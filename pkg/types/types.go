@@ -1,8 +1,9 @@
-package graw
+package types
 
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 // Thing is the base class for all Reddit API objects. It provides a common
@@ -41,14 +42,14 @@ type Edited struct {
 func (e *Edited) UnmarshalJSON(data []byte) error {
 	s := string(data)
 	// It can be a boolean `false`.
-	if s == "false" {
+	if strings.ToLower(s) == "false" {
 		e.IsEdited = false
 		e.Timestamp = 0
 		return nil
 	}
 
 	// It can be a boolean `true` for old edits.
-	if s == "true" {
+	if strings.ToLower(s) == "true" {
 		e.IsEdited = true
 		e.Timestamp = 0
 		return nil
@@ -63,7 +64,7 @@ func (e *Edited) UnmarshalJSON(data []byte) error {
 	}
 
 	// It could be null, which we treat as not edited.
-	if s == "null" {
+	if strings.ToLower(s) == "null" {
 		e.IsEdited = false
 		e.Timestamp = 0
 		return nil
