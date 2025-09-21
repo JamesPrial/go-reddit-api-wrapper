@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -396,7 +397,7 @@ func TestClient_DoHonorsCanceledContextBeforeSend(t *testing.T) {
 func TestClient_WaitForForcedDelayBlocksAndClears(t *testing.T) {
 	c := &Client{}
 	future := time.Now().Add(30 * time.Millisecond)
-	c.forceWaitUntil = future
+	atomic.StoreInt64(&c.forceWaitUntil, future.UnixNano())
 
 	start := time.Now()
 	if err := c.waitForForcedDelay(context.Background()); err != nil {
@@ -407,9 +408,7 @@ func TestClient_WaitForForcedDelayBlocksAndClears(t *testing.T) {
 		t.Fatalf("expected waitForForcedDelay to block, elapsed %v", elapsed)
 	}
 
-	c.mu.Lock()
-	cleared := c.forceWaitUntil.IsZero()
-	c.mu.Unlock()
+	cleared := atomic.LoadInt64(&c.forceWaitUntil) == 0
 	if !cleared {
 		t.Fatal("expected forced delay to be cleared after waiting")
 	}
@@ -417,7 +416,7 @@ func TestClient_WaitForForcedDelayBlocksAndClears(t *testing.T) {
 
 func TestClient_WaitForForcedDelayContextCanceled(t *testing.T) {
 	c := &Client{}
-	c.forceWaitUntil = time.Now().Add(100 * time.Millisecond)
+	atomic.StoreInt64(&c.forceWaitUntil, time.Now().Add(100*time.Millisecond).UnixNano())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -430,45 +429,35 @@ func TestClient_WaitForForcedDelayContextCanceled(t *testing.T) {
 		t.Fatalf("expected context canceled error, got %v", err)
 	}
 
-	c.mu.Lock()
-	if c.forceWaitUntil.IsZero() {
+	if atomic.LoadInt64(&c.forceWaitUntil) == 0 {
 		t.Fatalf("forced delay should remain until cleared on successful wait")
 	}
-	c.mu.Unlock()
 }
 
 func TestClient_DeferRequestsExtendsDelay(t *testing.T) {
 	c := &Client{}
 
 	c.deferRequests(context.Background(), -time.Second, "test")
-	c.mu.Lock()
-	zero := c.forceWaitUntil.IsZero()
-	c.mu.Unlock()
+	zero := atomic.LoadInt64(&c.forceWaitUntil) == 0
 	if !zero {
 		t.Fatal("negative duration should not set forced delay")
 	}
 
 	c.deferRequests(context.Background(), 20*time.Millisecond, "test")
-	c.mu.Lock()
-	first := c.forceWaitUntil
-	c.mu.Unlock()
-	if first.IsZero() {
+	first := atomic.LoadInt64(&c.forceWaitUntil)
+	if first == 0 {
 		t.Fatal("expected forced delay to be set")
 	}
 
 	c.deferRequests(context.Background(), 5*time.Millisecond, "test")
-	c.mu.Lock()
-	second := c.forceWaitUntil
-	c.mu.Unlock()
-	if !second.Equal(first) {
+	second := atomic.LoadInt64(&c.forceWaitUntil)
+	if second != first {
 		t.Fatalf("shorter defer should not reduce wait: first=%v second=%v", first, second)
 	}
 
 	c.deferRequests(context.Background(), 40*time.Millisecond, "test")
-	c.mu.Lock()
-	third := c.forceWaitUntil
-	c.mu.Unlock()
-	if !third.After(first) {
+	third := atomic.LoadInt64(&c.forceWaitUntil)
+	if third <= first {
 		t.Fatalf("longer defer should extend wait: first=%v third=%v", first, third)
 	}
 }
@@ -493,12 +482,11 @@ func TestClient_ApplyRateHeadersSetsForcedDelay(t *testing.T) {
 	resp.Header.Set("Retry-After", "0.05")
 
 	c.applyRateHeaders(resp)
-	c.mu.Lock()
-	deferUntil := c.forceWaitUntil
-	c.mu.Unlock()
-	if deferUntil.IsZero() {
+	deferUntilNanos := atomic.LoadInt64(&c.forceWaitUntil)
+	if deferUntilNanos == 0 {
 		t.Fatal("expected Retry-After to set forced delay")
 	}
+	deferUntil := time.Unix(0, deferUntilNanos)
 	if time.Until(deferUntil) <= 0 {
 		t.Fatalf("expected forced delay to be in the future, got %v", deferUntil)
 	}
@@ -507,18 +495,14 @@ func TestClient_ApplyRateHeadersSetsForcedDelay(t *testing.T) {
 func TestClient_ApplyRateHeadersDoesNotShortenDelay(t *testing.T) {
 	c := &Client{}
 	c.deferRequests(context.Background(), 60*time.Millisecond, "test")
-	c.mu.Lock()
-	initial := c.forceWaitUntil
-	c.mu.Unlock()
+	initial := atomic.LoadInt64(&c.forceWaitUntil)
 
 	resp := &http.Response{Header: make(http.Header)}
 	resp.Header.Set("Retry-After", "0.01")
 	c.applyRateHeaders(resp)
 
-	c.mu.Lock()
-	final := c.forceWaitUntil
-	c.mu.Unlock()
-	if !final.Equal(initial) {
+	final := atomic.LoadInt64(&c.forceWaitUntil)
+	if final != initial {
 		t.Fatalf("expected shorter retry-after to be ignored: initial=%v final=%v", initial, final)
 	}
 }
@@ -530,10 +514,8 @@ func TestClient_ApplyRateHeadersUsesRatelimitRemaining(t *testing.T) {
 	resp.Header.Set("X-Ratelimit-Reset", "0.05")
 
 	c.applyRateHeaders(resp)
-	c.mu.Lock()
-	deferUntil := c.forceWaitUntil
-	c.mu.Unlock()
-	if deferUntil.IsZero() {
+	deferUntilNanos := atomic.LoadInt64(&c.forceWaitUntil)
+	if deferUntilNanos == 0 {
 		t.Fatal("expected ratelimit headers to schedule delay")
 	}
 }

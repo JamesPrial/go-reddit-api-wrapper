@@ -10,7 +10,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
@@ -27,8 +27,7 @@ type Client struct {
 	maxLogBodyBytes int
 
 	limiter        *rate.Limiter
-	mu             sync.Mutex
-	forceWaitUntil time.Time
+	forceWaitUntil int64 // Unix nanoseconds, accessed atomically
 }
 
 // RateLimitConfig controls how requests are throttled before reaching Reddit.
@@ -186,17 +185,16 @@ func (c *Client) waitForRateLimit(ctx context.Context) error {
 
 func (c *Client) waitForForcedDelay(ctx context.Context) error {
 	for {
-		c.mu.Lock()
-		waitUntil := c.forceWaitUntil
-		c.mu.Unlock()
+		waitUntilNanos := atomic.LoadInt64(&c.forceWaitUntil)
 
-		if waitUntil.IsZero() {
+		if waitUntilNanos == 0 {
 			return nil
 		}
 
+		waitUntil := time.Unix(0, waitUntilNanos)
 		now := time.Now()
 		if !now.Before(waitUntil) {
-			c.clearForcedDelay(waitUntil)
+			c.clearForcedDelay(waitUntilNanos)
 			return nil
 		}
 
@@ -206,17 +204,14 @@ func (c *Client) waitForForcedDelay(ctx context.Context) error {
 			timer.Stop()
 			return ctx.Err()
 		case <-timer.C:
-			c.clearForcedDelay(waitUntil)
+			c.clearForcedDelay(waitUntilNanos)
 		}
 	}
 }
 
-func (c *Client) clearForcedDelay(previous time.Time) {
-	c.mu.Lock()
-	if previous.Equal(c.forceWaitUntil) {
-		c.forceWaitUntil = time.Time{}
-	}
-	c.mu.Unlock()
+func (c *Client) clearForcedDelay(previous int64) {
+	// Only clear if the value hasn't changed since we read it
+	atomic.CompareAndSwapInt64(&c.forceWaitUntil, previous, 0)
 }
 
 func (c *Client) applyRateHeaders(resp *http.Response) {
@@ -259,20 +254,27 @@ func (c *Client) deferRequests(ctx context.Context, d time.Duration, reason stri
 	}
 
 	until := time.Now().Add(d)
+	untilNanos := until.UnixNano()
 
-	c.mu.Lock()
-	update := until.After(c.forceWaitUntil)
-	if update {
-		c.forceWaitUntil = until
-	}
-	c.mu.Unlock()
-
-	if update && c.logger != nil {
-		c.logger.LogAttrs(ctx, slog.LevelInfo, "reddit requests deferred",
-			slog.Duration("delay", d),
-			slog.Time("until", until),
-			slog.String("reason", reason),
-		)
+	// Use a CAS loop to ensure we only update if the new value is later
+	for {
+		current := atomic.LoadInt64(&c.forceWaitUntil)
+		if current >= untilNanos {
+			// Current value is already later, nothing to do
+			return
+		}
+		if atomic.CompareAndSwapInt64(&c.forceWaitUntil, current, untilNanos) {
+			// Successfully updated
+			if c.logger != nil {
+				c.logger.LogAttrs(ctx, slog.LevelInfo, "reddit requests deferred",
+					slog.Duration("delay", d),
+					slog.Time("until", until),
+					slog.String("reason", reason),
+				)
+			}
+			return
+		}
+		// CAS failed, retry
 	}
 }
 
