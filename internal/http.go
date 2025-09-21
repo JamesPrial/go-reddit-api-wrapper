@@ -27,7 +27,7 @@ type Client struct {
 	maxLogBodyBytes int
 
 	limiter        *rate.Limiter
-	forceWaitUntil int64 // Unix nanoseconds, accessed atomically
+	forceWaitUntil atomic.Int64 // Unix nanoseconds
 }
 
 // RateLimitConfig controls how requests are throttled before reaching Reddit.
@@ -185,7 +185,7 @@ func (c *Client) waitForRateLimit(ctx context.Context) error {
 
 func (c *Client) waitForForcedDelay(ctx context.Context) error {
 	for {
-		waitUntilNanos := atomic.LoadInt64(&c.forceWaitUntil)
+		waitUntilNanos := c.forceWaitUntil.Load()
 
 		if waitUntilNanos == 0 {
 			return nil
@@ -211,7 +211,7 @@ func (c *Client) waitForForcedDelay(ctx context.Context) error {
 
 func (c *Client) clearForcedDelay(previous int64) {
 	// Only clear if the value hasn't changed since we read it
-	atomic.CompareAndSwapInt64(&c.forceWaitUntil, previous, 0)
+	c.forceWaitUntil.CompareAndSwap(previous, 0)
 }
 
 func (c *Client) applyRateHeaders(resp *http.Response) {
@@ -258,12 +258,12 @@ func (c *Client) deferRequests(ctx context.Context, d time.Duration, reason stri
 
 	// Use a CAS loop to ensure we only update if the new value is later
 	for {
-		current := atomic.LoadInt64(&c.forceWaitUntil)
+		current := c.forceWaitUntil.Load()
 		if current >= untilNanos {
 			// Current value is already later, nothing to do
 			return
 		}
-		if atomic.CompareAndSwapInt64(&c.forceWaitUntil, current, untilNanos) {
+		if c.forceWaitUntil.CompareAndSwap(current, untilNanos) {
 			// Successfully updated
 			if c.logger != nil {
 				c.logger.LogAttrs(ctx, slog.LevelInfo, "reddit requests deferred",
