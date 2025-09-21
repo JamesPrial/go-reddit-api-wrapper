@@ -100,3 +100,4 @@ The example application (`cmd/example/main.go`) uses:
 - `REDDIT_CLIENT_SECRET`: OAuth2 client secret
 - `REDDIT_USERNAME`: Reddit username (optional, for user auth)
 - `REDDIT_PASSWORD`: Reddit password (optional, for user auth)
+### git commit after finishing anything ###
