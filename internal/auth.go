@@ -5,12 +5,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 )
 
-const defaultTokenEndpointPath = "api/v1/access_token"
+const (
+	defaultTokenEndpointPath = "api/v1/access_token"
+	authLogBodyBytes         = 2 * 1024
+)
 
 // Authenticator handles retrieving an access token from the Reddit API.
 type Authenticator struct {
@@ -21,11 +26,12 @@ type Authenticator struct {
 	BaseURL      *url.URL
 	tokenURL     *url.URL
 	formData     *url.Values
+	logger       *slog.Logger
 }
 
 // NewAuthenticator creates a new authenticator.
 // The tokenPath parameter can be an empty string to use the default Reddit token endpoint.
-func NewAuthenticator(httpClient *http.Client, username, password, clientID, clientSecret, userAgent, baseURL, grantType, tokenPath string) (*Authenticator, error) {
+func NewAuthenticator(httpClient *http.Client, username, password, clientID, clientSecret, userAgent, baseURL, grantType, tokenPath string, logger *slog.Logger) (*Authenticator, error) {
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}
@@ -63,6 +69,7 @@ func NewAuthenticator(httpClient *http.Client, username, password, clientID, cli
 		BaseURL:      parsedURL,
 		tokenURL:     resolvedTokenURL,
 		formData:     form,
+		logger:       logger,
 	}, nil
 }
 
@@ -76,9 +83,11 @@ type tokenResponse struct {
 // GetToken performs the password grant flow to get an access token.
 func (a *Authenticator) GetToken(ctx context.Context) (string, error) {
 	data := a.formData.Encode()
+	start := time.Now()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.tokenURL.String(), strings.NewReader(data))
 	if err != nil {
+		a.logAuthError(ctx, "failed to create token request", err)
 		return "", &AuthError{Err: fmt.Errorf("failed to create token request: %w", err)}
 	}
 
@@ -86,20 +95,27 @@ func (a *Authenticator) GetToken(ctx context.Context) (string, error) {
 	req.Header.Set("User-Agent", a.userAgent)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
+	a.logAuthRequest(ctx)
+
 	resp, err := a.client.Do(req)
 	if err != nil {
+		a.logAuthError(ctx, "failed to execute token request", err)
 		return "", &AuthError{Err: fmt.Errorf("failed to execute token request: %w", err)}
 	}
 	defer resp.Body.Close()
 
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
+		a.logAuthError(ctx, "failed to read token response", err)
 		// Error reading the response body.
 		return "", &AuthError{
 			StatusCode: resp.StatusCode,
 			Err:        fmt.Errorf("failed to read response body: %w", err),
 		}
 	}
+
+	duration := time.Since(start)
+	a.logAuthHTTPResult(ctx, resp.StatusCode, duration, bodyBytes)
 
 	if resp.StatusCode != http.StatusOK {
 		return "", &AuthError{
@@ -110,6 +126,7 @@ func (a *Authenticator) GetToken(ctx context.Context) (string, error) {
 
 	var tokenResp tokenResponse
 	if err := json.Unmarshal(bodyBytes, &tokenResp); err != nil {
+		a.logAuthError(ctx, "failed to decode token response", err)
 		return "", &AuthError{
 			StatusCode: resp.StatusCode,
 			Body:       string(bodyBytes),
@@ -118,14 +135,116 @@ func (a *Authenticator) GetToken(ctx context.Context) (string, error) {
 	}
 
 	if tokenResp.AccessToken == "" {
+		emptyErr := fmt.Errorf("access token was empty in response")
+		a.logAuthError(ctx, "received empty access token", emptyErr)
 		return "", &AuthError{
 			StatusCode: resp.StatusCode,
 			Body:       string(bodyBytes),
-			Err:        fmt.Errorf("access token was empty in response"),
+			Err:        emptyErr,
 		}
 	}
 
+	a.logAuthSuccess(ctx, duration, tokenResp)
+
 	return tokenResp.AccessToken, nil
+}
+
+func (a *Authenticator) logAuthRequest(ctx context.Context) {
+	if a.logger == nil {
+		return
+	}
+
+	ctx = contextOrBackground(ctx)
+	attrs := []slog.Attr{}
+	if a.tokenURL != nil {
+		attrs = append(attrs, slog.String("url", a.tokenURL.String()))
+	}
+	if a.formData != nil {
+		attrs = append(attrs, slog.String("grant_type", a.formData.Get("grant_type")))
+	}
+
+	a.logger.LogAttrs(ctx, slog.LevelDebug, "requesting reddit access token", attrs...)
+}
+
+func (a *Authenticator) logAuthHTTPResult(ctx context.Context, status int, duration time.Duration, body []byte) {
+	if a.logger == nil {
+		return
+	}
+
+	ctx = contextOrBackground(ctx)
+	attrs := []slog.Attr{
+		slog.Int("status", status),
+		slog.Duration("duration", duration),
+	}
+	if a.tokenURL != nil {
+		attrs = append(attrs, slog.String("url", a.tokenURL.String()))
+	}
+
+	level := slog.LevelInfo
+	msg := "reddit auth request completed"
+	if status != http.StatusOK {
+		level = slog.LevelWarn
+		msg = "reddit auth request failed"
+	}
+
+	a.logger.LogAttrs(ctx, level, msg, attrs...)
+
+	if len(body) > 0 && a.logger.Enabled(ctx, slog.LevelDebug) {
+		snippet, truncated := truncateAuthBody(body)
+		bodyAttrs := []slog.Attr{
+			slog.Int("bytes", len(body)),
+			slog.String("body", snippet),
+		}
+		if truncated {
+			bodyAttrs = append(bodyAttrs, slog.Bool("truncated", true))
+		}
+		a.logger.LogAttrs(ctx, slog.LevelDebug, "reddit auth response body", bodyAttrs...)
+	}
+}
+
+func (a *Authenticator) logAuthError(ctx context.Context, message string, err error) {
+	if a.logger == nil {
+		return
+	}
+
+	ctx = contextOrBackground(ctx)
+	attrs := []slog.Attr{slog.String("error", err.Error())}
+	if a.tokenURL != nil {
+		attrs = append(attrs, slog.String("url", a.tokenURL.String()))
+	}
+
+	a.logger.LogAttrs(ctx, slog.LevelError, message, attrs...)
+}
+
+func (a *Authenticator) logAuthSuccess(ctx context.Context, duration time.Duration, token tokenResponse) {
+	if a.logger == nil {
+		return
+	}
+
+	ctx = contextOrBackground(ctx)
+	attrs := []slog.Attr{slog.Duration("duration", duration)}
+	if token.ExpiresIn > 0 {
+		attrs = append(attrs, slog.Int("expires_in", token.ExpiresIn))
+	}
+	if token.Scope != "" {
+		attrs = append(attrs, slog.String("scope", token.Scope))
+	}
+	if token.TokenType != "" {
+		attrs = append(attrs, slog.String("token_type", token.TokenType))
+	}
+
+	a.logger.LogAttrs(ctx, slog.LevelInfo, "reddit token acquired", attrs...)
+}
+
+func truncateAuthBody(body []byte) (string, bool) {
+	limit := authLogBodyBytes
+	if len(body) <= limit {
+		return string(body), false
+	}
+	if limit <= 0 {
+		return string(body), false
+	}
+	return string(body[:limit]), true
 }
 
 // AuthError represents an error that occurred during authentication.

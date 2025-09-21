@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"log/slog"
 	"os"
 
 	graw "github.com/jamesprial/go-reddit-api-wrapper"
@@ -20,6 +21,9 @@ func main() {
 		log.Fatal("REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET environment variables are required")
 	}
 
+	// Route structured logs to stdout; adjust the level as needed.
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
 	// Create client configuration
 	config := &graw.Config{
 		ClientID:     clientID,
@@ -27,6 +31,8 @@ func main() {
 		Username:     username, // Optional: for user-authenticated requests
 		Password:     password, // Optional: for user-authenticated requests
 		UserAgent:    "example-bot/1.0 by YourUsername",
+		Logger:       logger,
+		LogBodyLimit: 8 * 1024,
 	}
 
 	// Create the client

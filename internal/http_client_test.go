@@ -16,7 +16,7 @@ import (
 )
 
 func TestNewClient_DefaultRateLimiter(t *testing.T) {
-	client, err := NewClient(nil, "token", "https://example.com/api/", "agent", nil)
+	client, err := NewClient(nil, "token", "https://example.com/api/", "agent", nil, nil)
 	if err != nil {
 		t.Fatalf("NewClient returned error: %v", err)
 	}
@@ -34,7 +34,7 @@ func TestNewClient_DefaultRateLimiter(t *testing.T) {
 }
 
 func TestNewClient_InvalidBaseURL(t *testing.T) {
-	_, err := NewClient(nil, "token", "://bad", "agent", nil)
+	_, err := NewClient(nil, "token", "://bad", "agent", nil, nil)
 	if err == nil {
 		t.Fatal("expected error for invalid base URL")
 	}
@@ -46,7 +46,7 @@ func TestNewClient_InvalidBaseURL(t *testing.T) {
 }
 
 func TestNewClient_CustomLimiterConfig(t *testing.T) {
-	client, err := NewClient(nil, "token", "https://example.com/api", "agent", &RateLimitConfig{RequestsPerMinute: 120, Burst: 5})
+	client, err := NewClient(nil, "token", "https://example.com/api", "agent", &RateLimitConfig{RequestsPerMinute: 120, Burst: 5}, nil)
 	if err != nil {
 		t.Fatalf("NewClient returned error: %v", err)
 	}
@@ -69,7 +69,7 @@ func TestNewClient_CustomLimiterConfig(t *testing.T) {
 
 func TestClient_NewRequestSetsHeaders(t *testing.T) {
 	httpClient := &http.Client{}
-	c, err := NewClient(httpClient, "token-value", "https://example.com", "my-agent", &RateLimitConfig{RequestsPerMinute: 1000, Burst: 100})
+	c, err := NewClient(httpClient, "token-value", "https://example.com", "my-agent", &RateLimitConfig{RequestsPerMinute: 1000, Burst: 100}, nil)
 	if err != nil {
 		t.Fatalf("NewClient returned error: %v", err)
 	}
@@ -92,7 +92,7 @@ func TestClient_NewRequestSetsHeaders(t *testing.T) {
 }
 
 func TestClient_NewRequestInvalidPath(t *testing.T) {
-	c, err := NewClient(nil, "token", "https://example.com", "agent", nil)
+	c, err := NewClient(nil, "token", "https://example.com", "agent", nil, nil)
 	if err != nil {
 		t.Fatalf("NewClient returned error: %v", err)
 	}
@@ -109,7 +109,7 @@ func TestClient_NewRequestInvalidPath(t *testing.T) {
 }
 
 func TestClient_NewRequestPreservesBody(t *testing.T) {
-	c, err := NewClient(nil, "token", "https://example.com", "agent", nil)
+	c, err := NewClient(nil, "token", "https://example.com", "agent", nil, nil)
 	if err != nil {
 		t.Fatalf("NewClient returned error: %v", err)
 	}
@@ -138,7 +138,7 @@ func TestClient_DoDecodesResponse(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	httpClient := server.Client()
-	c, err := NewClient(httpClient, "token", server.URL+"/", "agent", &RateLimitConfig{RequestsPerMinute: 1000, Burst: 100})
+	c, err := NewClient(httpClient, "token", server.URL+"/", "agent", &RateLimitConfig{RequestsPerMinute: 1000, Burst: 100}, nil)
 	if err != nil {
 		t.Fatalf("NewClient returned error: %v", err)
 	}
@@ -173,7 +173,7 @@ func TestClient_DoTransportErrorWrapped(t *testing.T) {
 		return nil, expectedErr
 	})}
 
-	c, err := NewClient(httpClient, "token", "https://example.com/", "agent", nil)
+	c, err := NewClient(httpClient, "token", "https://example.com/", "agent", nil, nil)
 	if err != nil {
 		t.Fatalf("NewClient returned error: %v", err)
 	}
@@ -205,7 +205,7 @@ func TestClient_DoNonSuccessStatusReturnsAPIError(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	httpClient := server.Client()
-	c, err := NewClient(httpClient, "token", server.URL+"/", "agent", &RateLimitConfig{RequestsPerMinute: 60000, Burst: 1000})
+	c, err := NewClient(httpClient, "token", server.URL+"/", "agent", &RateLimitConfig{RequestsPerMinute: 60000, Burst: 1000}, nil)
 	if err != nil {
 		t.Fatalf("NewClient returned error: %v", err)
 	}
@@ -240,7 +240,7 @@ func TestClient_DoJSONDecodeErrorWrapped(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	httpClient := server.Client()
-	c, err := NewClient(httpClient, "token", server.URL+"/", "agent", &RateLimitConfig{RequestsPerMinute: 60000, Burst: 1000})
+	c, err := NewClient(httpClient, "token", server.URL+"/", "agent", &RateLimitConfig{RequestsPerMinute: 60000, Burst: 1000}, nil)
 	if err != nil {
 		t.Fatalf("NewClient returned error: %v", err)
 	}
@@ -270,7 +270,7 @@ func TestClient_DoSkipsDecodeWhenTargetNil(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	httpClient := server.Client()
-	c, err := NewClient(httpClient, "token", server.URL+"/", "agent", &RateLimitConfig{RequestsPerMinute: 60000, Burst: 1000})
+	c, err := NewClient(httpClient, "token", server.URL+"/", "agent", &RateLimitConfig{RequestsPerMinute: 60000, Burst: 1000}, nil)
 	if err != nil {
 		t.Fatalf("NewClient returned error: %v", err)
 	}
@@ -315,7 +315,7 @@ func TestClient_DoEnforcesRetryAfter(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	httpClient := server.Client()
-	c, err := NewClient(httpClient, "token", server.URL+"/", "agent", &RateLimitConfig{RequestsPerMinute: 60000, Burst: 1000})
+	c, err := NewClient(httpClient, "token", server.URL+"/", "agent", &RateLimitConfig{RequestsPerMinute: 60000, Burst: 1000}, nil)
 	if err != nil {
 		t.Fatalf("NewClient returned error: %v", err)
 	}
@@ -368,7 +368,7 @@ func TestClient_DoHonorsCanceledContextBeforeSend(t *testing.T) {
 		return nil, errors.New("unexpected transport call")
 	})}
 
-	c, err := NewClient(httpClient, "token", "https://example.com/", "agent", nil)
+	c, err := NewClient(httpClient, "token", "https://example.com/", "agent", nil, nil)
 	if err != nil {
 		t.Fatalf("NewClient returned error: %v", err)
 	}
@@ -440,7 +440,7 @@ func TestClient_WaitForForcedDelayContextCanceled(t *testing.T) {
 func TestClient_DeferRequestsExtendsDelay(t *testing.T) {
 	c := &Client{}
 
-	c.deferRequests(-time.Second)
+	c.deferRequests(context.Background(), -time.Second, "test")
 	c.mu.Lock()
 	zero := c.forceWaitUntil.IsZero()
 	c.mu.Unlock()
@@ -448,7 +448,7 @@ func TestClient_DeferRequestsExtendsDelay(t *testing.T) {
 		t.Fatal("negative duration should not set forced delay")
 	}
 
-	c.deferRequests(20 * time.Millisecond)
+	c.deferRequests(context.Background(), 20*time.Millisecond, "test")
 	c.mu.Lock()
 	first := c.forceWaitUntil
 	c.mu.Unlock()
@@ -456,7 +456,7 @@ func TestClient_DeferRequestsExtendsDelay(t *testing.T) {
 		t.Fatal("expected forced delay to be set")
 	}
 
-	c.deferRequests(5 * time.Millisecond)
+	c.deferRequests(context.Background(), 5*time.Millisecond, "test")
 	c.mu.Lock()
 	second := c.forceWaitUntil
 	c.mu.Unlock()
@@ -464,12 +464,26 @@ func TestClient_DeferRequestsExtendsDelay(t *testing.T) {
 		t.Fatalf("shorter defer should not reduce wait: first=%v second=%v", first, second)
 	}
 
-	c.deferRequests(40 * time.Millisecond)
+	c.deferRequests(context.Background(), 40*time.Millisecond, "test")
 	c.mu.Lock()
 	third := c.forceWaitUntil
 	c.mu.Unlock()
 	if !third.After(first) {
 		t.Fatalf("longer defer should extend wait: first=%v third=%v", first, third)
+	}
+}
+
+func TestClient_SetLogBodyLimit(t *testing.T) {
+	c := &Client{maxLogBodyBytes: defaultLogBodyBytes}
+
+	c.SetLogBodyLimit(2048)
+	if c.maxLogBodyBytes != 2048 {
+		t.Fatalf("expected maxLogBodyBytes to be 2048, got %d", c.maxLogBodyBytes)
+	}
+
+	c.SetLogBodyLimit(0)
+	if c.maxLogBodyBytes != defaultLogBodyBytes {
+		t.Fatalf("expected reset to defaultLogBodyBytes, got %d", c.maxLogBodyBytes)
 	}
 }
 
@@ -492,7 +506,7 @@ func TestClient_ApplyRateHeadersSetsForcedDelay(t *testing.T) {
 
 func TestClient_ApplyRateHeadersDoesNotShortenDelay(t *testing.T) {
 	c := &Client{}
-	c.deferRequests(60 * time.Millisecond)
+	c.deferRequests(context.Background(), 60*time.Millisecond, "test")
 	c.mu.Lock()
 	initial := c.forceWaitUntil
 	c.mu.Unlock()

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -18,10 +19,12 @@ import (
 
 // Client manages communication with the Reddit API.
 type Client struct {
-	client    *http.Client
-	BaseURL   *url.URL
-	UserAgent string
-	token     string
+	client          *http.Client
+	BaseURL         *url.URL
+	UserAgent       string
+	token           string
+	logger          *slog.Logger
+	maxLogBodyBytes int
 
 	limiter        *rate.Limiter
 	mu             sync.Mutex
@@ -41,11 +44,12 @@ const (
 	DefaultRateLimitBurst    = 10
 	SecondsPerMinute         = 60.0
 	ParseFloatBitSize        = 64
+	defaultLogBodyBytes      = 4 * 1024
 )
 
 // NewClient returns a new Reddit API client.
 // If a nil httpClient is provided, http.DefaultClient will be used.
-func NewClient(httpClient *http.Client, authToken string, baseURL string, userAgent string, rateCfg *RateLimitConfig) (*Client, error) {
+func NewClient(httpClient *http.Client, authToken string, baseURL string, userAgent string, rateCfg *RateLimitConfig, logger *slog.Logger) (*Client, error) {
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}
@@ -65,14 +69,26 @@ func NewClient(httpClient *http.Client, authToken string, baseURL string, userAg
 	limiter := buildLimiter(*rateCfg)
 
 	c := &Client{
-		client:    httpClient,
-		BaseURL:   parsedURL,
-		UserAgent: userAgent,
-		token:     authToken,
-		limiter:   limiter,
+		client:          httpClient,
+		BaseURL:         parsedURL,
+		UserAgent:       userAgent,
+		token:           authToken,
+		limiter:         limiter,
+		logger:          logger,
+		maxLogBodyBytes: defaultLogBodyBytes,
 	}
 
 	return c, nil
+}
+
+// SetLogBodyLimit adjusts how many response bytes are captured when debug logging is enabled.
+// Non-positive values revert to the default limit.
+func (c *Client) SetLogBodyLimit(limit int) {
+	if limit <= 0 {
+		c.maxLogBodyBytes = defaultLogBodyBytes
+		return
+	}
+	c.maxLogBodyBytes = limit
 }
 
 // NewRequest creates an API request. A relative URL can be provided in path,
@@ -98,24 +114,38 @@ func (c *Client) NewRequest(ctx context.Context, method, path string, body io.Re
 // JSON decoded and stored in the value pointed to by v, or returned as an
 // error if an API error has occurred.
 func (c *Client) Do(req *http.Request, v *types.Thing) (*http.Response, error) {
-	if err := c.waitForRateLimit(req.Context()); err != nil {
+	ctx := req.Context()
+	start := time.Now()
+
+	if err := c.waitForRateLimit(ctx); err != nil {
+		c.logWaitFailure(ctx, req, err)
 		return nil, &ClientError{OriginalErr: err}
 	}
 
 	resp, err := c.client.Do(req)
 	if err != nil {
+		c.logTransportError(ctx, req, time.Since(start), err)
 		return nil, &ClientError{OriginalErr: err}
 	}
 	defer resp.Body.Close()
 
 	c.applyRateHeaders(resp)
 
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		c.logBodyReadError(ctx, req, resp, time.Since(start), err)
+		return resp, &ClientError{OriginalErr: err}
+	}
+
+	c.logHTTPResult(ctx, req, resp, bodyBytes, time.Since(start))
+
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return resp, &APIError{Response: resp, Message: "request failed"}
 	}
 
-	if v != nil {
-		if err := json.NewDecoder(resp.Body).Decode(v); err != nil {
+	if v != nil && len(bodyBytes) > 0 {
+		if err := json.Unmarshal(bodyBytes, v); err != nil {
+			c.logDecodeError(ctx, req, resp, err)
 			return resp, &ClientError{OriginalErr: err}
 		}
 	}
@@ -190,9 +220,15 @@ func (c *Client) clearForcedDelay(previous time.Time) {
 }
 
 func (c *Client) applyRateHeaders(resp *http.Response) {
+	if resp == nil {
+		return
+	}
+
+	ctx := rateLimitContext(resp)
+
 	if retryAfter := resp.Header.Get("Retry-After"); retryAfter != "" {
 		if seconds, err := strconv.ParseFloat(retryAfter, ParseFloatBitSize); err == nil && seconds > 0 {
-			c.deferRequests(time.Duration(seconds * float64(time.Second)))
+			c.deferRequests(ctx, time.Duration(seconds*float64(time.Second)), "retry_after")
 		}
 	}
 
@@ -209,22 +245,173 @@ func (c *Client) applyRateHeaders(resp *http.Response) {
 	}
 
 	if remaining <= 1 {
-		c.deferRequests(time.Duration(resetSeconds * float64(time.Second)))
+		c.deferRequests(ctx, time.Duration(resetSeconds*float64(time.Second)), "ratelimit_remaining")
 	}
 }
 
-func (c *Client) deferRequests(d time.Duration) {
+func (c *Client) deferRequests(ctx context.Context, d time.Duration, reason string) {
 	if d <= 0 {
 		return
+	}
+
+	if ctx == nil {
+		ctx = context.Background()
 	}
 
 	until := time.Now().Add(d)
 
 	c.mu.Lock()
-	if until.After(c.forceWaitUntil) {
+	update := until.After(c.forceWaitUntil)
+	if update {
 		c.forceWaitUntil = until
 	}
 	c.mu.Unlock()
+
+	if update && c.logger != nil {
+		c.logger.LogAttrs(ctx, slog.LevelInfo, "reddit requests deferred",
+			slog.Duration("delay", d),
+			slog.Time("until", until),
+			slog.String("reason", reason),
+		)
+	}
+}
+
+func rateLimitContext(resp *http.Response) context.Context {
+	if resp != nil && resp.Request != nil {
+		return resp.Request.Context()
+	}
+	return context.Background()
+}
+
+func (c *Client) logWaitFailure(ctx context.Context, req *http.Request, err error) {
+	if c.logger == nil {
+		return
+	}
+
+	ctx = contextOrBackground(ctx)
+	c.logger.LogAttrs(ctx, slog.LevelWarn, "reddit request canceled before send",
+		slog.String("method", req.Method),
+		slog.String("url", req.URL.String()),
+		slog.String("error", err.Error()),
+	)
+}
+
+func (c *Client) logTransportError(ctx context.Context, req *http.Request, duration time.Duration, err error) {
+	if c.logger == nil {
+		return
+	}
+
+	ctx = contextOrBackground(ctx)
+	c.logger.LogAttrs(ctx, slog.LevelError, "reddit request transport error",
+		slog.String("method", req.Method),
+		slog.String("url", req.URL.String()),
+		slog.Duration("duration", duration),
+		slog.String("error", err.Error()),
+	)
+}
+
+func (c *Client) logBodyReadError(ctx context.Context, req *http.Request, resp *http.Response, duration time.Duration, err error) {
+	if c.logger == nil {
+		return
+	}
+
+	ctx = contextOrBackground(ctx)
+	attrs := []slog.Attr{
+		slog.String("method", req.Method),
+		slog.String("url", req.URL.String()),
+		slog.Duration("duration", duration),
+		slog.String("error", err.Error()),
+	}
+	if resp != nil {
+		attrs = append(attrs, slog.Int("status", resp.StatusCode))
+	}
+
+	c.logger.LogAttrs(ctx, slog.LevelError, "reddit response read failed", attrs...)
+}
+
+func (c *Client) logDecodeError(ctx context.Context, req *http.Request, resp *http.Response, err error) {
+	if c.logger == nil {
+		return
+	}
+
+	ctx = contextOrBackground(ctx)
+	attrs := []slog.Attr{
+		slog.String("method", req.Method),
+		slog.String("url", req.URL.String()),
+		slog.String("error", err.Error()),
+	}
+	if resp != nil {
+		attrs = append(attrs, slog.Int("status", resp.StatusCode))
+	}
+
+	c.logger.LogAttrs(ctx, slog.LevelError, "reddit response decode failed", attrs...)
+}
+
+func (c *Client) logHTTPResult(ctx context.Context, req *http.Request, resp *http.Response, body []byte, duration time.Duration) {
+	if c.logger == nil {
+		return
+	}
+
+	ctx = contextOrBackground(ctx)
+	attrs := []slog.Attr{
+		slog.String("method", req.Method),
+		slog.String("url", req.URL.String()),
+		slog.Duration("duration", duration),
+	}
+
+	status := 0
+	if resp != nil {
+		status = resp.StatusCode
+		attrs = append(attrs, slog.Int("status", resp.StatusCode))
+		if v := resp.Header.Get("X-Ratelimit-Remaining"); v != "" {
+			attrs = append(attrs, slog.String("rate_remaining", v))
+		}
+		if v := resp.Header.Get("X-Ratelimit-Reset"); v != "" {
+			attrs = append(attrs, slog.String("rate_reset", v))
+		}
+		if v := resp.Header.Get("Retry-After"); v != "" {
+			attrs = append(attrs, slog.String("retry_after", v))
+		}
+	}
+
+	level := slog.LevelInfo
+	msg := "reddit api request completed"
+	if status < 200 || status >= 300 {
+		level = slog.LevelWarn
+		msg = "reddit api request failed"
+	}
+
+	c.logger.LogAttrs(ctx, level, msg, attrs...)
+
+	if len(body) > 0 && c.logger.Enabled(ctx, slog.LevelDebug) {
+		snippet, truncated := c.truncateBody(body)
+		bodyAttrs := []slog.Attr{
+			slog.Int("bytes", len(body)),
+			slog.String("body", snippet),
+		}
+		if truncated {
+			bodyAttrs = append(bodyAttrs, slog.Bool("truncated", true))
+		}
+		c.logger.LogAttrs(ctx, slog.LevelDebug, "reddit api response body", bodyAttrs...)
+	}
+}
+
+func (c *Client) truncateBody(body []byte) (string, bool) {
+	limit := c.maxLogBodyBytes
+	if limit <= 0 {
+		limit = defaultLogBodyBytes
+	}
+	if len(body) <= limit {
+		return string(body), false
+	}
+	return string(body[:limit]), true
+}
+
+func contextOrBackground(ctx context.Context) context.Context {
+	if ctx != nil {
+		return ctx
+	}
+	return context.Background()
 }
 
 // APIError represents an error returned by the Reddit API.

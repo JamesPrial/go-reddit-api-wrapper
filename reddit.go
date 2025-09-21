@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -44,6 +45,11 @@ type Config struct {
 	HTTPClient *http.Client
 	// RateLimit tunes how fast requests are issued to Reddit.
 	RateLimit RateLimitConfig
+	// Logger captures structured diagnostics; optional.
+	Logger *slog.Logger
+	// LogBodyLimit overrides how many response bytes are included in debug logs.
+	// A value <= 0 keeps the library default.
+	LogBodyLimit int
 }
 
 // RateLimitConfig controls request throttling.
@@ -123,6 +129,7 @@ func NewClient(config *Config) (*Client, error) {
 		config.AuthURL,
 		grantType,
 		"", // Use default token path
+		config.Logger,
 	)
 	if err != nil {
 		return nil, &ClientError{Err: err.Error()}
@@ -154,9 +161,13 @@ func (c *Client) Connect(ctx context.Context) error {
 			RequestsPerMinute: rateLimit.RequestsPerMinute,
 			Burst:             rateLimit.Burst,
 		},
+		c.config.Logger,
 	)
 	if err != nil {
 		return &ClientError{Err: "failed to create HTTP client: " + err.Error()}
+	}
+	if c.config.LogBodyLimit > 0 {
+		client.SetLogBodyLimit(c.config.LogBodyLimit)
 	}
 
 	c.client = client

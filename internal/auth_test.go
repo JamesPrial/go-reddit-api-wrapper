@@ -218,7 +218,7 @@ func TestNewAuthenticator(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			a, err := NewAuthenticator(tc.httpClient, tc.username, tc.password, "id", "secret", "agent", tc.baseURL, tc.grantType, tc.tokenPath)
+			a, err := NewAuthenticator(tc.httpClient, tc.username, tc.password, "id", "secret", "agent", tc.baseURL, tc.grantType, tc.tokenPath, nil)
 
 			if (err != nil) != tc.wantErr {
 				t.Fatalf("NewAuthenticator() error = %v, wantErr %v", err, tc.wantErr)
@@ -413,7 +413,7 @@ func TestAuthenticator_GetToken(t *testing.T) {
 				defer server.Close()
 			}
 
-			a, err := NewAuthenticator(server.Client(), tc.username, tc.password, tc.clientID, tc.clientSecret, "test-agent", serverURL, tc.grantType, "")
+			a, err := NewAuthenticator(server.Client(), tc.username, tc.password, tc.clientID, tc.clientSecret, "test-agent", serverURL, tc.grantType, "", nil)
 			if err != nil {
 				t.Fatalf("failed to create authenticator: %v", err)
 			}
@@ -442,7 +442,7 @@ func TestAuthenticator_GetToken(t *testing.T) {
 		}))
 		defer server.Close()
 
-		a, err := NewAuthenticator(http.DefaultClient, "", "", "id", "secret", "agent", server.URL, "creds", "")
+		a, err := NewAuthenticator(http.DefaultClient, "", "", "id", "secret", "agent", server.URL, "creds", "", nil)
 		if err != nil {
 			t.Fatalf("failed to create authenticator: %v", err)
 		}

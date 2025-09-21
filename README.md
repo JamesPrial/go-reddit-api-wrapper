@@ -8,6 +8,7 @@ A Go wrapper for the Reddit API that provides a clean, easy-to-use interface for
 - Clean, typed API for common Reddit operations
 - Built-in error handling and rate limiting considerations
 - Support for pagination and listing options
+- Structured logging via Go's slog with optional response payload dumps
 
 ## Installation
 
@@ -33,16 +34,22 @@ import (
     "context"
     "fmt"
     "log"
-    
+    "log/slog"
+    "os"
+
     graw "github.com/jamesprial/go-reddit-api-wrapper"
 )
 
 func main() {
     // Create client configuration
+    logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+
     config := &graw.Config{
         ClientID:     "your-client-id",
         ClientSecret: "your-client-secret",
         UserAgent:   "my-bot/1.0 by YourUsername",
+        Logger:       logger,      // Optional: capture structured logs
+        LogBodyLimit: 4 * 1024,    // Optional: adjust response bytes in debug logs
     }
 
     // Create the client
@@ -95,6 +102,8 @@ type Config struct {
     BaseURL      string        // API base URL (optional, defaults to oauth.reddit.com)
     AuthURL      string        // Auth base URL (optional, defaults to www.reddit.com)  
     HTTPClient   *http.Client  // HTTP client (optional, uses default with 30s timeout)
+    Logger       *slog.Logger  // Structured logger (optional, defaults to no logging)
+    LogBodyLimit int           // Response bytes included in debug logs (optional)
 }
 ```
 
@@ -126,6 +135,22 @@ The example application supports these environment variables:
 - `REDDIT_CLIENT_SECRET` - Your Reddit app client secret
 - `REDDIT_USERNAME` - Your Reddit username (optional)
 - `REDDIT_PASSWORD` - Your Reddit password (optional)
+
+## Debug Logging
+
+Provide a `*slog.Logger` in `Config.Logger` to capture structured diagnostics. Debug level enables response payload snippets and rate limit metadata:
+
+```go
+logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+config := &graw.Config{
+    // ... other fields ...
+    Logger:       logger,
+    LogBodyLimit: 8 * 1024, // optional override (defaults to 4 KiB)
+}
+```
+
+The client logs request method, URL, status, duration, and rate limit headers. When debug logging is enabled, response bodies are included up to `LogBodyLimit` bytes.
 
 ## Running the Example
 
