@@ -43,7 +43,6 @@ type Config struct {
 	Logger *slog.Logger
 }
 
-
 // TokenProvider defines the interface for retrieving an access token.
 type TokenProvider interface {
 	GetToken(ctx context.Context) (string, error)
@@ -130,7 +129,6 @@ func (c *Client) Connect(ctx context.Context) error {
 		token,
 		c.config.BaseURL,
 		c.config.UserAgent,
-		nil, // Let the library handle rate limiting internally
 		c.config.Logger,
 	)
 	if err != nil {

@@ -22,10 +22,9 @@ func BenchmarkClient_Do_WithLogging(b *testing.B) {
 	}))
 	defer server.Close()
 
-	// Create client WITH logging and high rate limit to avoid throttling in benchmarks
+	// Create client WITH logging
 	logger := slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelInfo}))
-	client, _ := NewClient(http.DefaultClient, "test-token", server.URL, "bench/1.0",
-		&RateLimitConfig{RequestsPerMinute: 1000000, Burst: 1000}, logger)
+	client, _ := NewClient(http.DefaultClient, "test-token", server.URL, "bench/1.0", logger)
 
 	ctx := context.Background()
 
@@ -49,10 +48,9 @@ func BenchmarkClient_Do_WithLoggingDebug(b *testing.B) {
 	}))
 	defer server.Close()
 
-	// Create client with DEBUG logging (includes body logging) and high rate limit
+	// Create client with DEBUG logging (includes body logging)
 	logger := slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	client, _ := NewClient(http.DefaultClient, "test-token", server.URL, "bench/1.0",
-		&RateLimitConfig{RequestsPerMinute: 1000000, Burst: 1000}, logger)
+	client, _ := NewClient(http.DefaultClient, "test-token", server.URL, "bench/1.0", logger)
 	client.SetLogBodyLimit(8 * 1024)
 
 	ctx := context.Background()
@@ -75,9 +73,8 @@ func BenchmarkClient_Do_WithoutLogging(b *testing.B) {
 	}))
 	defer server.Close()
 
-	// Create client WITHOUT logging (nil logger) and high rate limit
-	client, _ := NewClient(http.DefaultClient, "test-token", server.URL, "bench/1.0",
-		&RateLimitConfig{RequestsPerMinute: 1000000, Burst: 1000}, nil)
+	// Create client WITHOUT logging (nil logger)
+	client, _ := NewClient(http.DefaultClient, "test-token", server.URL, "bench/1.0", nil)
 
 	ctx := context.Background()
 

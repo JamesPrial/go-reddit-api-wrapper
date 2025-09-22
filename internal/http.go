@@ -49,7 +49,7 @@ const (
 
 // NewClient returns a new Reddit API client.
 // If a nil httpClient is provided, http.DefaultClient will be used.
-func NewClient(httpClient *http.Client, authToken string, baseURL string, userAgent string, rateCfg *RateLimitConfig, logger *slog.Logger) (*Client, error) {
+func NewClient(httpClient *http.Client, authToken string, baseURL string, userAgent string, logger *slog.Logger) (*Client, error) {
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}
@@ -62,11 +62,7 @@ func NewClient(httpClient *http.Client, authToken string, baseURL string, userAg
 		parsedURL.Path += "/"
 	}
 
-	if rateCfg == nil {
-		rateCfg = &RateLimitConfig{}
-	}
-
-	limiter := buildLimiter(*rateCfg)
+	limiter := buildLimiter(RateLimitConfig{})
 
 	c := &Client{
 		client:          httpClient,

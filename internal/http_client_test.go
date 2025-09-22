@@ -16,7 +16,7 @@ import (
 )
 
 func TestNewClient_DefaultRateLimiter(t *testing.T) {
-	client, err := NewClient(nil, "token", "https://example.com/api/", "agent", nil, nil)
+	client, err := NewClient(nil, "token", "https://example.com/api/", "agent", nil)
 	if err != nil {
 		t.Fatalf("NewClient returned error: %v", err)
 	}
@@ -35,7 +35,7 @@ func TestNewClient_DefaultRateLimiter(t *testing.T) {
 }
 
 func TestNewClient_InvalidBaseURL(t *testing.T) {
-	_, err := NewClient(nil, "token", "://bad", "agent", nil, nil)
+	_, err := NewClient(nil, "token", "://bad", "agent", nil)
 	if err == nil {
 		t.Fatal("expected error for invalid base URL")
 	}
@@ -46,8 +46,8 @@ func TestNewClient_InvalidBaseURL(t *testing.T) {
 	}
 }
 
-func TestNewClient_CustomLimiterConfig(t *testing.T) {
-	client, err := NewClient(nil, "token", "https://example.com/api", "agent", &RateLimitConfig{RequestsPerMinute: 120, Burst: 5}, nil)
+func TestNewClient_BaseURLHandling(t *testing.T) {
+	client, err := NewClient(nil, "token", "https://example.com/api", "agent", nil)
 	if err != nil {
 		t.Fatalf("NewClient returned error: %v", err)
 	}
@@ -59,18 +59,11 @@ func TestNewClient_CustomLimiterConfig(t *testing.T) {
 	if client.limiter == nil {
 		t.Fatal("expected limiter to be initialized")
 	}
-
-	if got := client.limiter.Limit(); got != rate.Limit(2) {
-		t.Errorf("expected limit of 2 req/sec, got %v", got)
-	}
-	if got := client.limiter.Burst(); got != 5 {
-		t.Errorf("expected burst of 5, got %d", got)
-	}
 }
 
 func TestClient_NewRequestSetsHeaders(t *testing.T) {
 	httpClient := &http.Client{}
-	c, err := NewClient(httpClient, "token-value", "https://example.com", "my-agent", &RateLimitConfig{RequestsPerMinute: 1000, Burst: 100}, nil)
+	c, err := NewClient(httpClient, "token-value", "https://example.com", "my-agent", nil)
 	if err != nil {
 		t.Fatalf("NewClient returned error: %v", err)
 	}
@@ -93,7 +86,7 @@ func TestClient_NewRequestSetsHeaders(t *testing.T) {
 }
 
 func TestClient_NewRequestInvalidPath(t *testing.T) {
-	c, err := NewClient(nil, "token", "https://example.com", "agent", nil, nil)
+	c, err := NewClient(nil, "token", "https://example.com", "agent", nil)
 	if err != nil {
 		t.Fatalf("NewClient returned error: %v", err)
 	}
@@ -110,7 +103,7 @@ func TestClient_NewRequestInvalidPath(t *testing.T) {
 }
 
 func TestClient_NewRequestPreservesBody(t *testing.T) {
-	c, err := NewClient(nil, "token", "https://example.com", "agent", nil, nil)
+	c, err := NewClient(nil, "token", "https://example.com", "agent", nil)
 	if err != nil {
 		t.Fatalf("NewClient returned error: %v", err)
 	}
@@ -139,7 +132,7 @@ func TestClient_DoDecodesResponse(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	httpClient := server.Client()
-	c, err := NewClient(httpClient, "token", server.URL+"/", "agent", &RateLimitConfig{RequestsPerMinute: 1000, Burst: 100}, nil)
+	c, err := NewClient(httpClient, "token", server.URL+"/", "agent", nil)
 	if err != nil {
 		t.Fatalf("NewClient returned error: %v", err)
 	}
@@ -174,7 +167,7 @@ func TestClient_DoTransportErrorWrapped(t *testing.T) {
 		return nil, expectedErr
 	})}
 
-	c, err := NewClient(httpClient, "token", "https://example.com/", "agent", nil, nil)
+	c, err := NewClient(httpClient, "token", "https://example.com/", "agent", nil)
 	if err != nil {
 		t.Fatalf("NewClient returned error: %v", err)
 	}
@@ -206,7 +199,7 @@ func TestClient_DoNonSuccessStatusReturnsAPIError(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	httpClient := server.Client()
-	c, err := NewClient(httpClient, "token", server.URL+"/", "agent", &RateLimitConfig{RequestsPerMinute: 60000, Burst: 1000}, nil)
+	c, err := NewClient(httpClient, "token", server.URL+"/", "agent", nil)
 	if err != nil {
 		t.Fatalf("NewClient returned error: %v", err)
 	}
@@ -241,7 +234,7 @@ func TestClient_DoJSONDecodeErrorWrapped(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	httpClient := server.Client()
-	c, err := NewClient(httpClient, "token", server.URL+"/", "agent", &RateLimitConfig{RequestsPerMinute: 60000, Burst: 1000}, nil)
+	c, err := NewClient(httpClient, "token", server.URL+"/", "agent", nil)
 	if err != nil {
 		t.Fatalf("NewClient returned error: %v", err)
 	}
@@ -271,7 +264,7 @@ func TestClient_DoSkipsDecodeWhenTargetNil(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	httpClient := server.Client()
-	c, err := NewClient(httpClient, "token", server.URL+"/", "agent", &RateLimitConfig{RequestsPerMinute: 60000, Burst: 1000}, nil)
+	c, err := NewClient(httpClient, "token", server.URL+"/", "agent", nil)
 	if err != nil {
 		t.Fatalf("NewClient returned error: %v", err)
 	}
@@ -316,7 +309,7 @@ func TestClient_DoEnforcesRetryAfter(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	httpClient := server.Client()
-	c, err := NewClient(httpClient, "token", server.URL+"/", "agent", &RateLimitConfig{RequestsPerMinute: 60000, Burst: 1000}, nil)
+	c, err := NewClient(httpClient, "token", server.URL+"/", "agent", nil)
 	if err != nil {
 		t.Fatalf("NewClient returned error: %v", err)
 	}
@@ -369,7 +362,7 @@ func TestClient_DoHonorsCanceledContextBeforeSend(t *testing.T) {
 		return nil, errors.New("unexpected transport call")
 	})}
 
-	c, err := NewClient(httpClient, "token", "https://example.com/", "agent", nil, nil)
+	c, err := NewClient(httpClient, "token", "https://example.com/", "agent", nil)
 	if err != nil {
 		t.Fatalf("NewClient returned error: %v", err)
 	}
