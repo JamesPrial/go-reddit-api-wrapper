@@ -52,34 +52,7 @@ moreComments, err := client.GetMoreComments(ctx, postID, commentIDs, &graw.MoreC
 })
 ```
 
-#### 3. CommentTree Utilities
-- Count total comments including nested replies
-- Filter comments by score, author, or custom criteria
-- Find gilded comments
-- Calculate tree depth
-- Sort comments by various criteria
-
-```go
-tree := graw.NewCommentTree(comments)
-highScored := tree.GetScoreRange(10, 99999)
-byAuthor := tree.GetByAuthor("username")
-gilded := tree.GetGilded()
-```
-
-#### 4. CommentIterator
-- Traverse comment trees without recursion (prevents stack overflow)
-- Depth-first or breadth-first traversal
-- Built-in filtering and depth limiting
-
-```go
-iter := graw.NewCommentIterator(comments, &graw.TraversalOptions{
-    MaxDepth:      3,
-    MinScore:      0,
-    Order:         graw.DepthFirst,
-})
-```
-
-#### 5. Batch Operations
+#### 3. Batch Operations
 - Load comments for multiple posts in parallel
 - More efficient than sequential requests
 - Maintains result ordering
@@ -92,7 +65,7 @@ requests := []graw.CommentRequest{
 results, err := client.GetCommentsMultiple(ctx, requests)
 ```
 
-#### 6. Bulk Collection
+#### 4. Bulk Collection
 - Collect multiple pages of posts at once
 - Useful for data analysis and aggregation
 

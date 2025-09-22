@@ -8,7 +8,6 @@ import (
 	"os"
 
 	graw "github.com/jamesprial/go-reddit-api-wrapper"
-	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 )
 
 func main() {
@@ -169,42 +168,9 @@ func main() {
 			}
 		}
 
-		// 3. Demonstrate CommentTree utilities
-		if comments != nil && len(comments.Comments) > 0 {
-			fmt.Println("\n3. Using CommentTree utilities:")
-			tree := graw.NewCommentTree(comments.Comments)
-
-			// Count total comments including nested replies
-			totalComments := tree.Count()
-			fmt.Printf("   Total comments in tree: %d\n", totalComments)
-
-			// Find highly scored comments
-			highScored := tree.Filter(func(c *types.Comment) bool {
-				return c.Data != nil && c.Data.Score >= 10
-			})
-			fmt.Printf("   Comments with score >= 10: %d\n", len(highScored))
-
-			// Get all comments by a specific author (if any)
-			if len(comments.Comments) > 0 && comments.Comments[0].Data != nil {
-				authorName := comments.Comments[0].Data.Author
-				byAuthor := tree.GetByAuthor(authorName)
-				fmt.Printf("   Comments by %s: %d\n", authorName, len(byAuthor))
-			}
-
-			// Find gilded comments
-			gilded := tree.Filter(func(c *types.Comment) bool {
-				return c.Data != nil && c.Data.Gilded > 0
-			})
-			fmt.Printf("   Gilded comments: %d\n", len(gilded))
-
-			// Get tree depth
-			depth := tree.GetDepth()
-			fmt.Printf("   Max comment tree depth: %d\n", depth)
-		}
-
-		// 4. Demonstrate batch comment loading for multiple posts
+		// 3. Demonstrate batch comment loading for multiple posts
 		if len(hotPosts.Posts) >= 3 {
-			fmt.Println("\n4. Batch loading comments for multiple posts:")
+			fmt.Println("\n3. Batch loading comments for multiple posts:")
 
 			requests := []graw.CommentRequest{
 				{Subreddit: "golang", PostID: hotPosts.Posts[0].ID, Options: &graw.ListingOptions{Limit: 5}},
