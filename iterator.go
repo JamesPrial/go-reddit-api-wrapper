@@ -88,6 +88,11 @@ func (it *PostIterator) Next() (*types.Post, error) {
 			return nil, err
 		}
 
+		if resp == nil {
+			it.err = fmt.Errorf("received nil response")
+			return nil, it.err
+		}
+
 		it.buffer = resp.Posts
 		it.bufferIdx = 0
 		it.after = resp.After
@@ -103,6 +108,12 @@ func (it *PostIterator) Next() (*types.Post, error) {
 
 	post := it.buffer[it.bufferIdx]
 	it.bufferIdx++
+
+	// Skip nil posts
+	if post == nil {
+		return it.Next()
+	}
+
 	return post, nil
 }
 

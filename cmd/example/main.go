@@ -118,7 +118,11 @@ func main() {
 				break
 			}
 			postCount++
-			fmt.Printf("   %d. %s (score: %d)\n", postCount, post.Data.Title, post.Data.Score)
+			if post.Data != nil {
+				fmt.Printf("   %d. %s (score: %d)\n", postCount, post.Data.Title, post.Data.Score)
+			} else {
+				fmt.Printf("   %d. [Post data unavailable]\n", postCount)
+			}
 		}
 
 		// 2. Demonstrate GetMoreComments for loading truncated comments
