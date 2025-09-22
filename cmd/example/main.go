@@ -85,11 +85,12 @@ func main() {
 	}
 
 	// Get comments for a post (if we have posts)
+	var comments *graw.CommentsResponse
 	if len(hotPosts.Posts) > 0 {
 		firstPost := hotPosts.Posts[0]
 		// Use post ID directly
 		postID := firstPost.ID
-		comments, err := client.GetComments(ctx, "golang", postID, &graw.ListingOptions{Limit: 5})
+		comments, err = client.GetComments(ctx, "golang", postID, &graw.ListingOptions{Limit: 5})
 		if err != nil {
 			log.Printf("Failed to get comments: %v", err)
 		} else {
@@ -140,7 +141,7 @@ func main() {
 		fmt.Printf("   Total posts fetched: %d\n", totalPosts)
 
 		// 2. Demonstrate GetMoreComments for loading truncated comments
-		if len(comments.MoreIDs) > 0 {
+		if comments != nil && len(comments.MoreIDs) > 0 {
 			fmt.Printf("\n2. Loading more comments (found %d truncated):\n", len(comments.MoreIDs))
 
 			// Load up to 10 more comments
@@ -169,35 +170,37 @@ func main() {
 		}
 
 		// 3. Demonstrate CommentTree utilities
-		fmt.Println("\n3. Using CommentTree utilities:")
-		tree := graw.NewCommentTree(comments.Comments)
+		if comments != nil && len(comments.Comments) > 0 {
+			fmt.Println("\n3. Using CommentTree utilities:")
+			tree := graw.NewCommentTree(comments.Comments)
 
-		// Count total comments including nested replies
-		totalComments := tree.Count()
-		fmt.Printf("   Total comments in tree: %d\n", totalComments)
+			// Count total comments including nested replies
+			totalComments := tree.Count()
+			fmt.Printf("   Total comments in tree: %d\n", totalComments)
 
-		// Find highly scored comments
-		highScored := tree.Filter(func(c *types.Comment) bool {
-			return c.Data != nil && c.Data.Score >= 10
-		})
-		fmt.Printf("   Comments with score >= 10: %d\n", len(highScored))
+			// Find highly scored comments
+			highScored := tree.Filter(func(c *types.Comment) bool {
+				return c.Data != nil && c.Data.Score >= 10
+			})
+			fmt.Printf("   Comments with score >= 10: %d\n", len(highScored))
 
-		// Get all comments by a specific author (if any)
-		if len(comments.Comments) > 0 && comments.Comments[0].Data != nil {
-			authorName := comments.Comments[0].Data.Author
-			byAuthor := tree.GetByAuthor(authorName)
-			fmt.Printf("   Comments by %s: %d\n", authorName, len(byAuthor))
+			// Get all comments by a specific author (if any)
+			if len(comments.Comments) > 0 && comments.Comments[0].Data != nil {
+				authorName := comments.Comments[0].Data.Author
+				byAuthor := tree.GetByAuthor(authorName)
+				fmt.Printf("   Comments by %s: %d\n", authorName, len(byAuthor))
+			}
+
+			// Find gilded comments
+			gilded := tree.Filter(func(c *types.Comment) bool {
+				return c.Data != nil && c.Data.Gilded > 0
+			})
+			fmt.Printf("   Gilded comments: %d\n", len(gilded))
+
+			// Get tree depth
+			depth := tree.GetDepth()
+			fmt.Printf("   Max comment tree depth: %d\n", depth)
 		}
-
-		// Find gilded comments
-		gilded := tree.Filter(func(c *types.Comment) bool {
-			return c.Data != nil && c.Data.Gilded > 0
-		})
-		fmt.Printf("   Gilded comments: %d\n", len(gilded))
-
-		// Get tree depth
-		depth := tree.GetDepth()
-		fmt.Printf("   Max comment tree depth: %d\n", depth)
 
 		// 4. Demonstrate batch comment loading for multiple posts
 		if len(hotPosts.Posts) >= 3 {
