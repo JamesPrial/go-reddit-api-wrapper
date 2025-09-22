@@ -21,10 +21,6 @@ const (
 	DefaultUserAgent = "go-reddit-api-wrapper/0.01"
 	// DefaultTimeout is the default HTTP client timeout
 	DefaultTimeout = 30 * time.Second
-	// DefaultRequestsPerMinute is Reddit's baseline token quota.
-	DefaultRequestsPerMinute = 60
-	// DefaultRateLimitBurst allows short spikes above the steady rate.
-	DefaultRateLimitBurst = 10
 )
 
 // Config holds the configuration for the Reddit client.
@@ -43,8 +39,6 @@ type Config struct {
 	AuthURL string
 	// HTTPClient to use for requests (defaults to a client with DefaultTimeout)
 	HTTPClient *http.Client
-	// RateLimit tunes how fast requests are issued to Reddit.
-	RateLimit RateLimitConfig
 	// Logger captures structured diagnostics; optional.
 	Logger *slog.Logger
 	// LogBodyLimit overrides how many response bytes are included in debug logs.
@@ -52,23 +46,6 @@ type Config struct {
 	LogBodyLimit int
 }
 
-// RateLimitConfig controls request throttling.
-type RateLimitConfig struct {
-	// RequestsPerMinute caps sustained throughput. Zero means use default.
-	RequestsPerMinute float64
-	// Burst bounds short spikes above the steady-state rate. Zero uses default.
-	Burst int
-}
-
-func (r RateLimitConfig) withDefaults() RateLimitConfig {
-	if r.RequestsPerMinute <= 0 {
-		r.RequestsPerMinute = DefaultRequestsPerMinute
-	}
-	if r.Burst <= 0 {
-		r.Burst = DefaultRateLimitBurst
-	}
-	return r
-}
 
 // TokenProvider defines the interface for retrieving an access token.
 type TokenProvider interface {
@@ -151,16 +128,12 @@ func (c *Client) Connect(ctx context.Context) error {
 	}
 
 	// Create internal HTTP client
-	rateLimit := c.config.RateLimit.withDefaults()
 	client, err := internal.NewClient(
 		c.config.HTTPClient,
 		token,
 		c.config.BaseURL,
 		c.config.UserAgent,
-		&internal.RateLimitConfig{
-			RequestsPerMinute: rateLimit.RequestsPerMinute,
-			Burst:             rateLimit.Burst,
-		},
+		nil, // Let the library handle rate limiting internally
 		c.config.Logger,
 	)
 	if err != nil {

@@ -58,7 +58,7 @@ go mod tidy
 ### Package Structure
 - **`reddit.go`**: Main client implementation and public API surface
   - `Client` struct: Main Reddit API client
-  - `Config` struct: Client configuration including auth credentials, rate limiting
+  - `Config` struct: Client configuration including auth credentials
   - Public methods: `NewClient()`, `Connect()`, `GetHot()`, `GetNew()`, `GetComments()`, etc.
 
 - **`internal/`**: Internal implementation details (not exposed to library users)
@@ -88,10 +88,10 @@ go mod tidy
 4. Automatic token refresh on expiry
 
 ### Rate Limiting Strategy
-- Default: 60 requests/minute with burst of 10
-- Respects Reddit's X-Ratelimit-Reset header
-- Local rate limiter prevents exceeding limits
-- Configurable via `RateLimitConfig`
+- Automatic: 60 requests/minute with burst of 10 (Reddit's default limits)
+- Respects Reddit's X-Ratelimit-Reset and Retry-After headers
+- Proactive throttling when approaching limits
+- Handled internally by the library (not user-configurable)
 
 ## Environment Variables
 
