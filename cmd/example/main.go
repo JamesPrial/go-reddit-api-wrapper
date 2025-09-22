@@ -217,9 +217,14 @@ func main() {
 				log.Printf("Batch loading error: %v", err)
 			} else {
 				for i, result := range batchResults {
-					if result != nil && result.Post != nil {
-						fmt.Printf("   Post %d: %.50s... - %d comments loaded\n",
-							i+1, result.Post.Data.Title, len(result.Comments))
+					if result != nil {
+						if result.Post != nil {
+							fmt.Printf("   Post %d: %.50s... - %d comments loaded\n",
+								i+1, result.Post.Data.Title, len(result.Comments))
+						} else {
+							fmt.Printf("   Post %d: (post data not included) - %d comments loaded\n",
+								i+1, len(result.Comments))
+						}
 					}
 				}
 			}

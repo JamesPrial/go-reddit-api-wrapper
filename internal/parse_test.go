@@ -1019,14 +1019,15 @@ func TestExtractPostAndComments(t *testing.T) {
 			expectError: true,
 		},
 		{
-			name: "single element response",
+			name: "single element response with comments",
 			response: []*types.Thing{
 				{
 					Kind: "Listing",
 					Data: json.RawMessage(`{"children":[]}`),
 				},
 			},
-			expectError: true,
+			expectError: false,
+			// Should return nil post with empty comments
 		},
 		{
 			name: "valid post and comments",

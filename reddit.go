@@ -370,31 +370,39 @@ func (c *Client) GetComments(ctx context.Context, subreddit, postID string, opts
 		return nil, &ClientError{Err: "failed to get comments: " + err.Error()}
 	}
 
-	// Check if response is an error object instead of expected array
-	// Reddit sometimes returns 200 OK with error details in JSON
-	if len(resp) > 0 && resp[0] == '{' {
-		// Log the unexpected object response for debugging
-		if c.config.Logger != nil {
-			c.config.Logger.Debug("GetComments received object instead of array",
-				"response_preview", string(resp[:min(200, len(resp))]))
-		}
-
-		var errObj struct {
-			Error   string `json:"error"`
-			Message string `json:"message"`
-			Reason  string `json:"reason"`
-		}
-		if err := json.Unmarshal(resp, &errObj); err == nil && errObj.Error != "" {
-			return nil, &ClientError{Err: fmt.Sprintf("reddit API error: %s - %s", errObj.Error, errObj.Message)}
-		}
-
-		// If it's an object but not a recognized error format, return a generic error
-		return nil, &ClientError{Err: fmt.Sprintf("unexpected response format: expected array but got object: %s", string(resp[:min(200, len(resp))]))}
-	}
-
+	// Reddit can return either an array [post, comments] or a single Listing object
 	var result []*types.Thing
-	if err := json.Unmarshal(resp, &result); err != nil {
-		return nil, &ClientError{Err: "failed to parse comments response: " + err.Error()}
+
+	// First check if it's an array response
+	if len(resp) > 0 && resp[0] == '[' {
+		if err := json.Unmarshal(resp, &result); err != nil {
+			return nil, &ClientError{Err: "failed to parse comments array response: " + err.Error()}
+		}
+	} else if len(resp) > 0 && resp[0] == '{' {
+		// It's a single object - could be a Listing or an error
+		var singleThing types.Thing
+		if err := json.Unmarshal(resp, &singleThing); err != nil {
+			// Check if it's an error response
+			var errObj struct {
+				Error   string `json:"error"`
+				Message string `json:"message"`
+				Reason  string `json:"reason"`
+			}
+			if err := json.Unmarshal(resp, &errObj); err == nil && errObj.Error != "" {
+				return nil, &ClientError{Err: fmt.Sprintf("reddit API error: %s - %s", errObj.Error, errObj.Message)}
+			}
+			return nil, &ClientError{Err: "failed to parse comments response: " + err.Error()}
+		}
+
+		// If it's a Listing with comments, wrap it in an array
+		// Some endpoints return just the comments listing without the post
+		if singleThing.Kind == "Listing" {
+			result = []*types.Thing{&singleThing}
+		} else {
+			return nil, &ClientError{Err: fmt.Sprintf("unexpected response kind: %s", singleThing.Kind)}
+		}
+	} else {
+		return nil, &ClientError{Err: "empty or invalid response from Reddit"}
 	}
 
 	// Parse the post and comments
@@ -403,6 +411,7 @@ func (c *Client) GetComments(ctx context.Context, subreddit, postID string, opts
 		return nil, &ClientError{Err: "failed to parse comments: " + err.Error()}
 	}
 
+	// Note: post may be nil if Reddit only returned comments without the post
 	return &CommentsResponse{
 		Post:     post,
 		Comments: comments,

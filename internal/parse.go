@@ -247,21 +247,42 @@ func (p *Parser) ExtractComments(thing *types.Thing) ([]*types.Comment, []string
 // ExtractPostAndComments parses the typical response from GetComments which contains
 // [post_listing, comments_listing]
 func (p *Parser) ExtractPostAndComments(response []*types.Thing) (*types.Post, []*types.Comment, []string, error) {
-	if len(response) < 2 {
-		return nil, nil, nil, fmt.Errorf("expected at least 2 elements in response")
+	if len(response) == 0 {
+		return nil, nil, nil, fmt.Errorf("empty response")
 	}
 
-	// First element should be a listing with the post
-	posts, err := p.ExtractPosts(response[0])
-	if err != nil || len(posts) == 0 {
-		return nil, nil, nil, fmt.Errorf("failed to extract post: %w", err)
+	// Reddit can return either:
+	// 1. Two listings: [post_listing, comments_listing]
+	// 2. One listing with just comments (when fetching comments for a specific post)
+
+	if len(response) >= 2 {
+		// Standard format: first is post, second is comments
+		posts, err := p.ExtractPosts(response[0])
+		if err != nil || len(posts) == 0 {
+			return nil, nil, nil, fmt.Errorf("failed to extract post: %w", err)
+		}
+
+		// Second element should be the comments listing
+		comments, moreIDs, err := p.ExtractComments(response[1])
+		if err != nil {
+			return posts[0], nil, nil, fmt.Errorf("failed to extract comments: %w", err)
+		}
+
+		return posts[0], comments, moreIDs, nil
 	}
 
-	// Second element should be the comments listing
-	comments, moreIDs, err := p.ExtractComments(response[1])
+	// Single listing format: just comments, no post
+	// This happens when fetching additional comments or in certain API responses
+	comments, moreIDs, err := p.ExtractComments(response[0])
 	if err != nil {
-		return posts[0], nil, nil, fmt.Errorf("failed to extract comments: %w", err)
+		// Try to extract as posts instead (might be a post-only response)
+		posts, err := p.ExtractPosts(response[0])
+		if err != nil || len(posts) == 0 {
+			return nil, nil, nil, fmt.Errorf("failed to extract data from single listing: %w", err)
+		}
+		return posts[0], nil, nil, nil
 	}
 
-	return posts[0], comments, moreIDs, nil
+	// Return nil post with the comments
+	return nil, comments, moreIDs, nil
 }
