@@ -274,13 +274,22 @@ func (c *Client) GetHot(ctx context.Context, subreddit string, opts *ListingOpti
 	}
 
 	// Get pagination info
-	listing, _ := c.parser.ParseThing(&result)
-	listingData, _ := listing.(*types.ListingData)
+	var after, before string
+	listing, err := c.parser.ParseThing(&result)
+	if err == nil {
+		// If ParseThing succeeds, try to get pagination data
+		if listingData, ok := listing.(*types.ListingData); ok {
+			after = listingData.After
+			before = listingData.Before
+		}
+	}
+	// If ParseThing fails or type assertion fails, we still return the posts
+	// with empty pagination values rather than panicking
 
 	return &PostsResponse{
 		Posts:  posts,
-		After:  listingData.After,
-		Before: listingData.Before,
+		After:  after,
+		Before: before,
 	}, nil
 }
 
@@ -331,13 +340,22 @@ func (c *Client) GetNew(ctx context.Context, subreddit string, opts *ListingOpti
 	}
 
 	// Get pagination info
-	listing, _ := c.parser.ParseThing(&result)
-	listingData, _ := listing.(*types.ListingData)
+	var after, before string
+	listing, err := c.parser.ParseThing(&result)
+	if err == nil {
+		// If ParseThing succeeds, try to get pagination data
+		if listingData, ok := listing.(*types.ListingData); ok {
+			after = listingData.After
+			before = listingData.Before
+		}
+	}
+	// If ParseThing fails or type assertion fails, we still return the posts
+	// with empty pagination values rather than panicking
 
 	return &PostsResponse{
 		Posts:  posts,
-		After:  listingData.After,
-		Before: listingData.Before,
+		After:  after,
+		Before: before,
 	}, nil
 }
 
