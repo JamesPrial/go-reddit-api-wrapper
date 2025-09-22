@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/jamesprial/go-reddit-api-wrapper/internal"
@@ -218,6 +219,13 @@ type ListingOptions struct {
 	Before string // Get items before this item ID
 }
 
+// MoreCommentsOptions provides options for loading additional comments.
+type MoreCommentsOptions struct {
+	Sort  string // Sort order: "confidence", "new", "top", "controversial", "old", "qa"
+	Depth int    // Maximum depth of replies to retrieve (0 for no limit)
+	Limit int    // Maximum number of comments to retrieve (default 100)
+}
+
 // GetHot retrieves hot posts from a subreddit.
 // If subreddit is empty, it gets from the front page.
 func (c *Client) GetHot(ctx context.Context, subreddit string, opts *ListingOptions) (*PostsResponse, error) {
@@ -370,6 +378,132 @@ func (c *Client) GetComments(ctx context.Context, subreddit, postID string, opts
 		Comments: comments,
 		MoreIDs:  moreIDs,
 	}, nil
+}
+
+// CommentRequest represents a request for loading comments for a specific post.
+type CommentRequest struct {
+	Subreddit string
+	PostID    string
+	Options   *ListingOptions
+}
+
+// GetCommentsMultiple loads comments for multiple posts in parallel.
+// This is more efficient than calling GetComments multiple times sequentially.
+func (c *Client) GetCommentsMultiple(ctx context.Context, requests []CommentRequest) ([]*CommentsResponse, error) {
+	if !c.IsConnected() {
+		return nil, &ClientError{Err: "client not connected, call Connect() first"}
+	}
+
+	if len(requests) == 0 {
+		return []*CommentsResponse{}, nil
+	}
+
+	// Create channels for results
+	type result struct {
+		index    int
+		response *CommentsResponse
+		err      error
+	}
+	resultChan := make(chan result, len(requests))
+
+	// Launch goroutines for parallel fetching
+	for i, req := range requests {
+		go func(index int, r CommentRequest) {
+			resp, err := c.GetComments(ctx, r.Subreddit, r.PostID, r.Options)
+			resultChan <- result{index: index, response: resp, err: err}
+		}(i, req)
+	}
+
+	// Collect results
+	results := make([]*CommentsResponse, len(requests))
+	var firstError error
+	for i := 0; i < len(requests); i++ {
+		res := <-resultChan
+		if res.err != nil && firstError == nil {
+			firstError = res.err
+		}
+		results[res.index] = res.response
+	}
+
+	if firstError != nil {
+		return results, firstError
+	}
+	return results, nil
+}
+
+// GetMoreComments loads additional comments that were truncated from the initial response.
+// This uses Reddit's /api/morechildren endpoint to fetch comments by their IDs.
+func (c *Client) GetMoreComments(ctx context.Context, linkID string, commentIDs []string, opts *MoreCommentsOptions) ([]*types.Comment, error) {
+	if !c.IsConnected() {
+		return nil, &ClientError{Err: "client not connected, call Connect() first"}
+	}
+
+	if len(commentIDs) == 0 {
+		return []*types.Comment{}, nil
+	}
+
+	// Reddit's link_id format requires the type prefix (t3_)
+	if !strings.HasPrefix(linkID, "t3_") {
+		linkID = "t3_" + linkID
+	}
+
+	req, err := c.client.NewRequest(ctx, http.MethodGet, "api/morechildren", nil)
+	if err != nil {
+		return nil, &ClientError{Err: "failed to create request: " + err.Error()}
+	}
+
+	// Build query parameters
+	q := req.URL.Query()
+	q.Set("link_id", linkID)
+	q.Set("children", strings.Join(commentIDs, ","))
+	q.Set("api_type", "json")
+
+	if opts != nil {
+		if opts.Sort != "" {
+			q.Set("sort", opts.Sort)
+		}
+		if opts.Depth > 0 {
+			q.Set("depth", fmt.Sprintf("%d", opts.Depth))
+		}
+		if opts.Limit > 0 {
+			q.Set("limit_children", fmt.Sprintf("%d", opts.Limit))
+		}
+	}
+
+	req.URL.RawQuery = q.Encode()
+
+	// The morechildren endpoint returns a different structure
+	var response struct {
+		JSON struct {
+			Errors [][]string   `json:"errors"`
+			Data   struct {
+				Things []*types.Thing `json:"things"`
+			} `json:"data"`
+		} `json:"json"`
+	}
+
+	if err := c.getJSON(ctx, req, &response); err != nil {
+		return nil, &ClientError{Err: "failed to get more comments: " + err.Error()}
+	}
+
+	// Check for API errors
+	if len(response.JSON.Errors) > 0 {
+		return nil, &ClientError{Err: fmt.Sprintf("API error: %v", response.JSON.Errors[0])}
+	}
+
+	// Extract comments from the response
+	var comments []*types.Comment
+	for _, thing := range response.JSON.Data.Things {
+		if thing.Kind == "t1" {
+			var comment types.Comment
+			if err := json.Unmarshal(thing.Data, &comment); err != nil {
+				continue // Skip if we can't unmarshal
+			}
+			comments = append(comments, &comment)
+		}
+	}
+
+	return comments, nil
 }
 
 // getJSON is a helper method to handle JSON responses that aren't Thing objects
