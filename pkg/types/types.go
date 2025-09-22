@@ -55,18 +55,18 @@ func (e *Edited) UnmarshalJSON(data []byte) error {
 		return nil
 	}
 
+	// It could be null, which we treat as not edited.
+	if strings.ToLower(s) == "null" {
+		e.IsEdited = false
+		e.Timestamp = 0
+		return nil
+	}
+
 	// It can be a float timestamp.
 	var timestamp float64
 	if err := json.Unmarshal(data, &timestamp); err == nil {
 		e.IsEdited = true
 		e.Timestamp = timestamp
-		return nil
-	}
-
-	// It could be null, which we treat as not edited.
-	if strings.ToLower(s) == "null" {
-		e.IsEdited = false
-		e.Timestamp = 0
 		return nil
 	}
 
