@@ -32,7 +32,6 @@ func main() {
 		Password:     password, // Optional: for user-authenticated requests
 		UserAgent:    "example-bot/1.0 by YourUsername",
 		Logger:       logger,
-		LogBodyLimit: 8 * 1024,
 	}
 
 	// Create the client

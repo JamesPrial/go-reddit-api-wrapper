@@ -58,7 +58,7 @@ go mod tidy
 ### Package Structure
 - **`reddit.go`**: Main client implementation and public API surface
   - `Client` struct: Main Reddit API client
-  - `Config` struct: Client configuration including auth credentials
+  - `Config` struct: Client configuration including auth credentials and optional logger
   - Public methods: `NewClient()`, `Connect()`, `GetHot()`, `GetNew()`, `GetComments()`, etc.
 
 - **`internal/`**: Internal implementation details (not exposed to library users)
@@ -79,7 +79,7 @@ go mod tidy
 1. **Token Provider Interface**: Abstraction for token retrieval, allowing different auth strategies
 2. **HTTP Client Interface**: Abstraction over internal HTTP client for testing
 3. **Rate Limiting**: Dual approach using local rate limiter and respecting Reddit's headers
-4. **Structured Logging**: Optional slog integration with configurable body limits for debugging
+4. **Structured Logging**: Optional slog integration for debugging
 
 ### Authentication Flow
 1. Client creation with credentials (`NewClient`)

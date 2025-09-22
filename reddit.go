@@ -39,11 +39,8 @@ type Config struct {
 	AuthURL string
 	// HTTPClient to use for requests (defaults to a client with DefaultTimeout)
 	HTTPClient *http.Client
-	// Logger captures structured diagnostics; optional.
+	// Logger for structured diagnostics (optional)
 	Logger *slog.Logger
-	// LogBodyLimit overrides how many response bytes are included in debug logs.
-	// A value <= 0 keeps the library default.
-	LogBodyLimit int
 }
 
 
@@ -138,9 +135,6 @@ func (c *Client) Connect(ctx context.Context) error {
 	)
 	if err != nil {
 		return &ClientError{Err: "failed to create HTTP client: " + err.Error()}
-	}
-	if c.config.LogBodyLimit > 0 {
-		client.SetLogBodyLimit(c.config.LogBodyLimit)
 	}
 
 	c.client = client
