@@ -514,7 +514,7 @@ func (c *Client) GetMoreComments(ctx context.Context, linkID string, commentIDs 
 	// The morechildren endpoint returns a different structure
 	var response struct {
 		JSON struct {
-			Errors [][]string   `json:"errors"`
+			Errors [][]string `json:"errors"`
 			Data   struct {
 				Things []*types.Thing `json:"things"`
 			} `json:"data"`

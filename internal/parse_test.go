@@ -18,9 +18,9 @@ func TestParseThing(t *testing.T) {
 	parser := NewParser()
 
 	tests := []struct {
-		name        string
-		thing       *types.Thing
-		expectError bool
+		name         string
+		thing        *types.Thing
+		expectError  bool
 		expectedType string
 	}{
 		{
@@ -34,7 +34,7 @@ func TestParseThing(t *testing.T) {
 				Kind: "Listing",
 				Data: json.RawMessage(`{"after":"after123","before":null,"children":[]}`),
 			},
-			expectError: false,
+			expectError:  false,
 			expectedType: "*types.ListingData",
 		},
 		{
@@ -45,7 +45,7 @@ func TestParseThing(t *testing.T) {
 				Name: "t1_comment123",
 				Data: json.RawMessage(`{"author":"testuser","body":"test comment","score":10,"replies":""}`),
 			},
-			expectError: false,
+			expectError:  false,
 			expectedType: "*types.CommentData",
 		},
 		{
@@ -54,7 +54,7 @@ func TestParseThing(t *testing.T) {
 				Kind: "t2",
 				Data: json.RawMessage(`{"name":"testuser","link_karma":100,"comment_karma":200}`),
 			},
-			expectError: false,
+			expectError:  false,
 			expectedType: "*types.AccountData",
 		},
 		{
@@ -65,7 +65,7 @@ func TestParseThing(t *testing.T) {
 				Name: "t3_post123",
 				Data: json.RawMessage(`{"author":"testuser","title":"Test Post","url":"http://example.com","score":100}`),
 			},
-			expectError: false,
+			expectError:  false,
 			expectedType: "*types.LinkData",
 		},
 		{
@@ -74,7 +74,7 @@ func TestParseThing(t *testing.T) {
 				Kind: "t4",
 				Data: json.RawMessage(`{"author":"testuser","body":"test message","subject":"Test Subject"}`),
 			},
-			expectError: false,
+			expectError:  false,
 			expectedType: "*types.MessageData",
 		},
 		{
@@ -83,7 +83,7 @@ func TestParseThing(t *testing.T) {
 				Kind: "t5",
 				Data: json.RawMessage(`{"display_name":"golang","title":"Go Programming","subscribers":100000}`),
 			},
-			expectError: false,
+			expectError:  false,
 			expectedType: "*types.SubredditData",
 		},
 		{
@@ -92,7 +92,7 @@ func TestParseThing(t *testing.T) {
 				Kind: "more",
 				Data: json.RawMessage(`{"children":["id1","id2","id3"],"id":"more123"}`),
 			},
-			expectError: false,
+			expectError:  false,
 			expectedType: "*types.MoreData",
 		},
 		{
@@ -681,8 +681,8 @@ func TestExtractPosts(t *testing.T) {
 		expectCount int
 	}{
 		{
-			name: "nil listing",
-			thing: nil,
+			name:        "nil listing",
+			thing:       nil,
 			expectError: true,
 			expectCount: 0,
 		},
@@ -802,11 +802,11 @@ func TestExtractComments(t *testing.T) {
 	parser := NewParser()
 
 	tests := []struct {
-		name         string
-		thing        *types.Thing
-		expectError  bool
+		name           string
+		thing          *types.Thing
+		expectError    bool
 		expectComments int
-		expectMore   int
+		expectMore     int
 	}{
 		{
 			name: "single comment without replies",
@@ -1229,7 +1229,7 @@ func TestEditedUnmarshalJSON(t *testing.T) {
 			name:      "null",
 			input:     `null`,
 			expectErr: false,
-			isEdited:  false,  // null means not edited
+			isEdited:  false, // null means not edited
 			timestamp: 0,
 		},
 		{
