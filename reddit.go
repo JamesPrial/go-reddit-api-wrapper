@@ -2,6 +2,7 @@ package graw
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -59,6 +60,7 @@ type Client struct {
 	client HTTPClient
 	auth   TokenProvider
 	config *Config
+	parser Parser
 }
 
 // NewClient creates a new Reddit client with the provided configuration.
@@ -111,6 +113,7 @@ func NewClient(config *Config) (*Client, error) {
 	return &Client{
 		auth:   auth,
 		config: config,
+		parser: internal.NewParser(),
 	}, nil
 }
 
@@ -146,7 +149,7 @@ func (c *Client) IsConnected() bool {
 
 // Me returns information about the authenticated user.
 // This is useful for testing authentication and getting user details.
-func (c *Client) Me(ctx context.Context) (*types.Thing, error) {
+func (c *Client) Me(ctx context.Context) (*UserResponse, error) {
 	if !c.IsConnected() {
 		return nil, &ClientError{Err: "client not connected, call Connect() first"}
 	}
@@ -162,11 +165,22 @@ func (c *Client) Me(ctx context.Context) (*types.Thing, error) {
 		return nil, &ClientError{Err: "failed to get user info: " + err.Error()}
 	}
 
-	return &result, nil
+	// Parse the account data
+	parsed, err := c.parser.ParseThing(&result)
+	if err != nil {
+		return nil, &ClientError{Err: "failed to parse user info: " + err.Error()}
+	}
+
+	account, ok := parsed.(*types.AccountData)
+	if !ok {
+		return nil, &ClientError{Err: "unexpected response type"}
+	}
+
+	return &UserResponse{User: account}, nil
 }
 
 // GetSubreddit retrieves information about a specific subreddit.
-func (c *Client) GetSubreddit(ctx context.Context, name string) (*types.Thing, error) {
+func (c *Client) GetSubreddit(ctx context.Context, name string) (*SubredditResponse, error) {
 	if !c.IsConnected() {
 		return nil, &ClientError{Err: "client not connected, call Connect() first"}
 	}
@@ -183,7 +197,18 @@ func (c *Client) GetSubreddit(ctx context.Context, name string) (*types.Thing, e
 		return nil, &ClientError{Err: "failed to get subreddit: " + err.Error()}
 	}
 
-	return &result, nil
+	// Parse the subreddit data
+	parsed, err := c.parser.ParseThing(&result)
+	if err != nil {
+		return nil, &ClientError{Err: "failed to parse subreddit: " + err.Error()}
+	}
+
+	subreddit, ok := parsed.(*types.SubredditData)
+	if !ok {
+		return nil, &ClientError{Err: "unexpected response type"}
+	}
+
+	return &SubredditResponse{Subreddit: subreddit}, nil
 }
 
 // ListingOptions provides options for listing operations.
@@ -195,7 +220,7 @@ type ListingOptions struct {
 
 // GetHot retrieves hot posts from a subreddit.
 // If subreddit is empty, it gets from the front page.
-func (c *Client) GetHot(ctx context.Context, subreddit string, opts *ListingOptions) (*types.Thing, error) {
+func (c *Client) GetHot(ctx context.Context, subreddit string, opts *ListingOptions) (*PostsResponse, error) {
 	if !c.IsConnected() {
 		return nil, &ClientError{Err: "client not connected, call Connect() first"}
 	}
@@ -233,12 +258,26 @@ func (c *Client) GetHot(ctx context.Context, subreddit string, opts *ListingOpti
 		return nil, &ClientError{Err: "failed to get hot posts: " + err.Error()}
 	}
 
-	return &result, nil
+	// Extract posts from the listing
+	posts, err := c.parser.ExtractPosts(&result)
+	if err != nil {
+		return nil, &ClientError{Err: "failed to parse posts: " + err.Error()}
+	}
+
+	// Get pagination info
+	listing, _ := c.parser.ParseThing(&result)
+	listingData, _ := listing.(*types.ListingData)
+
+	return &PostsResponse{
+		Posts:  posts,
+		After:  listingData.After,
+		Before: listingData.Before,
+	}, nil
 }
 
 // GetNew retrieves new posts from a subreddit.
 // If subreddit is empty, it gets from the front page.
-func (c *Client) GetNew(ctx context.Context, subreddit string, opts *ListingOptions) (*types.Thing, error) {
+func (c *Client) GetNew(ctx context.Context, subreddit string, opts *ListingOptions) (*PostsResponse, error) {
 	if !c.IsConnected() {
 		return nil, &ClientError{Err: "client not connected, call Connect() first"}
 	}
@@ -276,11 +315,25 @@ func (c *Client) GetNew(ctx context.Context, subreddit string, opts *ListingOpti
 		return nil, &ClientError{Err: "failed to get new posts: " + err.Error()}
 	}
 
-	return &result, nil
+	// Extract posts from the listing
+	posts, err := c.parser.ExtractPosts(&result)
+	if err != nil {
+		return nil, &ClientError{Err: "failed to parse posts: " + err.Error()}
+	}
+
+	// Get pagination info
+	listing, _ := c.parser.ParseThing(&result)
+	listingData, _ := listing.(*types.ListingData)
+
+	return &PostsResponse{
+		Posts:  posts,
+		After:  listingData.After,
+		Before: listingData.Before,
+	}, nil
 }
 
 // GetComments retrieves comments for a specific post.
-func (c *Client) GetComments(ctx context.Context, subreddit, postID string, opts *ListingOptions) (*types.Thing, error) {
+func (c *Client) GetComments(ctx context.Context, subreddit, postID string, opts *ListingOptions) (*CommentsResponse, error) {
 	if !c.IsConnected() {
 		return nil, &ClientError{Err: "client not connected, call Connect() first"}
 	}
@@ -300,13 +353,38 @@ func (c *Client) GetComments(ctx context.Context, subreddit, postID string, opts
 		req.URL.RawQuery = q.Encode()
 	}
 
-	var result types.Thing
-	_, err = c.client.Do(req, &result)
-	if err != nil {
+	// Reddit returns an array of listings for comments endpoint
+	var result []*types.Thing
+	if err := c.getJSON(ctx, req, &result); err != nil {
 		return nil, &ClientError{Err: "failed to get comments: " + err.Error()}
 	}
 
-	return &result, nil
+	// Parse the post and comments
+	post, comments, moreIDs, err := c.parser.ExtractPostAndComments(result)
+	if err != nil {
+		return nil, &ClientError{Err: "failed to parse comments: " + err.Error()}
+	}
+
+	return &CommentsResponse{
+		Post:     post,
+		Comments: comments,
+		MoreIDs:  moreIDs,
+	}, nil
+}
+
+// getJSON is a helper method to handle JSON responses that aren't Thing objects
+func (c *Client) getJSON(ctx context.Context, req *http.Request, v interface{}) error {
+	resp, err := c.config.HTTPClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("unexpected status: %d", resp.StatusCode)
+	}
+
+	return json.NewDecoder(resp.Body).Decode(v)
 }
 
 // ClientError represents an error from the Reddit client.

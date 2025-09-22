@@ -54,7 +54,7 @@ func main() {
 		if err != nil {
 			log.Printf("Failed to get user info: %v", err)
 		} else {
-			fmt.Printf("Authenticated as user: %s\n", userInfo.Name)
+			fmt.Printf("Authenticated as user: %s\n", userInfo.User.Name)
 		}
 	}
 
@@ -63,10 +63,14 @@ func main() {
 	if err != nil {
 		log.Printf("Failed to get hot posts: %v", err)
 	} else {
-		fmt.Println("Hot posts from r/golang:")
-		fmt.Printf("Got listing with kind: %s\n", hotPosts.Kind)
-		// Note: You'd need to unmarshal the Data field to get the actual posts
-		// This is just a basic example showing the API structure
+		fmt.Println("\nHot posts from r/golang:")
+		for i, post := range hotPosts.Posts {
+			fmt.Printf("%d. %s (score: %d, comments: %d)\n",
+				i+1, post.Data.Title, post.Data.Score, post.Data.NumComments)
+		}
+		if hotPosts.After != "" {
+			fmt.Printf("Next page: %s\n", hotPosts.After)
+		}
 	}
 
 	// Get subreddit info
@@ -74,6 +78,30 @@ func main() {
 	if err != nil {
 		log.Printf("Failed to get subreddit info: %v", err)
 	} else {
-		fmt.Printf("Subreddit info: %s (kind: %s)\n", subredditInfo.Name, subredditInfo.Kind)
+		fmt.Printf("\nSubreddit: r/%s\n", subredditInfo.Subreddit.DisplayName)
+		fmt.Printf("Subscribers: %d\n", subredditInfo.Subreddit.Subscribers)
+		fmt.Printf("Description: %.100s...\n", subredditInfo.Subreddit.PublicDescription)
+	}
+
+	// Get comments for a post (if we have posts)
+	if len(hotPosts.Posts) > 0 {
+		firstPost := hotPosts.Posts[0]
+		// Use post ID directly
+		postID := firstPost.ID
+		comments, err := client.GetComments(ctx, "golang", postID, &graw.ListingOptions{Limit: 5})
+		if err != nil {
+			log.Printf("Failed to get comments: %v", err)
+		} else {
+			fmt.Printf("\nComments for post: %s\n", comments.Post.Data.Title)
+			for i, comment := range comments.Comments {
+				if i >= 3 { // Show only first 3 comments
+					break
+				}
+				fmt.Printf("  - %s: %.100s...\n", comment.Data.Author, comment.Data.Body)
+			}
+			if len(comments.MoreIDs) > 0 {
+				fmt.Printf("  (%d more comments available)\n", len(comments.MoreIDs))
+			}
+		}
 	}
 }

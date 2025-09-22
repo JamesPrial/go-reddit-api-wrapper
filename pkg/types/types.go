@@ -229,3 +229,17 @@ type MoreData struct {
 	ID       string   `json:"id"`
 	Name     string   `json:"name"`
 }
+
+// Post represents a Reddit post with its metadata
+type Post struct {
+	ID   string    `json:"id"`   // Post ID (without prefix)
+	Name string    `json:"name"` // Full name (e.g., "t3_abc123")
+	Data *LinkData `json:"data"`
+}
+
+// Comment represents a Reddit comment with its metadata
+type Comment struct {
+	ID   string       `json:"id"`   // Comment ID (without prefix)
+	Name string       `json:"name"` // Full name (e.g., "t1_abc123")
+	Data *CommentData `json:"data"`
+}
