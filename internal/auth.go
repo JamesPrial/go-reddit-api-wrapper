@@ -9,12 +9,19 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
 const (
 	defaultTokenEndpointPath = "api/v1/access_token"
 )
+
+// tokenCache holds cached token data immutably
+type tokenCache struct {
+	token  string
+	expiry time.Time
+}
 
 // Authenticator handles retrieving an access token from the Reddit API.
 type Authenticator struct {
@@ -26,6 +33,9 @@ type Authenticator struct {
 	tokenURL     *url.URL
 	formData     *url.Values
 	logger       *slog.Logger
+
+	// Token cache using atomic pointer for lock-free access
+	cachedToken atomic.Pointer[tokenCache]
 }
 
 // NewAuthenticator creates a new authenticator.
@@ -81,6 +91,18 @@ type tokenResponse struct {
 
 // GetToken performs the password grant flow to get an access token.
 func (a *Authenticator) GetToken(ctx context.Context) (string, error) {
+	// Check cache first - lock-free read
+	if cached := a.cachedToken.Load(); cached != nil {
+		if time.Now().Before(cached.expiry) {
+			if a.logger != nil {
+				a.logger.LogAttrs(ctx, slog.LevelDebug, "using cached reddit token",
+					slog.Time("expires_at", cached.expiry))
+			}
+			return cached.token, nil
+		}
+	}
+
+	// Cache miss or expired, fetch new token
 	data := a.formData.Encode()
 	start := time.Now()
 
@@ -142,6 +164,14 @@ func (a *Authenticator) GetToken(ctx context.Context) (string, error) {
 			Err:        emptyErr,
 		}
 	}
+
+	// Cache the token with expiry - atomic store
+	// Use 90% of the expiry time to ensure we refresh before it actually expires
+	expiryDuration := time.Duration(float64(tokenResp.ExpiresIn) * 0.9 * float64(time.Second))
+	a.cachedToken.Store(&tokenCache{
+		token:  tokenResp.AccessToken,
+		expiry: time.Now().Add(expiryDuration),
+	})
 
 	a.logAuthSuccess(ctx, duration, tokenResp)
 

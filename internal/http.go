@@ -166,13 +166,18 @@ func (c *Client) DoRaw(req *http.Request) ([]byte, error) {
 	ctx := req.Context()
 	start := time.Now()
 
-	// Get token and set auth header
-	token, err := c.tokenProvider.GetToken(ctx)
-	if err != nil {
-		return nil, &ClientError{OriginalErr: fmt.Errorf("failed to get auth token: %w", err)}
+	// Only set auth headers if not already present
+	// (NewRequest already sets them, so this handles direct DoRaw calls)
+	if req.Header.Get("Authorization") == "" {
+		token, err := c.tokenProvider.GetToken(ctx)
+		if err != nil {
+			return nil, &ClientError{OriginalErr: fmt.Errorf("failed to get auth token: %w", err)}
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("User-Agent", c.UserAgent)
+	if req.Header.Get("User-Agent") == "" {
+		req.Header.Set("User-Agent", c.UserAgent)
+	}
 
 	if err := c.waitForRateLimit(ctx); err != nil {
 		c.logWaitFailure(ctx, req, err)
