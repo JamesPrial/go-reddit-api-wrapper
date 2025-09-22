@@ -61,7 +61,7 @@ type Client struct {
 	client HTTPClient
 	auth   TokenProvider
 	config *Config
-	parser Parser
+	parser *internal.Parser
 }
 
 // NewClient creates a new Reddit client with the provided configuration.
@@ -150,7 +150,7 @@ func (c *Client) IsConnected() bool {
 
 // Me returns information about the authenticated user.
 // This is useful for testing authentication and getting user details.
-func (c *Client) Me(ctx context.Context) (*UserResponse, error) {
+func (c *Client) Me(ctx context.Context) (*types.AccountData, error) {
 	if !c.IsConnected() {
 		return nil, &ClientError{Err: "client not connected, call Connect() first"}
 	}
@@ -177,11 +177,11 @@ func (c *Client) Me(ctx context.Context) (*UserResponse, error) {
 		return nil, &ClientError{Err: "unexpected response type"}
 	}
 
-	return &UserResponse{User: account}, nil
+	return account, nil
 }
 
 // GetSubreddit retrieves information about a specific subreddit.
-func (c *Client) GetSubreddit(ctx context.Context, name string) (*SubredditResponse, error) {
+func (c *Client) GetSubreddit(ctx context.Context, name string) (*types.SubredditData, error) {
 	if !c.IsConnected() {
 		return nil, &ClientError{Err: "client not connected, call Connect() first"}
 	}
@@ -209,7 +209,7 @@ func (c *Client) GetSubreddit(ctx context.Context, name string) (*SubredditRespo
 		return nil, &ClientError{Err: "unexpected response type"}
 	}
 
-	return &SubredditResponse{Subreddit: subreddit}, nil
+	return subreddit, nil
 }
 
 // ListingOptions provides options for listing operations.

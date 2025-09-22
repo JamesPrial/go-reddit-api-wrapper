@@ -8,6 +8,7 @@ import (
 	"os"
 
 	graw "github.com/jamesprial/go-reddit-api-wrapper"
+	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 )
 
 func main() {
@@ -54,7 +55,7 @@ func main() {
 		if err != nil {
 			log.Printf("Failed to get user info: %v", err)
 		} else {
-			fmt.Printf("Authenticated as user: %s\n", userInfo.User.Name)
+			fmt.Printf("Authenticated as user: %s\n", userInfo.Name)
 		}
 	}
 
@@ -78,9 +79,9 @@ func main() {
 	if err != nil {
 		log.Printf("Failed to get subreddit info: %v", err)
 	} else {
-		fmt.Printf("\nSubreddit: r/%s\n", subredditInfo.Subreddit.DisplayName)
-		fmt.Printf("Subscribers: %d\n", subredditInfo.Subreddit.Subscribers)
-		fmt.Printf("Description: %.100s...\n", subredditInfo.Subreddit.PublicDescription)
+		fmt.Printf("\nSubreddit: r/%s\n", subredditInfo.DisplayName)
+		fmt.Printf("Subscribers: %d\n", subredditInfo.Subscribers)
+		fmt.Printf("Description: %.100s...\n", subredditInfo.PublicDescription)
 	}
 
 	// Get comments for a post (if we have posts)
@@ -109,7 +110,7 @@ func main() {
 
 		// 1. Demonstrate PostIterator for pagination
 		fmt.Println("\n1. Using PostIterator to paginate through posts:")
-		iterator := client.NewHotIterator(ctx, "golang").WithLimit(10)
+		iterator := client.NewHotIterator(ctx, "golang", 10)
 		postCount := 0
 		for iterator.HasNext() && postCount < 15 {
 			post, err := iterator.Next()
@@ -163,7 +164,9 @@ func main() {
 		fmt.Printf("   Total comments in tree: %d\n", totalComments)
 
 		// Find highly scored comments
-		highScored := tree.GetScoreRange(10, 99999)
+		highScored := tree.Filter(func(c *types.Comment) bool {
+			return c.Data != nil && c.Data.Score >= 10
+		})
 		fmt.Printf("   Comments with score >= 10: %d\n", len(highScored))
 
 		// Get all comments by a specific author (if any)
@@ -174,7 +177,9 @@ func main() {
 		}
 
 		// Find gilded comments
-		gilded := tree.GetGilded()
+		gilded := tree.Filter(func(c *types.Comment) bool {
+			return c.Data != nil && c.Data.Gilded > 0
+		})
 		fmt.Printf("   Gilded comments: %d\n", len(gilded))
 
 		// Get tree depth
@@ -183,12 +188,7 @@ func main() {
 
 		// 4. Demonstrate CommentIterator for traversal
 		fmt.Println("\n4. Using CommentIterator for traversal:")
-		commentIter := graw.NewCommentIterator(comments.Comments, &graw.TraversalOptions{
-			MaxDepth:      3,
-			MinScore:      0,
-			IterativeMode: true,
-			Order:         graw.DepthFirst,
-		})
+		commentIter := graw.NewCommentIterator(comments.Comments, true) // true for depth-first
 
 		traversedCount := 0
 		for commentIter.HasNext() && traversedCount < 10 {
@@ -228,24 +228,28 @@ func main() {
 
 		// 6. Demonstrate collecting multiple pages of posts
 		fmt.Println("\n6. Collecting multiple pages of posts:")
-		collector := client.NewNewIterator(ctx, "golang").WithLimit(25)
-		allNewPosts, err := collector.Collect(50) // Collect up to 50 posts
-		if err != nil {
-			log.Printf("Failed to collect posts: %v", err)
-		} else {
-			fmt.Printf("   Collected %d new posts from r/golang\n", len(allNewPosts))
+		collector := client.NewNewIterator(ctx, "golang", 25)
+		var allNewPosts []*types.Post
+		for collector.HasNext() && len(allNewPosts) < 50 {
+			post, err := collector.Next()
+			if err != nil {
+				log.Printf("Failed to collect posts: %v", err)
+				break
+			}
+			allNewPosts = append(allNewPosts, post)
+		}
+		fmt.Printf("   Collected %d new posts from r/golang\n", len(allNewPosts))
 
-			// Show score distribution
-			var totalScore int
-			for _, post := range allNewPosts {
-				if post.Data != nil {
-					totalScore += post.Data.Score
-				}
+		// Show score distribution
+		var totalScore int
+		for _, post := range allNewPosts {
+			if post.Data != nil {
+				totalScore += post.Data.Score
 			}
-			if len(allNewPosts) > 0 {
-				avgScore := totalScore / len(allNewPosts)
-				fmt.Printf("   Average score: %d\n", avgScore)
-			}
+		}
+		if len(allNewPosts) > 0 {
+			avgScore := totalScore / len(allNewPosts)
+			fmt.Printf("   Average score: %d\n", avgScore)
 		}
 	}
 }

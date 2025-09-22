@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/jamesprial/go-reddit-api-wrapper/internal"
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 )
 
@@ -129,13 +130,17 @@ func TestCommentTree_NilHandling(t *testing.T) {
 			_ = tree.GetTopLevel()
 			_ = tree.GetByAuthor("user1")
 			_ = tree.GetByID("1")
-			_ = tree.GetGilded()
-			_ = tree.GetScoreRange(0, 100)
+			_ = tree.Filter(func(c *types.Comment) bool {
+				return c != nil && c.Data != nil && c.Data.Gilded > 0
+			})
+			_ = tree.Filter(func(c *types.Comment) bool {
+				return c != nil && c.Data != nil && c.Data.Score >= 0 && c.Data.Score <= 100
+			})
 			_ = tree.Find(func(c *types.Comment) bool { return true })
 			_ = tree.Filter(func(c *types.Comment) bool { return true })
 
 			tree.Walk(func(c *types.Comment) {})
-			_ = tree.Map(func(c *types.Comment) interface{} { return c })
+			// Map is no longer part of the interface
 		})
 	}
 }
@@ -226,7 +231,9 @@ func TestCommentTree_GetGilded(t *testing.T) {
 	comments[0].Data.Gilded = 2
 
 	tree := NewCommentTree(comments)
-	gilded := tree.GetGilded()
+	gilded := tree.Filter(func(c *types.Comment) bool {
+		return c != nil && c.Data != nil && c.Data.Gilded > 0
+	})
 
 	if len(gilded) != 1 {
 		t.Errorf("Expected 1 gilded comment, got %d", len(gilded))
@@ -289,7 +296,7 @@ func TestExtractReplies_EdgeCases(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			replies := extractReplies(tt.comment)
+			replies := internal.ExtractReplies(tt.comment)
 			if len(replies) != tt.wantLen {
 				t.Errorf("Expected %d replies, got %d", tt.wantLen, len(replies))
 			}
