@@ -399,12 +399,12 @@ func TestClient_WaitForForcedDelayBlocksAndClears(t *testing.T) {
 	c.forceWaitUntil.Store(future.UnixNano())
 
 	start := time.Now()
-	if err := c.waitForForcedDelay(context.Background()); err != nil {
-		t.Fatalf("waitForForcedDelay returned error: %v", err)
+	if err := c.waitForRateLimit(context.Background()); err != nil {
+		t.Fatalf("waitForRateLimit returned error: %v", err)
 	}
 	elapsed := time.Since(start)
 	if elapsed < 25*time.Millisecond {
-		t.Fatalf("expected waitForForcedDelay to block, elapsed %v", elapsed)
+		t.Fatalf("expected waitForRateLimit to block, elapsed %v", elapsed)
 	}
 
 	cleared := c.forceWaitUntil.Load() == 0
@@ -420,7 +420,7 @@ func TestClient_WaitForForcedDelayContextCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	err := c.waitForForcedDelay(ctx)
+	err := c.waitForRateLimit(ctx)
 	if err == nil {
 		t.Fatal("expected context cancellation error")
 	}
@@ -516,6 +516,43 @@ func TestClient_ApplyRateHeadersUsesRatelimitRemaining(t *testing.T) {
 	deferUntilNanos := c.forceWaitUntil.Load()
 	if deferUntilNanos == 0 {
 		t.Fatal("expected ratelimit headers to schedule delay")
+	}
+}
+
+func TestClient_ProactiveRateLimiting(t *testing.T) {
+	tests := []struct {
+		name         string
+		remaining    string
+		resetSeconds string
+		expectDelay  bool
+	}{
+		{"below threshold - 0 remaining", "0", "10", true},
+		{"below threshold - 1 remaining", "1", "10", true},
+		{"below threshold - 4 remaining", "4", "10", true},
+		{"at threshold - 5 remaining", "5", "10", false},
+		{"above threshold - 10 remaining", "10", "10", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := &Client{}
+			resp := &http.Response{Header: make(http.Header)}
+			resp.Header.Set("X-Ratelimit-Remaining", tt.remaining)
+			resp.Header.Set("X-Ratelimit-Reset", tt.resetSeconds)
+
+			c.applyRateHeaders(resp)
+			deferUntilNanos := c.forceWaitUntil.Load()
+
+			if tt.expectDelay {
+				if deferUntilNanos == 0 {
+					t.Errorf("expected delay for remaining=%s, but no delay was set", tt.remaining)
+				}
+			} else {
+				if deferUntilNanos != 0 {
+					t.Errorf("expected no delay for remaining=%s, but delay was set", tt.remaining)
+				}
+			}
+		})
 	}
 }
 

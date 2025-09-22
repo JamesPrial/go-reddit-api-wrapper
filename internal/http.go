@@ -39,11 +39,12 @@ type RateLimitConfig struct {
 }
 
 const (
-	DefaultRequestsPerMinute = 60
-	DefaultRateLimitBurst    = 10
-	SecondsPerMinute         = 60.0
-	ParseFloatBitSize        = 64
-	defaultLogBodyBytes      = 4 * 1024
+	DefaultRequestsPerMinute    = 60
+	DefaultRateLimitBurst       = 10
+	SecondsPerMinute            = 60.0
+	ParseFloatBitSize           = 64
+	defaultLogBodyBytes         = 4 * 1024
+	ProactiveRateLimitThreshold = 5 // Start throttling when remaining requests drop below this
 )
 
 // NewClient returns a new Reddit API client.
@@ -172,30 +173,19 @@ func buildLimiter(cfg RateLimitConfig) *rate.Limiter {
 }
 
 func (c *Client) waitForRateLimit(ctx context.Context) error {
-	if err := c.waitForForcedDelay(ctx); err != nil {
-		return err
-	}
-
-	if c.limiter == nil {
-		return nil
-	}
-
-	return c.limiter.Wait(ctx)
-}
-
-func (c *Client) waitForForcedDelay(ctx context.Context) error {
+	// Handle forced delay from rate limit headers
 	for {
 		waitUntilNanos := c.forceWaitUntil.Load()
 
 		if waitUntilNanos == 0 {
-			return nil
+			break
 		}
 
 		waitUntil := time.Unix(0, waitUntilNanos)
 		now := time.Now()
 		if !now.Before(waitUntil) {
 			c.clearForcedDelay(waitUntilNanos)
-			return nil
+			break
 		}
 
 		timer := time.NewTimer(waitUntil.Sub(now))
@@ -207,6 +197,13 @@ func (c *Client) waitForForcedDelay(ctx context.Context) error {
 			c.clearForcedDelay(waitUntilNanos)
 		}
 	}
+
+	// Apply local rate limiter if configured
+	if c.limiter == nil {
+		return nil
+	}
+
+	return c.limiter.Wait(ctx)
 }
 
 func (c *Client) clearForcedDelay(previous int64) {
@@ -239,8 +236,17 @@ func (c *Client) applyRateHeaders(resp *http.Response) {
 		return
 	}
 
-	if remaining <= 1 {
-		c.deferRequests(ctx, time.Duration(resetSeconds*float64(time.Second)), "ratelimit_remaining")
+	// Proactive throttling: start slowing down when approaching the rate limit
+	if remaining < ProactiveRateLimitThreshold {
+		// Calculate delay to spread remaining requests over the reset period
+		// Add 10% buffer to be conservative
+		if remaining > 0 {
+			delayPerRequest := (resetSeconds * 1.1) / remaining
+			c.deferRequests(ctx, time.Duration(delayPerRequest*float64(time.Second)), "proactive_ratelimit")
+		} else {
+			// No requests remaining, must wait full reset period
+			c.deferRequests(ctx, time.Duration(resetSeconds*float64(time.Second)), "ratelimit_exhausted")
+		}
 	}
 }
 
