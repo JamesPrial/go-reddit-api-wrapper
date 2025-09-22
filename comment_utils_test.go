@@ -35,7 +35,28 @@ func createCommentWithReplies(id, author string, replies ...*types.Comment) *typ
 			if reply == nil {
 				continue
 			}
-			replyData, _ := json.Marshal(reply.Data)
+			// Create a simplified comment data that will marshal/unmarshal correctly
+			// We need to avoid the Edited field marshaling issue
+			commentDataMap := map[string]interface{}{
+				"author": reply.Data.Author,
+				"body":   reply.Data.Body,
+				"score":  reply.Data.Score,
+				"ups":    reply.Data.Ups,
+				"downs":  reply.Data.Downs,
+				"edited": false, // Use a simple boolean
+				"gilded": reply.Data.Gilded,
+			}
+
+			// Handle nested replies if they exist
+			if reply.Data.Replies.Thing != nil {
+				// The reply has its own replies, include them
+				commentDataMap["replies"] = reply.Data.Replies.Thing
+			} else {
+				commentDataMap["replies"] = "" // Empty string for no replies
+			}
+
+			replyData, _ := json.Marshal(commentDataMap)
+
 			children = append(children, &types.Thing{
 				ID:   reply.ID,
 				Name: reply.Name,

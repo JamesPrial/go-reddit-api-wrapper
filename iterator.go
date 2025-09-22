@@ -286,6 +286,7 @@ func extractReplies(comment *types.Comment) []*types.Comment {
 
 	// The replies is a Thing containing a Listing
 	repliesThing := comment.Data.Replies.Thing
+	// Reddit uses "Listing" with capital L
 	if repliesThing.Kind != "Listing" {
 		return nil
 	}
