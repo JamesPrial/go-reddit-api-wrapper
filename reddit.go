@@ -362,9 +362,16 @@ func (c *Client) GetComments(ctx context.Context, subreddit, postID string, opts
 	}
 
 	// Reddit returns an array of listings for comments endpoint
-	var result []*types.Thing
-	if err := c.getJSON(ctx, req, &result); err != nil {
+	// We can't use c.client.Do because it expects a single Thing, not an array
+	// So we need to make the request manually but with proper auth
+	resp, err := c.getAuthenticatedJSON(ctx, req)
+	if err != nil {
 		return nil, &ClientError{Err: "failed to get comments: " + err.Error()}
+	}
+
+	var result []*types.Thing
+	if err := json.Unmarshal(resp, &result); err != nil {
+		return nil, &ClientError{Err: "failed to parse comments response: " + err.Error()}
 	}
 
 	// Parse the post and comments
@@ -519,6 +526,31 @@ func (c *Client) getJSON(ctx context.Context, req *http.Request, v interface{}) 
 	}
 
 	return json.NewDecoder(resp.Body).Decode(v)
+}
+
+// getAuthenticatedJSON makes an authenticated request and returns the raw JSON response
+func (c *Client) getAuthenticatedJSON(ctx context.Context, req *http.Request) ([]byte, error) {
+	// Add authorization header
+	token, err := c.auth.GetToken(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get auth token: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("User-Agent", c.config.UserAgent)
+
+	// Make the request
+	resp, err := c.config.HTTPClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(body))
+	}
+
+	return io.ReadAll(resp.Body)
 }
 
 // ClientError represents an error from the Reddit client.
