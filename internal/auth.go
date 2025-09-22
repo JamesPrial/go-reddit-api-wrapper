@@ -14,7 +14,6 @@ import (
 
 const (
 	defaultTokenEndpointPath = "api/v1/access_token"
-	authLogBodyBytes         = 2 * 1024
 )
 
 // Authenticator handles retrieving an access token from the Reddit API.
@@ -175,31 +174,20 @@ func (a *Authenticator) logAuthHTTPResult(ctx context.Context, status int, durat
 	attrs := []slog.Attr{
 		slog.Int("status", status),
 		slog.Duration("duration", duration),
+		slog.Int("response_bytes", len(body)),
 	}
 	if a.tokenURL != nil {
 		attrs = append(attrs, slog.String("url", a.tokenURL.String()))
 	}
 
 	level := slog.LevelInfo
-	msg := "reddit auth request completed"
+	msg := "reddit auth token requested"
 	if status != http.StatusOK {
 		level = slog.LevelWarn
-		msg = "reddit auth request failed"
+		msg = "reddit auth token request failed"
 	}
 
 	a.logger.LogAttrs(ctx, level, msg, attrs...)
-
-	if len(body) > 0 && a.logger.Enabled(ctx, slog.LevelDebug) {
-		snippet, truncated := truncateAuthBody(body)
-		bodyAttrs := []slog.Attr{
-			slog.Int("bytes", len(body)),
-			slog.String("body", snippet),
-		}
-		if truncated {
-			bodyAttrs = append(bodyAttrs, slog.Bool("truncated", true))
-		}
-		a.logger.LogAttrs(ctx, slog.LevelDebug, "reddit auth response body", bodyAttrs...)
-	}
 }
 
 func (a *Authenticator) logAuthError(ctx context.Context, message string, err error) {
@@ -234,17 +222,6 @@ func (a *Authenticator) logAuthSuccess(ctx context.Context, duration time.Durati
 	}
 
 	a.logger.LogAttrs(ctx, slog.LevelInfo, "reddit token acquired", attrs...)
-}
-
-func truncateAuthBody(body []byte) (string, bool) {
-	limit := authLogBodyBytes
-	if len(body) <= limit {
-		return string(body), false
-	}
-	if limit <= 0 {
-		return string(body), false
-	}
-	return string(body[:limit]), true
 }
 
 // AuthError represents an error that occurred during authentication.
