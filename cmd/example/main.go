@@ -92,6 +92,8 @@ func main() {
 		comments, err = client.GetComments(ctx, "golang", postID, &graw.ListingOptions{Limit: 5})
 		if err != nil {
 			log.Printf("Failed to get comments: %v", err)
+		} else if comments == nil || comments.Post == nil {
+			log.Printf("No post data returned with comments")
 		} else {
 			fmt.Printf("\nComments for post: %s\n", comments.Post.Data.Title)
 			for i, comment := range comments.Comments {
