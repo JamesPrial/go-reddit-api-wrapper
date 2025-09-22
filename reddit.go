@@ -54,6 +54,7 @@ type TokenProvider interface {
 type HTTPClient interface {
 	NewRequest(ctx context.Context, method, path string, body io.Reader) (*http.Request, error)
 	Do(req *http.Request, v *types.Thing) (*http.Response, error)
+	DoRaw(req *http.Request) ([]byte, error)
 }
 
 // Client is the main Reddit API client.
@@ -121,16 +122,16 @@ func NewClient(config *Config) (*Client, error) {
 // Connect authenticates with Reddit and initializes the internal HTTP client.
 // This must be called before making any API requests.
 func (c *Client) Connect(ctx context.Context) error {
-	// Get access token
-	token, err := c.auth.GetToken(ctx)
+	// Validate that we can get a token before creating the client
+	_, err := c.auth.GetToken(ctx)
 	if err != nil {
 		return &ClientError{Err: "failed to authenticate: " + err.Error()}
 	}
 
-	// Create internal HTTP client
+	// Create internal HTTP client with token provider
 	client, err := internal.NewClient(
 		c.config.HTTPClient,
-		token,
+		c.auth,
 		c.config.BaseURL,
 		c.config.UserAgent,
 		c.config.Logger,
@@ -363,10 +364,32 @@ func (c *Client) GetComments(ctx context.Context, subreddit, postID string, opts
 
 	// Reddit returns an array of listings for comments endpoint
 	// We can't use c.client.Do because it expects a single Thing, not an array
-	// So we need to make the request manually but with proper auth
-	resp, err := c.getAuthenticatedJSON(ctx, req)
+	// So we need to use DoRaw to get the raw JSON response
+	resp, err := c.client.DoRaw(req)
 	if err != nil {
 		return nil, &ClientError{Err: "failed to get comments: " + err.Error()}
+	}
+
+	// Check if response is an error object instead of expected array
+	// Reddit sometimes returns 200 OK with error details in JSON
+	if len(resp) > 0 && resp[0] == '{' {
+		// Log the unexpected object response for debugging
+		if c.config.Logger != nil {
+			c.config.Logger.Debug("GetComments received object instead of array",
+				"response_preview", string(resp[:min(200, len(resp))]))
+		}
+
+		var errObj struct {
+			Error   string `json:"error"`
+			Message string `json:"message"`
+			Reason  string `json:"reason"`
+		}
+		if err := json.Unmarshal(resp, &errObj); err == nil && errObj.Error != "" {
+			return nil, &ClientError{Err: fmt.Sprintf("reddit API error: %s - %s", errObj.Error, errObj.Message)}
+		}
+
+		// If it's an object but not a recognized error format, return a generic error
+		return nil, &ClientError{Err: fmt.Sprintf("unexpected response format: expected array but got object: %s", string(resp[:min(200, len(resp))]))}
 	}
 
 	var result []*types.Thing
@@ -490,7 +513,7 @@ func (c *Client) GetMoreComments(ctx context.Context, linkID string, commentIDs 
 	}
 
 	// Make authenticated request
-	respBody, err := c.getAuthenticatedJSON(ctx, req)
+	respBody, err := c.client.DoRaw(req)
 	if err != nil {
 		return nil, &ClientError{Err: "failed to get more comments: " + err.Error()}
 	}
@@ -519,31 +542,6 @@ func (c *Client) GetMoreComments(ctx context.Context, linkID string, commentIDs 
 	return comments, nil
 }
 
-// getAuthenticatedJSON makes an authenticated request and returns the raw JSON response
-func (c *Client) getAuthenticatedJSON(ctx context.Context, req *http.Request) ([]byte, error) {
-	// Add authorization header
-	token, err := c.auth.GetToken(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get auth token: %w", err)
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("User-Agent", c.config.UserAgent)
-
-	// Make the request
-	resp, err := c.config.HTTPClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(body))
-	}
-
-	return io.ReadAll(resp.Body)
-}
-
 // ClientError represents an error from the Reddit client.
 type ClientError struct {
 	Err string
@@ -552,4 +550,12 @@ type ClientError struct {
 // Error implements the error interface.
 func (e *ClientError) Error() string {
 	return "reddit client error: " + e.Err
+}
+
+// min returns the minimum of two integers
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

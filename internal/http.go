@@ -17,12 +17,17 @@ import (
 	"golang.org/x/time/rate"
 )
 
+// TokenProvider defines the interface for retrieving an access token.
+type TokenProvider interface {
+	GetToken(ctx context.Context) (string, error)
+}
+
 // Client manages communication with the Reddit API.
 type Client struct {
 	client          *http.Client
 	BaseURL         *url.URL
 	UserAgent       string
-	token           string
+	tokenProvider   TokenProvider
 	logger          *slog.Logger
 	maxLogBodyBytes int
 
@@ -49,7 +54,7 @@ const (
 
 // NewClient returns a new Reddit API client.
 // If a nil httpClient is provided, http.DefaultClient will be used.
-func NewClient(httpClient *http.Client, authToken string, baseURL string, userAgent string, logger *slog.Logger) (*Client, error) {
+func NewClient(httpClient *http.Client, tokenProvider TokenProvider, baseURL string, userAgent string, logger *slog.Logger) (*Client, error) {
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}
@@ -68,7 +73,7 @@ func NewClient(httpClient *http.Client, authToken string, baseURL string, userAg
 		client:          httpClient,
 		BaseURL:         parsedURL,
 		UserAgent:       userAgent,
-		token:           authToken,
+		tokenProvider:   tokenProvider,
 		limiter:         limiter,
 		logger:          logger,
 		maxLogBodyBytes: defaultLogBodyBytes,
@@ -100,7 +105,13 @@ func (c *Client) NewRequest(ctx context.Context, method, path string, body io.Re
 		return nil, &ClientError{OriginalErr: err}
 	}
 
-	req.Header.Set("Authorization", "Bearer "+c.token)
+	// Get token and set auth header
+	token, err := c.tokenProvider.GetToken(ctx)
+	if err != nil {
+		return nil, &ClientError{OriginalErr: fmt.Errorf("failed to get auth token: %w", err)}
+	}
+
+	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("User-Agent", c.UserAgent)
 
 	return req, nil
@@ -147,6 +158,49 @@ func (c *Client) Do(req *http.Request, v *types.Thing) (*http.Response, error) {
 	}
 
 	return resp, nil
+}
+
+// DoRaw sends an API request and returns the raw response body as bytes.
+// It automatically adds authentication headers to the request.
+func (c *Client) DoRaw(req *http.Request) ([]byte, error) {
+	ctx := req.Context()
+	start := time.Now()
+
+	// Get token and set auth header
+	token, err := c.tokenProvider.GetToken(ctx)
+	if err != nil {
+		return nil, &ClientError{OriginalErr: fmt.Errorf("failed to get auth token: %w", err)}
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("User-Agent", c.UserAgent)
+
+	if err := c.waitForRateLimit(ctx); err != nil {
+		c.logWaitFailure(ctx, req, err)
+		return nil, &ClientError{OriginalErr: err}
+	}
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		c.logTransportError(ctx, req, time.Since(start), err)
+		return nil, &ClientError{OriginalErr: err}
+	}
+	defer resp.Body.Close()
+
+	c.applyRateHeaders(resp)
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		c.logBodyReadError(ctx, req, resp, time.Since(start), err)
+		return nil, &ClientError{OriginalErr: err}
+	}
+
+	c.logHTTPResult(ctx, req, resp, bodyBytes, time.Since(start))
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, &APIError{Response: resp, Message: fmt.Sprintf("request failed with status %d: %s", resp.StatusCode, string(bodyBytes))}
+	}
+
+	return bodyBytes, nil
 }
 
 func buildLimiter(cfg RateLimitConfig) *rate.Limiter {

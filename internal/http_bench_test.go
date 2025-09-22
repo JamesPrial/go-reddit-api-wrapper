@@ -24,7 +24,8 @@ func BenchmarkClient_Do_WithLogging(b *testing.B) {
 
 	// Create client WITH logging
 	logger := slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelInfo}))
-	client, _ := NewClient(http.DefaultClient, "test-token", server.URL, "bench/1.0", logger)
+	tokenProvider := &mockTokenProvider{token: "test-token"}
+	client, _ := NewClient(http.DefaultClient, tokenProvider, server.URL, "bench/1.0", logger)
 
 	ctx := context.Background()
 
@@ -50,7 +51,8 @@ func BenchmarkClient_Do_WithLoggingDebug(b *testing.B) {
 
 	// Create client with DEBUG logging (includes body logging)
 	logger := slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	client, _ := NewClient(http.DefaultClient, "test-token", server.URL, "bench/1.0", logger)
+	tokenProvider := &mockTokenProvider{token: "test-token"}
+	client, _ := NewClient(http.DefaultClient, tokenProvider, server.URL, "bench/1.0", logger)
 	client.SetLogBodyLimit(8 * 1024)
 
 	ctx := context.Background()
@@ -74,7 +76,8 @@ func BenchmarkClient_Do_WithoutLogging(b *testing.B) {
 	defer server.Close()
 
 	// Create client WITHOUT logging (nil logger)
-	client, _ := NewClient(http.DefaultClient, "test-token", server.URL, "bench/1.0", nil)
+	tokenProvider := &mockTokenProvider{token: "test-token"}
+	client, _ := NewClient(http.DefaultClient, tokenProvider, server.URL, "bench/1.0", nil)
 
 	ctx := context.Background()
 
