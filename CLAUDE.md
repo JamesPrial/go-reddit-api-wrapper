@@ -88,7 +88,7 @@ go mod tidy
 4. Automatic token refresh on expiry
 
 ### Rate Limiting Strategy
-- Automatic: 60 requests/minute with burst of 10 (Reddit's default limits)
+- Automatic: 1000 requests/minute with burst of 10 (Reddit's default limits)
 - Respects Reddit's X-Ratelimit-Reset and Retry-After headers
 - Proactive throttling when approaching limits
 - Handled internally by the library (not user-configurable)

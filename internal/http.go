@@ -39,7 +39,7 @@ type RateLimitConfig struct {
 }
 
 const (
-	DefaultRequestsPerMinute    = 60
+	DefaultRequestsPerMinute    = 1000
 	DefaultRateLimitBurst       = 10
 	SecondsPerMinute            = 60.0
 	ParseFloatBitSize           = 64
