@@ -227,6 +227,11 @@ func (it *CommentIterator) Next() (*types.Comment, error) {
 		it.stack = it.stack[:len(it.stack)-1]
 	}
 
+	// Skip nil comments
+	if comment == nil {
+		return it.Next()
+	}
+
 	// Skip if already visited
 	if it.visited[comment.ID] {
 		return it.Next()
@@ -264,6 +269,9 @@ func (it *CommentIterator) Next() (*types.Comment, error) {
 
 // getCommentDepth calculates the depth of a comment in the tree.
 func getCommentDepth(comment *types.Comment) int {
+	if comment == nil {
+		return 0
+	}
 	depth := 0
 	// Count the number of parent links (simplified - would need parent tracking)
 	// In a real implementation, we'd track depth during traversal
@@ -272,7 +280,7 @@ func getCommentDepth(comment *types.Comment) int {
 
 // extractReplies extracts reply comments from a comment's replies field.
 func extractReplies(comment *types.Comment) []*types.Comment {
-	if comment.Data == nil || comment.Data.Replies.Thing == nil {
+	if comment == nil || comment.Data == nil || comment.Data.Replies.Thing == nil {
 		return nil
 	}
 

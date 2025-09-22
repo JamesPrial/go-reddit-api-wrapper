@@ -24,6 +24,9 @@ func (ct *CommentTree) Flatten() []*types.Comment {
 // flattenRecursive recursively flattens the comment tree.
 func (ct *CommentTree) flattenRecursive(comments []*types.Comment, result *[]*types.Comment) {
 	for _, comment := range comments {
+		if comment == nil {
+			continue
+		}
 		*result = append(*result, comment)
 		replies := extractReplies(comment)
 		if len(replies) > 0 {
@@ -42,6 +45,9 @@ func (ct *CommentTree) Filter(filterFunc func(*types.Comment) bool) []*types.Com
 // filterRecursive recursively filters the comment tree.
 func (ct *CommentTree) filterRecursive(comments []*types.Comment, result *[]*types.Comment, filterFunc func(*types.Comment) bool) {
 	for _, comment := range comments {
+		if comment == nil {
+			continue
+		}
 		if filterFunc(comment) {
 			*result = append(*result, comment)
 		}
@@ -60,6 +66,9 @@ func (ct *CommentTree) Find(condition func(*types.Comment) bool) *types.Comment 
 // findRecursive recursively searches for a comment matching the condition.
 func (ct *CommentTree) findRecursive(comments []*types.Comment, condition func(*types.Comment) bool) *types.Comment {
 	for _, comment := range comments {
+		if comment == nil {
+			continue
+		}
 		if condition(comment) {
 			return comment
 		}
@@ -115,6 +124,9 @@ func (ct *CommentTree) GetDepth() int {
 func (ct *CommentTree) getDepthRecursive(comments []*types.Comment, currentDepth int) int {
 	maxDepth := currentDepth
 	for _, comment := range comments {
+		if comment == nil {
+			continue
+		}
 		replies := extractReplies(comment)
 		if len(replies) > 0 {
 			depth := ct.getDepthRecursive(replies, currentDepth+1)
@@ -185,6 +197,9 @@ func (ct *CommentTree) Walk(fn func(*types.Comment)) {
 // walkRecursive recursively walks the comment tree.
 func (ct *CommentTree) walkRecursive(comments []*types.Comment, fn func(*types.Comment)) {
 	for _, comment := range comments {
+		if comment == nil {
+			continue
+		}
 		fn(comment)
 		replies := extractReplies(comment)
 		if len(replies) > 0 {
