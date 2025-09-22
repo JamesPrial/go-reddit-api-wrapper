@@ -489,8 +489,14 @@ func (c *Client) GetMoreComments(ctx context.Context, linkID string, commentIDs 
 		} `json:"json"`
 	}
 
-	if err := c.getJSON(ctx, req, &response); err != nil {
+	// Make authenticated request
+	respBody, err := c.getAuthenticatedJSON(ctx, req)
+	if err != nil {
 		return nil, &ClientError{Err: "failed to get more comments: " + err.Error()}
+	}
+
+	if err := json.Unmarshal(respBody, &response); err != nil {
+		return nil, &ClientError{Err: "failed to parse more comments response: " + err.Error()}
 	}
 
 	// Check for API errors
@@ -511,21 +517,6 @@ func (c *Client) GetMoreComments(ctx context.Context, linkID string, commentIDs 
 	}
 
 	return comments, nil
-}
-
-// getJSON is a helper method to handle JSON responses that aren't Thing objects
-func (c *Client) getJSON(ctx context.Context, req *http.Request, v interface{}) error {
-	resp, err := c.config.HTTPClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("unexpected status: %d", resp.StatusCode)
-	}
-
-	return json.NewDecoder(resp.Body).Decode(v)
 }
 
 // getAuthenticatedJSON makes an authenticated request and returns the raw JSON response
