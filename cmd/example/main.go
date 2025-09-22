@@ -105,26 +105,39 @@ func main() {
 			}
 		}
 
-		// Demonstrate new pagination and tree traversal features
+		// Demonstrate pagination and tree traversal features
 		fmt.Println("\n=== PAGINATION & TREE TRAVERSAL DEMOS ===")
 
-		// 1. Demonstrate PostIterator for pagination
-		fmt.Println("\n1. Using PostIterator to paginate through posts:")
-		iterator := client.NewHotIterator(ctx, "golang", 10)
-		postCount := 0
-		for iterator.HasNext() && postCount < 15 {
-			post, err := iterator.Next()
+		// 1. Demonstrate simple pagination using After token
+		fmt.Println("\n1. Simple pagination through posts:")
+		after := ""
+		totalPosts := 0
+		for page := 1; page <= 3; page++ { // Get 3 pages
+			resp, err := client.GetHot(ctx, "golang", &graw.ListingOptions{
+				Limit: 5,
+				After: after,
+			})
 			if err != nil {
-				log.Printf("Iterator error: %v", err)
+				log.Printf("Failed to get page %d: %v", page, err)
 				break
 			}
-			postCount++
-			if post.Data != nil {
-				fmt.Printf("   %d. %s (score: %d)\n", postCount, post.Data.Title, post.Data.Score)
-			} else {
-				fmt.Printf("   %d. [Post data unavailable]\n", postCount)
+			fmt.Printf("   Page %d: %d posts\n", page, len(resp.Posts))
+			totalPosts += len(resp.Posts)
+
+			// Show first 2 titles from each page
+			for i, post := range resp.Posts {
+				if i < 2 && post.Data != nil {
+					fmt.Printf("     - %.60s... (score: %d)\n", post.Data.Title, post.Data.Score)
+				}
+			}
+
+			after = resp.After
+			if after == "" {
+				fmt.Println("   No more pages available")
+				break
 			}
 		}
+		fmt.Printf("   Total posts fetched: %d\n", totalPosts)
 
 		// 2. Demonstrate GetMoreComments for loading truncated comments
 		if len(comments.MoreIDs) > 0 {
@@ -186,26 +199,9 @@ func main() {
 		depth := tree.GetDepth()
 		fmt.Printf("   Max comment tree depth: %d\n", depth)
 
-		// 4. Demonstrate CommentIterator for traversal
-		fmt.Println("\n4. Using CommentIterator for traversal:")
-		commentIter := graw.NewCommentIterator(comments.Comments, true) // true for depth-first
-
-		traversedCount := 0
-		for commentIter.HasNext() && traversedCount < 10 {
-			comment, err := commentIter.Next()
-			if err != nil {
-				break
-			}
-			traversedCount++
-			if comment.Data != nil {
-				fmt.Printf("   [Depth-first #%d] %s (score: %d)\n",
-					traversedCount, comment.Data.Author, comment.Data.Score)
-			}
-		}
-
-		// 5. Demonstrate batch comment loading for multiple posts
+		// 4. Demonstrate batch comment loading for multiple posts
 		if len(hotPosts.Posts) >= 3 {
-			fmt.Println("\n5. Batch loading comments for multiple posts:")
+			fmt.Println("\n4. Batch loading comments for multiple posts:")
 
 			requests := []graw.CommentRequest{
 				{Subreddit: "golang", PostID: hotPosts.Posts[0].ID, Options: &graw.ListingOptions{Limit: 5}},
@@ -219,37 +215,11 @@ func main() {
 			} else {
 				for i, result := range batchResults {
 					if result != nil && result.Post != nil {
-						fmt.Printf("   Post %d: %s - %d comments loaded\n",
+						fmt.Printf("   Post %d: %.50s... - %d comments loaded\n",
 							i+1, result.Post.Data.Title, len(result.Comments))
 					}
 				}
 			}
-		}
-
-		// 6. Demonstrate collecting multiple pages of posts
-		fmt.Println("\n6. Collecting multiple pages of posts:")
-		collector := client.NewNewIterator(ctx, "golang", 25)
-		var allNewPosts []*types.Post
-		for collector.HasNext() && len(allNewPosts) < 50 {
-			post, err := collector.Next()
-			if err != nil {
-				log.Printf("Failed to collect posts: %v", err)
-				break
-			}
-			allNewPosts = append(allNewPosts, post)
-		}
-		fmt.Printf("   Collected %d new posts from r/golang\n", len(allNewPosts))
-
-		// Show score distribution
-		var totalScore int
-		for _, post := range allNewPosts {
-			if post.Data != nil {
-				totalScore += post.Data.Score
-			}
-		}
-		if len(allNewPosts) > 0 {
-			avgScore := totalScore / len(allNewPosts)
-			fmt.Printf("   Average score: %d\n", avgScore)
 		}
 	}
 }
