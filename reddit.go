@@ -590,11 +590,11 @@ func (c *Client) GetMoreComments(ctx context.Context, linkID string, commentIDs 
 	var comments []*types.Comment
 	for _, thing := range response.JSON.Data.Things {
 		if thing.Kind == "t1" {
-			var comment types.Comment
-			if err := json.Unmarshal(thing.Data, &comment); err != nil {
-				continue // Skip if we can't unmarshal
+			comment, err := c.parser.ParseComment(thing)
+			if err != nil {
+				continue // Skip if we can't parse
 			}
-			comments = append(comments, &comment)
+			comments = append(comments, comment)
 		}
 	}
 

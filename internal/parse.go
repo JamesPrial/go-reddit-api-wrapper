@@ -73,8 +73,8 @@ func (p *Parser) ParseLink(thing *types.Thing) (*types.LinkData, error) {
 	return &link, nil
 }
 
-// ParseComment extracts a CommentData from a Thing of kind "t1".
-func (p *Parser) ParseComment(thing *types.Thing) (*types.CommentData, error) {
+// ParseComment extracts a Comment from a Thing of kind "t1".
+func (p *Parser) ParseComment(thing *types.Thing) (*types.Comment, error) {
 	if thing == nil {
 		return nil, fmt.Errorf("thing is nil")
 	}
@@ -82,10 +82,44 @@ func (p *Parser) ParseComment(thing *types.Thing) (*types.CommentData, error) {
 		return nil, fmt.Errorf("expected t1 (Comment), got %s", thing.Kind)
 	}
 
-	var comment types.CommentData
+	var comment types.Comment
 	if err := json.Unmarshal(thing.Data, &comment); err != nil {
 		return nil, fmt.Errorf("failed to parse Comment data: %w", err)
 	}
+
+	// Extract ID and Name from the data if not already set
+	if comment.ID == "" || comment.Name == "" {
+		var dataFields struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		}
+		if err := json.Unmarshal(thing.Data, &dataFields); err == nil {
+			if comment.ID == "" && dataFields.ID != "" {
+				comment.ID = dataFields.ID
+			}
+			if comment.Name == "" && dataFields.Name != "" {
+				comment.Name = dataFields.Name
+			}
+		}
+	}
+
+	// Fallback to Thing-level fields if still missing
+	if comment.ID == "" && thing.ID != "" {
+		comment.ID = thing.ID
+	}
+	if comment.Name == "" && thing.Name != "" {
+		comment.Name = thing.Name
+	}
+
+	// Parse replies if present
+	if len(comment.RepliesData) > 0 && string(comment.RepliesData) != `""` {
+		var repliesThing types.Thing
+		if err := json.Unmarshal(comment.RepliesData, &repliesThing); err == nil {
+			replies, _, _ := p.ExtractComments(&repliesThing)
+			comment.Replies = replies
+		}
+	}
+
 	return &comment, nil
 }
 
@@ -200,21 +234,15 @@ func (p *Parser) ExtractComments(thing *types.Thing) ([]*types.Comment, []string
 
 	// Handle both single comments and listings
 	if thing.Kind == "t1" {
-		commentData, err := p.ParseComment(thing)
+		comment, err := p.ParseComment(thing)
 		if err != nil {
 			return nil, nil, err
 		}
-		comments = append(comments, &types.Comment{
-			ID:   thing.ID,
-			Name: thing.Name,
-			Data: commentData,
-		})
+		comments = append(comments, comment)
 
-		// Process replies recursively
-		if commentData.Replies.Thing != nil {
-			replies, moreReplies, _ := p.ExtractComments(commentData.Replies.Thing)
-			comments = append(comments, replies...)
-			moreIDs = append(moreIDs, moreReplies...)
+		// Replies are already parsed in ParseComment, just add them
+		if comment.Replies != nil {
+			comments = append(comments, comment.Replies...)
 		}
 		return comments, moreIDs, nil
 	}
@@ -232,38 +260,16 @@ func (p *Parser) ExtractComments(thing *types.Thing) ([]*types.Comment, []string
 	for _, child := range listingData.Children {
 		switch child.Kind {
 		case "t1":
-			commentData, err := p.ParseComment(child)
+			comment, err := p.ParseComment(child)
 			if err != nil {
 				continue
 			}
 
-			// Extract ID and name from the data JSON since Reddit includes them there
-			// for children in a listing, not at the Thing level
-			var dataFields struct {
-				ID   string `json:"id"`
-				Name string `json:"name"`
-			}
-			id, name := child.ID, child.Name
-			if err := json.Unmarshal(child.Data, &dataFields); err == nil {
-				if dataFields.ID != "" {
-					id = dataFields.ID
-				}
-				if dataFields.Name != "" {
-					name = dataFields.Name
-				}
-			}
+			comments = append(comments, comment)
 
-			comments = append(comments, &types.Comment{
-				ID:   id,
-				Name: name,
-				Data: commentData,
-			})
-
-			// Process nested replies
-			if commentData.Replies.Thing != nil {
-				replies, moreReplies, _ := p.ExtractComments(commentData.Replies.Thing)
-				comments = append(comments, replies...)
-				moreIDs = append(moreIDs, moreReplies...)
+			// Replies are already parsed in ParseComment, just add them
+			if comment.Replies != nil {
+				comments = append(comments, comment.Replies...)
 			}
 		case "more":
 			more, err := p.ParseMore(child)

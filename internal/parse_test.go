@@ -46,7 +46,7 @@ func TestParseThing(t *testing.T) {
 				Data: json.RawMessage(`{"author":"testuser","body":"test comment","score":10,"replies":""}`),
 			},
 			expectError:  false,
-			expectedType: "*types.CommentData",
+			expectedType: "*types.Comment",
 		},
 		{
 			name: "t2 account",
@@ -1263,41 +1263,41 @@ func TestEditedUnmarshalJSON(t *testing.T) {
 	}
 }
 
-// Test edge cases for CommentReplies type unmarshaling
+// Test edge cases for Comment replies field unmarshaling
 func TestCommentRepliesUnmarshalJSON(t *testing.T) {
 	tests := []struct {
 		name      string
 		input     string
-		expectNil bool
+		expectNilReplies bool
 	}{
 		{
 			name:      "empty string",
-			input:     `""`,
-			expectNil: true,
+			input:     `{"replies":""}`,
+			expectNilReplies: true,
 		},
 		{
 			name:      "listing object",
-			input:     `{"kind":"Listing","data":{"children":[]}}`,
-			expectNil: false,
+			input:     `{"replies":{"kind":"Listing","data":{"children":[]}}}`,
+			expectNilReplies: true, // Parser will fill this in, UnmarshalJSON leaves it nil
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var cr types.CommentReplies
-			err := cr.UnmarshalJSON([]byte(tt.input))
+			var c types.Comment
+			err := json.Unmarshal([]byte(tt.input), &c)
 
 			if err != nil {
 				t.Errorf("unexpected error: %v", err)
 			}
 
-			if tt.expectNil {
-				if cr.Thing != nil {
-					t.Errorf("expected nil Thing but got non-nil")
+			if tt.expectNilReplies {
+				if c.Replies != nil {
+					t.Errorf("expected nil Replies but got non-nil")
 				}
 			} else {
-				if cr.Thing == nil {
-					t.Errorf("expected non-nil Thing but got nil")
+				if c.Replies == nil {
+					t.Errorf("expected non-nil Replies but got nil")
 				}
 			}
 		})

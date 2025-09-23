@@ -101,7 +101,7 @@ func main() {
 				if i >= 3 { // Show only first 3 comments
 					break
 				}
-				fmt.Printf("  - %s: %.100s...\n", comment.Data.Author, comment.Data.Body)
+				fmt.Printf("  - %s: %.100s...\n", comment.Author, comment.Body)
 			}
 			if len(comments.MoreIDs) > 0 {
 				fmt.Printf("  (%d more comments available)\n", len(comments.MoreIDs))
@@ -164,8 +164,8 @@ func main() {
 					if i >= 3 {
 						break
 					}
-					if comment.Data != nil {
-						fmt.Printf("   - %s: %.80s...\n", comment.Data.Author, comment.Data.Body)
+					if comment != nil {
+						fmt.Printf("   - %s: %.80s...\n", comment.Author, comment.Body)
 					}
 				}
 			}

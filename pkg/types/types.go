@@ -73,20 +73,6 @@ func (e *Edited) UnmarshalJSON(data []byte) error {
 	return fmt.Errorf("unrecognized type for 'edited' field: %s", s)
 }
 
-// CommentReplies handles a "replies" field which can be a Listing object or an empty string.
-type CommentReplies struct {
-	*Thing
-}
-
-// UnmarshalJSON implements json.Unmarshaler to handle the mixed types of the "replies" field.
-func (cr *CommentReplies) UnmarshalJSON(data []byte) error {
-	if string(data) == `""` {
-		cr.Thing = nil
-		return nil
-	}
-
-	return json.Unmarshal(data, &cr.Thing)
-}
 
 // ListingData contains the data for a Listing, which is used for pagination.
 type ListingData struct {
@@ -96,34 +82,6 @@ type ListingData struct {
 	Children []*Thing `json:"children"`
 }
 
-// CommentData contains the data for a Comment.
-type CommentData struct {
-	Votable
-	Created
-	ApprovedBy          *string `json:"approved_by"`
-	Author              string  `json:"author"`
-	AuthorFlairCSSClass *string `json:"author_flair_css_class"`
-	AuthorFlairText     *string `json:"author_flair_text"`
-	BannedBy            *string `json:"banned_by"`
-	Body                string  `json:"body"`
-	BodyHTML            string  `json:"body_html"`
-	// Edited can be a boolean (for old comments) or a float64 timestamp.
-	Edited        Edited         `json:"edited"`
-	Gilded        int            `json:"gilded"`
-	LinkAuthor    string         `json:"link_author,omitempty"`
-	LinkID        string         `json:"link_id"`
-	LinkTitle     string         `json:"link_title,omitempty"`
-	LinkURL       string         `json:"link_url,omitempty"`
-	NumReports    *int           `json:"num_reports"`
-	ParentID      string         `json:"parent_id"`
-	Replies       CommentReplies `json:"replies"`
-	Saved         bool           `json:"saved"`
-	Score         int            `json:"score"`
-	ScoreHidden   bool           `json:"score_hidden"`
-	Subreddit     string         `json:"subreddit"`
-	SubredditID   string         `json:"subreddit_id"`
-	Distinguished *string        `json:"distinguished"`
-}
 
 // LinkData contains the data for a Link (submission).
 type LinkData struct {
@@ -188,21 +146,21 @@ type SubredditData struct {
 // MessageData contains the data for a private Message.
 type MessageData struct {
 	Created
-	Author           string         `json:"author"`
-	Body             string         `json:"body"`
-	BodyHTML         string         `json:"body_html"`
-	Context          string         `json:"context"`
-	FirstMessage     *int64         `json:"first_message"`
-	FirstMessageName *string        `json:"first_message_name"`
-	Likes            *bool          `json:"likes"`
-	LinkTitle        string         `json:"link_title"`
-	Name             string         `json:"name"`
-	New              bool           `json:"new"`
-	ParentID         *string        `json:"parent_id"`
-	Replies          CommentReplies `json:"replies"`
-	Subject          string         `json:"subject"`
-	Subreddit        *string        `json:"subreddit"`
-	WasComment       bool           `json:"was_comment"`
+	Author           string          `json:"author"`
+	Body             string          `json:"body"`
+	BodyHTML         string          `json:"body_html"`
+	Context          string          `json:"context"`
+	FirstMessage     *int64          `json:"first_message"`
+	FirstMessageName *string         `json:"first_message_name"`
+	Likes            *bool           `json:"likes"`
+	LinkTitle        string          `json:"link_title"`
+	Name             string          `json:"name"`
+	New              bool            `json:"new"`
+	ParentID         *string         `json:"parent_id"`
+	RepliesData      json.RawMessage `json:"replies"` // Raw replies data, handled separately
+	Subject          string          `json:"subject"`
+	Subreddit        *string         `json:"subreddit"`
+	WasComment       bool            `json:"was_comment"`
 }
 
 // AccountData contains the data for a user Account.
@@ -237,11 +195,66 @@ type Post struct {
 	Data *LinkData `json:"data"`
 }
 
-// Comment represents a Reddit comment with its metadata
+// Comment represents a Reddit comment with all its fields
 type Comment struct {
-	ID   string       `json:"id"`   // Comment ID (without prefix)
-	Name string       `json:"name"` // Full name (e.g., "t1_abc123")
-	Data *CommentData `json:"data"`
+	Votable
+	Created
+	ID                  string     `json:"id"`   // Comment ID (without prefix)
+	Name                string     `json:"name"` // Full name (e.g., "t1_abc123")
+	ApprovedBy          *string    `json:"approved_by"`
+	Author              string     `json:"author"`
+	AuthorFlairCSSClass *string    `json:"author_flair_css_class"`
+	AuthorFlairText     *string    `json:"author_flair_text"`
+	BannedBy            *string    `json:"banned_by"`
+	Body                string     `json:"body"`
+	BodyHTML            string     `json:"body_html"`
+	Edited              Edited     `json:"edited"` // Can be a boolean (for old comments) or a float64 timestamp
+	Gilded              int        `json:"gilded"`
+	LinkAuthor          string     `json:"link_author,omitempty"`
+	LinkID              string     `json:"link_id"`
+	LinkTitle           string     `json:"link_title,omitempty"`
+	LinkURL             string     `json:"link_url,omitempty"`
+	NumReports          *int       `json:"num_reports"`
+	ParentID            string     `json:"parent_id"`
+	Replies             []*Comment `json:"-"` // Handled by custom unmarshal
+	RepliesData         json.RawMessage `json:"replies"` // Raw data for custom processing
+	Saved               bool       `json:"saved"`
+	Score               int        `json:"score"`
+	ScoreHidden         bool       `json:"score_hidden"`
+	Subreddit           string     `json:"subreddit"`
+	SubredditID         string     `json:"subreddit_id"`
+	Distinguished       *string    `json:"distinguished"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler to handle Reddit's mixed-type replies field
+func (c *Comment) UnmarshalJSON(data []byte) error {
+	// Use an alias to avoid infinite recursion
+	type Alias Comment
+	aux := &struct {
+		*Alias
+	}{
+		Alias: (*Alias)(c),
+	}
+
+	// First unmarshal everything normally
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+
+	// Now handle the replies field specially
+	if len(c.RepliesData) > 0 {
+		// Check if it's an empty string
+		if string(c.RepliesData) == `""` {
+			c.Replies = nil
+		} else {
+			// It should be a Thing containing a Listing of comments
+			// We'll leave the actual parsing to the parser for now
+			// to avoid circular dependencies
+			c.Replies = nil // Parser will fill this in
+		}
+	}
+
+	return nil
 }
 
 // PostsResponse represents a collection of posts from a subreddit with pagination info.
