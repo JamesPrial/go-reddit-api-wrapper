@@ -83,7 +83,6 @@ func TestNewAuthenticator(t *testing.T) {
 		name       string
 		httpClient *http.Client
 		baseURL    string
-		tokenPath  string
 		username   string
 		password   string
 		grantType  string
@@ -94,7 +93,6 @@ func TestNewAuthenticator(t *testing.T) {
 			name:       "success with nil client",
 			httpClient: nil,
 			baseURL:    "https://www.reddit.com/",
-			tokenPath:  "api/v1/access_token",
 			grantType:  "password",
 			wantErr:    false,
 			checkFunc: func(t *testing.T, a *Authenticator, err error) {
@@ -122,7 +120,6 @@ func TestNewAuthenticator(t *testing.T) {
 		{
 			name:      "success with base url missing trailing slash",
 			baseURL:   "https://www.reddit.com",
-			tokenPath: "api/v1/access_token",
 			grantType: "password",
 			wantErr:   false,
 			checkFunc: func(t *testing.T, a *Authenticator, err error) {
@@ -135,19 +132,7 @@ func TestNewAuthenticator(t *testing.T) {
 				}
 			},
 		},
-		{
-			name:      "success with empty token path",
-			baseURL:   "https://www.reddit.com/",
-			tokenPath: "",
-			grantType: "password",
-			wantErr:   false,
-			checkFunc: func(t *testing.T, a *Authenticator, err error) {
-				expected := "https://www.reddit.com/" + defaultTokenEndpointPath
-				if a.tokenURL.String() != expected {
-					t.Errorf("expected tokenURL to be %q, got %q", expected, a.tokenURL.String())
-				}
-			},
-		},
+
 		{
 			name:      "error with invalid base url",
 			baseURL:   "::invalid-url",
@@ -161,22 +146,8 @@ func TestNewAuthenticator(t *testing.T) {
 			},
 		},
 		{
-			name:      "error with invalid token path",
-			baseURL:   "https://www.reddit.com/",
-			tokenPath: ":", // invalid path segment
-			grantType: "password",
-			wantErr:   true,
-			checkFunc: func(t *testing.T, a *Authenticator, err error) {
-				var authErr *AuthError
-				if !errors.As(err, &authErr) {
-					t.Errorf("expected AuthError, got %T", err)
-				}
-			},
-		},
-		{
 			name:      "success with username and password",
 			baseURL:   "https://www.reddit.com/",
-			tokenPath: "",
 			username:  "testuser",
 			password:  "testpass",
 			grantType: "password",
@@ -195,9 +166,9 @@ func TestNewAuthenticator(t *testing.T) {
 			},
 		},
 		{
-			name:      "success with empty username and password",
-			baseURL:   "https://www.reddit.com/",
-			tokenPath: "",
+			name:    "success with empty username and password",
+			baseURL: "https://www.reddit.com/",
+
 			grantType: "client_credentials",
 			wantErr:   false,
 			checkFunc: func(t *testing.T, a *Authenticator, err error) {
@@ -218,7 +189,7 @@ func TestNewAuthenticator(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			a, err := NewAuthenticator(tc.httpClient, tc.username, tc.password, "id", "secret", "agent", tc.baseURL, tc.grantType, tc.tokenPath, nil)
+			a, err := NewAuthenticator(tc.httpClient, tc.username, tc.password, "id", "secret", "agent", tc.baseURL, tc.grantType, nil)
 
 			if (err != nil) != tc.wantErr {
 				t.Fatalf("NewAuthenticator() error = %v, wantErr %v", err, tc.wantErr)
@@ -413,7 +384,7 @@ func TestAuthenticator_GetToken(t *testing.T) {
 				defer server.Close()
 			}
 
-			a, err := NewAuthenticator(server.Client(), tc.username, tc.password, tc.clientID, tc.clientSecret, "test-agent", serverURL, tc.grantType, "", nil)
+			a, err := NewAuthenticator(server.Client(), tc.username, tc.password, tc.clientID, tc.clientSecret, "test-agent", serverURL, tc.grantType, nil)
 			if err != nil {
 				t.Fatalf("failed to create authenticator: %v", err)
 			}
@@ -442,7 +413,7 @@ func TestAuthenticator_GetToken(t *testing.T) {
 		}))
 		defer server.Close()
 
-		a, err := NewAuthenticator(http.DefaultClient, "", "", "id", "secret", "agent", server.URL, "creds", "", nil)
+		a, err := NewAuthenticator(http.DefaultClient, "", "", "id", "secret", "agent", server.URL, "creds", nil)
 		if err != nil {
 			t.Fatalf("failed to create authenticator: %v", err)
 		}

@@ -73,7 +73,6 @@ func (e *Edited) UnmarshalJSON(data []byte) error {
 	return fmt.Errorf("unrecognized type for 'edited' field: %s", s)
 }
 
-
 // ListingData contains the data for a Listing, which is used for pagination.
 type ListingData struct {
 	BeforeFullname string   `json:"before"` // Reddit fullname for pagination (previous page)
@@ -82,7 +81,58 @@ type ListingData struct {
 	Children       []*Thing `json:"children"`
 }
 
+// Pagination captures the shared pagination behaviour for Reddit listing endpoints.
+// Reddit uses "fullnames" for pagination, which are strings like "t3_abc123" where
+// "t3" indicates the type (link/post) and "abc123" is the item ID.
+type Pagination struct {
+	// Limit specifies the number of items to retrieve.
+	// Reddit enforces a maximum of 100 items per request.
+	// If 0 or not specified, Reddit's default limit (usually 25) is used.
+	Limit int
 
+	// After specifies the Reddit fullname after which to get items.
+	// Used for forward pagination. Format: "t3_abc123" for posts, "t1_def456" for comments.
+	// Cannot be used together with Before.
+	After string
+
+	// Before specifies the Reddit fullname before which to get items.
+	// Used for backward pagination. Format: "t3_abc123" for posts, "t1_def456" for comments.
+	// Cannot be used together with After.
+	Before string
+}
+
+// PostsRequest describes a request to retrieve posts from a subreddit (or the front page).
+// The Subreddit field can be left blank to target the front page.
+type PostsRequest struct {
+	Subreddit string
+	Pagination
+}
+
+// CommentsRequest describes a request to retrieve comments for a specific post.
+type CommentsRequest struct {
+	Subreddit string
+	PostID    string
+	Pagination
+}
+
+// MoreCommentsRequest describes a request to expand previously truncated comment trees.
+// Pass the post identifier (link) together with the comment identifiers you want to load.
+type MoreCommentsRequest struct {
+	LinkID     string
+	CommentIDs []string
+
+	// Sort specifies the comment sort order.
+	// Valid values: "confidence" (default), "new", "top", "controversial", "old", "qa".
+	Sort string
+
+	// Depth specifies the maximum depth of comment replies to retrieve.
+	// 0 means no limit, 1 means only top-level comments, 2 means one level of replies, etc.
+	Depth int
+
+	// Limit specifies the maximum number of comments to retrieve.
+	// Reddit's default is 100. Setting this too high may cause timeouts.
+	Limit int
+}
 
 // SubredditData contains the data for a Subreddit.
 type SubredditData struct {

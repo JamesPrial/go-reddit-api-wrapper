@@ -39,8 +39,7 @@ type Authenticator struct {
 }
 
 // NewAuthenticator creates a new authenticator.
-// The tokenPath parameter can be an empty string to use the default Reddit token endpoint.
-func NewAuthenticator(httpClient *http.Client, username, password, clientID, clientSecret, userAgent, baseURL, grantType, tokenPath string, logger *slog.Logger) (*Authenticator, error) {
+func NewAuthenticator(httpClient *http.Client, username, password, clientID, clientSecret, userAgent, baseURL, grantType string, logger *slog.Logger) (*Authenticator, error) {
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}
@@ -52,10 +51,7 @@ func NewAuthenticator(httpClient *http.Client, username, password, clientID, cli
 	if !strings.HasSuffix(parsedURL.Path, "/") {
 		parsedURL.Path += "/"
 	}
-
-	if tokenPath == "" {
-		tokenPath = defaultTokenEndpointPath
-	}
+	tokenPath := defaultTokenEndpointPath
 
 	resolvedTokenURL, err := parsedURL.Parse(tokenPath)
 	if err != nil {

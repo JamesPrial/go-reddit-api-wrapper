@@ -65,12 +65,15 @@ func main() {
     }
 
     // Get hot posts from r/golang
-    posts, err := client.GetHot(ctx, "golang", &graw.ListingOptions{Limit: 10})
+    posts, err := client.GetHot(ctx, &types.PostsRequest{
+        Subreddit:  "golang",
+        Pagination: types.Pagination{Limit: 10},
+    })
     if err != nil {
         log.Fatalf("Failed to get hot posts: %v", err)
     }
     
-    fmt.Printf("Retrieved %s posts\n", posts.Kind)
+    fmt.Printf("Retrieved %d posts\n", len(posts.Posts))
 }
 ```
 
@@ -113,17 +116,38 @@ type Config struct {
 - `Connect(ctx context.Context) error` - Authenticate with Reddit
 - `Me(ctx context.Context) (*Thing, error)` - Get authenticated user info
 - `GetSubreddit(ctx context.Context, name string) (*Thing, error)` - Get subreddit info
-- `GetHot(ctx context.Context, subreddit string, opts *ListingOptions) (*Thing, error)` - Get hot posts
-- `GetNew(ctx context.Context, subreddit string, opts *ListingOptions) (*Thing, error)` - Get new posts
-- `GetComments(ctx context.Context, subreddit, postID string, opts *ListingOptions) (*Thing, error)` - Get post comments
+- `GetHot(ctx context.Context, request *types.PostsRequest) (*types.PostsResponse, error)` - Get hot posts
+- `GetNew(ctx context.Context, request *types.PostsRequest) (*types.PostsResponse, error)` - Get new posts
+- `GetComments(ctx context.Context, request *types.CommentsRequest) (*types.CommentsResponse, error)` - Get post comments
+- `GetCommentsMultiple(ctx context.Context, requests []*types.CommentsRequest) ([]*types.CommentsResponse, error)` - Batch comment loading
+- `GetMoreComments(ctx context.Context, request *types.MoreCommentsRequest) ([]*types.Comment, error)` - Load truncated comments
 
-### Listing Options
+### Request Types (pkg/types)
 
 ```go
-type ListingOptions struct {
+type Pagination struct {
     Limit  int    // Number of items to retrieve (max 100)
-    After  string // Get items after this item ID  
+    After  string // Get items after this item ID
     Before string // Get items before this item ID
+}
+
+type PostsRequest struct {
+    Subreddit string
+    Pagination
+}
+
+type CommentsRequest struct {
+    Subreddit string
+    PostID    string
+    Pagination
+}
+
+type MoreCommentsRequest struct {
+    LinkID     string
+    CommentIDs []string
+    Sort       string
+    Depth      int
+    Limit      int
 }
 ```
 

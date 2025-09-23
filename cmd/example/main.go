@@ -1,3 +1,26 @@
+// Package main demonstrates usage of the go-reddit-api-wrapper library.
+// This example shows how to:
+//   - Configure and connect to Reddit's API
+//   - Fetch hot posts from a subreddit
+//   - Get subreddit information
+//   - Retrieve comments for posts
+//   - Use pagination to load additional content
+//   - Load truncated comments using GetMoreComments
+//   - Batch load comments for multiple posts
+//
+// Environment Variables Required:
+//   - REDDIT_CLIENT_ID: Your Reddit app's client ID
+//   - REDDIT_CLIENT_SECRET: Your Reddit app's client secret
+//
+// Optional Environment Variables:
+//   - REDDIT_USERNAME: Reddit username (for user authentication)
+//   - REDDIT_PASSWORD: Reddit password (for user authentication)
+//
+// To run this example:
+//
+//	export REDDIT_CLIENT_ID="your_client_id"
+//	export REDDIT_CLIENT_SECRET="your_client_secret"
+//	go run ./cmd/example/main.go
 package main
 
 import (
@@ -11,6 +34,9 @@ import (
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 )
 
+// main demonstrates the core functionality of the Reddit API wrapper.
+// It shows authentication, fetching posts, getting subreddit info,
+// retrieving comments, and advanced features like pagination and batch operations.
 func main() {
 	// Get credentials from environment variables
 	clientID := os.Getenv("REDDIT_CLIENT_ID")
@@ -60,7 +86,10 @@ func main() {
 	}
 
 	// Get hot posts from r/golang
-	hotPosts, err := client.GetHot(ctx, "golang", &graw.ListingOptions{Limit: 5})
+	hotPosts, err := client.GetHot(ctx, &types.PostsRequest{
+		Subreddit:  "golang",
+		Pagination: types.Pagination{Limit: 5},
+	})
 	if err != nil {
 		log.Printf("Failed to get hot posts: %v", err)
 	} else {
@@ -90,7 +119,11 @@ func main() {
 		firstPost := hotPosts.Posts[0]
 		// Use post ID directly
 		postID := firstPost.ID
-		comments, err = client.GetComments(ctx, "golang", postID, &graw.ListingOptions{Limit: 5})
+		comments, err = client.GetComments(ctx, &types.CommentsRequest{
+			Subreddit:  "golang",
+			PostID:     postID,
+			Pagination: types.Pagination{Limit: 5},
+		})
 		if err != nil {
 			log.Printf("Failed to get comments: %v", err)
 		} else if comments == nil || comments.Post == nil {
@@ -116,9 +149,9 @@ func main() {
 		after := ""
 		totalPosts := 0
 		for page := 1; page <= 3; page++ { // Get 3 pages
-			resp, err := client.GetHot(ctx, "golang", &graw.ListingOptions{
-				Limit: 5,
-				After: after,
+			resp, err := client.GetHot(ctx, &types.PostsRequest{
+				Subreddit:  "golang",
+				Pagination: types.Pagination{Limit: 5, After: after},
 			})
 			if err != nil {
 				log.Printf("Failed to get page %d: %v", page, err)
@@ -152,9 +185,11 @@ func main() {
 				moreToLoad = moreToLoad[:10]
 			}
 
-			moreComments, err := client.GetMoreComments(ctx, firstPost.ID, moreToLoad, &graw.MoreCommentsOptions{
-				Sort:  "best",
-				Limit: 10,
+			moreComments, err := client.GetMoreComments(ctx, &types.MoreCommentsRequest{
+				LinkID:     firstPost.ID,
+				CommentIDs: moreToLoad,
+				Sort:       "best",
+				Limit:      10,
 			})
 			if err != nil {
 				log.Printf("Failed to load more comments: %v", err)
@@ -175,10 +210,22 @@ func main() {
 		if len(hotPosts.Posts) >= 3 {
 			fmt.Println("\n3. Batch loading comments for multiple posts:")
 
-			requests := []graw.CommentRequest{
-				{Subreddit: "golang", PostID: hotPosts.Posts[0].ID, Options: &graw.ListingOptions{Limit: 5}},
-				{Subreddit: "golang", PostID: hotPosts.Posts[1].ID, Options: &graw.ListingOptions{Limit: 5}},
-				{Subreddit: "golang", PostID: hotPosts.Posts[2].ID, Options: &graw.ListingOptions{Limit: 5}},
+			requests := []*types.CommentsRequest{
+				{
+					Subreddit:  "golang",
+					PostID:     hotPosts.Posts[0].ID,
+					Pagination: types.Pagination{Limit: 5},
+				},
+				{
+					Subreddit:  "golang",
+					PostID:     hotPosts.Posts[1].ID,
+					Pagination: types.Pagination{Limit: 5},
+				},
+				{
+					Subreddit:  "golang",
+					PostID:     hotPosts.Posts[2].ID,
+					Pagination: types.Pagination{Limit: 5},
+				},
 			}
 
 			batchResults, err := client.GetCommentsMultiple(ctx, requests)
