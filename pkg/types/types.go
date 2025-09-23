@@ -243,3 +243,17 @@ type Comment struct {
 	Name string       `json:"name"` // Full name (e.g., "t1_abc123")
 	Data *CommentData `json:"data"`
 }
+
+// PostsResponse represents a collection of posts from a subreddit with pagination info.
+type PostsResponse struct {
+	Posts  []*Post
+	After  string // For pagination
+	Before string // For pagination
+}
+
+// CommentsResponse represents a post with its comments and more IDs for loading truncated comments.
+type CommentsResponse struct {
+	Post     *Post
+	Comments []*Comment
+	MoreIDs  []string // IDs of additional comments that can be loaded
+}

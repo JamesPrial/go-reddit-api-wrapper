@@ -8,6 +8,7 @@ import (
 	"os"
 
 	graw "github.com/jamesprial/go-reddit-api-wrapper"
+	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 )
 
 func main() {
@@ -84,7 +85,7 @@ func main() {
 	}
 
 	// Get comments for a post (if we have posts)
-	var comments *graw.CommentsResponse
+	var comments *types.CommentsResponse
 	if len(hotPosts.Posts) > 0 {
 		firstPost := hotPosts.Posts[0]
 		// Use post ID directly

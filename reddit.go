@@ -230,7 +230,7 @@ type MoreCommentsOptions struct {
 
 // GetHot retrieves hot posts from a subreddit.
 // If subreddit is empty, it gets from the front page.
-func (c *Client) GetHot(ctx context.Context, subreddit string, opts *ListingOptions) (*PostsResponse, error) {
+func (c *Client) GetHot(ctx context.Context, subreddit string, opts *ListingOptions) (*types.PostsResponse, error) {
 	if !c.IsConnected() {
 		return nil, &ClientError{Err: "client not connected, call Connect() first"}
 	}
@@ -287,7 +287,7 @@ func (c *Client) GetHot(ctx context.Context, subreddit string, opts *ListingOpti
 	// If ParseThing fails or type assertion fails, we still return the posts
 	// with empty pagination values rather than panicking
 
-	return &PostsResponse{
+	return &types.PostsResponse{
 		Posts:  posts,
 		After:  after,
 		Before: before,
@@ -296,7 +296,7 @@ func (c *Client) GetHot(ctx context.Context, subreddit string, opts *ListingOpti
 
 // GetNew retrieves new posts from a subreddit.
 // If subreddit is empty, it gets from the front page.
-func (c *Client) GetNew(ctx context.Context, subreddit string, opts *ListingOptions) (*PostsResponse, error) {
+func (c *Client) GetNew(ctx context.Context, subreddit string, opts *ListingOptions) (*types.PostsResponse, error) {
 	if !c.IsConnected() {
 		return nil, &ClientError{Err: "client not connected, call Connect() first"}
 	}
@@ -353,7 +353,7 @@ func (c *Client) GetNew(ctx context.Context, subreddit string, opts *ListingOpti
 	// If ParseThing fails or type assertion fails, we still return the posts
 	// with empty pagination values rather than panicking
 
-	return &PostsResponse{
+	return &types.PostsResponse{
 		Posts:  posts,
 		After:  after,
 		Before: before,
@@ -361,7 +361,7 @@ func (c *Client) GetNew(ctx context.Context, subreddit string, opts *ListingOpti
 }
 
 // GetComments retrieves comments for a specific post.
-func (c *Client) GetComments(ctx context.Context, subreddit, postID string, opts *ListingOptions) (*CommentsResponse, error) {
+func (c *Client) GetComments(ctx context.Context, subreddit, postID string, opts *ListingOptions) (*types.CommentsResponse, error) {
 	if !c.IsConnected() {
 		return nil, &ClientError{Err: "client not connected, call Connect() first"}
 	}
@@ -460,7 +460,7 @@ func (c *Client) GetComments(ctx context.Context, subreddit, postID string, opts
 	}
 
 	// Note: post may be nil if Reddit only returned comments without the post
-	return &CommentsResponse{
+	return &types.CommentsResponse{
 		Post:     post,
 		Comments: comments,
 		MoreIDs:  moreIDs,
@@ -476,19 +476,19 @@ type CommentRequest struct {
 
 // GetCommentsMultiple loads comments for multiple posts in parallel.
 // This is more efficient than calling GetComments multiple times sequentially.
-func (c *Client) GetCommentsMultiple(ctx context.Context, requests []CommentRequest) ([]*CommentsResponse, error) {
+func (c *Client) GetCommentsMultiple(ctx context.Context, requests []CommentRequest) ([]*types.CommentsResponse, error) {
 	if !c.IsConnected() {
 		return nil, &ClientError{Err: "client not connected, call Connect() first"}
 	}
 
 	if len(requests) == 0 {
-		return []*CommentsResponse{}, nil
+		return []*types.CommentsResponse{}, nil
 	}
 
 	// Create channels for results
 	type result struct {
 		index    int
-		response *CommentsResponse
+		response *types.CommentsResponse
 		err      error
 	}
 	resultChan := make(chan result, len(requests))
@@ -502,7 +502,7 @@ func (c *Client) GetCommentsMultiple(ctx context.Context, requests []CommentRequ
 	}
 
 	// Collect results
-	results := make([]*CommentsResponse, len(requests))
+	results := make([]*types.CommentsResponse, len(requests))
 	var firstError error
 	for i := 0; i < len(requests); i++ {
 		res := <-resultChan
@@ -611,10 +611,3 @@ func (e *ClientError) Error() string {
 	return "reddit client error: " + e.Err
 }
 
-// min returns the minimum of two integers
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
