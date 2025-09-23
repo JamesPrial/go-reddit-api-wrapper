@@ -57,8 +57,8 @@ func (p *Parser) ParseListing(thing *types.Thing) (*types.ListingData, error) {
 	return &listing, nil
 }
 
-// ParseLink extracts a LinkData from a Thing of kind "t3".
-func (p *Parser) ParseLink(thing *types.Thing) (*types.LinkData, error) {
+// ParseLink extracts a Post from a Thing of kind "t3".
+func (p *Parser) ParseLink(thing *types.Thing) (*types.Post, error) {
 	if thing == nil {
 		return nil, fmt.Errorf("thing is nil")
 	}
@@ -66,11 +66,36 @@ func (p *Parser) ParseLink(thing *types.Thing) (*types.LinkData, error) {
 		return nil, fmt.Errorf("expected t3 (Link), got %s", thing.Kind)
 	}
 
-	var link types.LinkData
-	if err := json.Unmarshal(thing.Data, &link); err != nil {
+	var post types.Post
+	if err := json.Unmarshal(thing.Data, &post); err != nil {
 		return nil, fmt.Errorf("failed to parse Link data: %w", err)
 	}
-	return &link, nil
+
+	// Extract ID and Name from the data if not already set
+	if post.ID == "" || post.Name == "" {
+		var dataFields struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		}
+		if err := json.Unmarshal(thing.Data, &dataFields); err == nil {
+			if post.ID == "" && dataFields.ID != "" {
+				post.ID = dataFields.ID
+			}
+			if post.Name == "" && dataFields.Name != "" {
+				post.Name = dataFields.Name
+			}
+		}
+	}
+
+	// Fallback to Thing-level fields if still missing
+	if post.ID == "" && thing.ID != "" {
+		post.ID = thing.ID
+	}
+	if post.Name == "" && thing.Name != "" {
+		post.Name = thing.Name
+	}
+
+	return &post, nil
 }
 
 // ParseComment extracts a Comment from a Thing of kind "t1".
@@ -197,31 +222,11 @@ func (p *Parser) ExtractPosts(listing *types.Thing) ([]*types.Post, error) {
 	posts := make([]*types.Post, 0, len(listingData.Children))
 	for _, child := range listingData.Children {
 		if child.Kind == "t3" {
-			link, err := p.ParseLink(child)
+			post, err := p.ParseLink(child)
 			if err != nil {
 				continue
 			}
-
-			// Extract ID and name from the data JSON since Reddit includes them there
-			// for children in a listing, not at the Thing level
-			var dataFields struct {
-				ID   string `json:"id"`
-				Name string `json:"name"`
-			}
-			if err := json.Unmarshal(child.Data, &dataFields); err == nil {
-				posts = append(posts, &types.Post{
-					ID:   dataFields.ID,
-					Name: dataFields.Name,
-					Data: link,
-				})
-			} else {
-				// Fallback to Thing-level fields if present
-				posts = append(posts, &types.Post{
-					ID:   child.ID,
-					Name: child.Name,
-					Data: link,
-				})
-			}
+			posts = append(posts, post)
 		}
 	}
 	return posts, nil

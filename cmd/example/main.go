@@ -67,7 +67,7 @@ func main() {
 		fmt.Println("\nHot posts from r/golang:")
 		for i, post := range hotPosts.Posts {
 			fmt.Printf("%d. %s (score: %d, comments: %d)\n",
-				i+1, post.Data.Title, post.Data.Score, post.Data.NumComments)
+				i+1, post.Title, post.Score, post.NumComments)
 		}
 		if hotPosts.After != "" {
 			fmt.Printf("Next page: %s\n", hotPosts.After)
@@ -96,7 +96,7 @@ func main() {
 		} else if comments == nil || comments.Post == nil {
 			log.Printf("No post data returned with comments")
 		} else {
-			fmt.Printf("\nComments for post: %s\n", comments.Post.Data.Title)
+			fmt.Printf("\nComments for post: %s\n", comments.Post.Title)
 			for i, comment := range comments.Comments {
 				if i >= 3 { // Show only first 3 comments
 					break
@@ -129,8 +129,8 @@ func main() {
 
 			// Show first 2 titles from each page
 			for i, post := range resp.Posts {
-				if i < 2 && post.Data != nil {
-					fmt.Printf("     - %.60s... (score: %d)\n", post.Data.Title, post.Data.Score)
+				if i < 2 && post != nil {
+					fmt.Printf("     - %.60s... (score: %d)\n", post.Title, post.Score)
 				}
 			}
 
@@ -189,7 +189,7 @@ func main() {
 					if result != nil {
 						if result.Post != nil {
 							fmt.Printf("   Post %d: %.50s... - %d comments loaded\n",
-								i+1, result.Post.Data.Title, len(result.Comments))
+								i+1, result.Post.Title, len(result.Comments))
 						} else {
 							fmt.Printf("   Post %d: (post data not included) - %d comments loaded\n",
 								i+1, len(result.Comments))

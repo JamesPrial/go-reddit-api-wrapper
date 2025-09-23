@@ -66,7 +66,7 @@ func TestParseThing(t *testing.T) {
 				Data: json.RawMessage(`{"author":"testuser","title":"Test Post","url":"http://example.com","score":100}`),
 			},
 			expectError:  false,
-			expectedType: "*types.LinkData",
+			expectedType: "*types.Post",
 		},
 		{
 			name: "t4 message",

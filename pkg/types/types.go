@@ -83,39 +83,6 @@ type ListingData struct {
 }
 
 
-// LinkData contains the data for a Link (submission).
-type LinkData struct {
-	Votable
-	Created
-	Author              string          `json:"author"`
-	AuthorFlairCSSClass *string         `json:"author_flair_css_class"`
-	AuthorFlairText     *string         `json:"author_flair_text"`
-	Clicked             bool            `json:"clicked"`
-	Domain              string          `json:"domain"`
-	Hidden              bool            `json:"hidden"`
-	IsSelf              bool            `json:"is_self"`
-	LinkFlairCSSClass   *string         `json:"link_flair_css_class"`
-	LinkFlairText       *string         `json:"link_flair_text"`
-	Locked              bool            `json:"locked"`
-	Media               json.RawMessage `json:"media"`
-	MediaEmbed          json.RawMessage `json:"media_embed"`
-	NumComments         int             `json:"num_comments"`
-	Over18              bool            `json:"over_18"`
-	Permalink           string          `json:"permalink"`
-	Saved               bool            `json:"saved"`
-	Score               int             `json:"score"`
-	SelfText            string          `json:"selftext"`
-	SelfTextHTML        *string         `json:"selftext_html"`
-	Subreddit           string          `json:"subreddit"`
-	SubredditID         string          `json:"subreddit_id"`
-	Thumbnail           string          `json:"thumbnail"`
-	Title               string          `json:"title"`
-	URL                 string          `json:"url"`
-	// Edited can be a boolean or a float64 timestamp.
-	Edited        Edited  `json:"edited"`
-	Distinguished *string `json:"distinguished"`
-	Stickied      bool    `json:"stickied"`
-}
 
 // SubredditData contains the data for a Subreddit.
 type SubredditData struct {
@@ -188,11 +155,39 @@ type MoreData struct {
 	Name     string   `json:"name"`
 }
 
-// Post represents a Reddit post with its metadata
+// Post represents a Reddit post with all its fields
 type Post struct {
-	ID   string    `json:"id"`   // Post ID (without prefix)
-	Name string    `json:"name"` // Full name (e.g., "t3_abc123")
-	Data *LinkData `json:"data"`
+	Votable
+	Created
+	ID                  string          `json:"id"`   // Post ID (without prefix)
+	Name                string          `json:"name"` // Full name (e.g., "t3_abc123")
+	Author              string          `json:"author"`
+	AuthorFlairCSSClass *string         `json:"author_flair_css_class"`
+	AuthorFlairText     *string         `json:"author_flair_text"`
+	Clicked             bool            `json:"clicked"`
+	Domain              string          `json:"domain"`
+	Hidden              bool            `json:"hidden"`
+	IsSelf              bool            `json:"is_self"`
+	LinkFlairCSSClass   *string         `json:"link_flair_css_class"`
+	LinkFlairText       *string         `json:"link_flair_text"`
+	Locked              bool            `json:"locked"`
+	Media               json.RawMessage `json:"media"`
+	MediaEmbed          json.RawMessage `json:"media_embed"`
+	NumComments         int             `json:"num_comments"`
+	Over18              bool            `json:"over_18"`
+	Permalink           string          `json:"permalink"`
+	Saved               bool            `json:"saved"`
+	Score               int             `json:"score"`
+	SelfText            string          `json:"selftext"`
+	SelfTextHTML        *string         `json:"selftext_html"`
+	Subreddit           string          `json:"subreddit"`
+	SubredditID         string          `json:"subreddit_id"`
+	Thumbnail           string          `json:"thumbnail"`
+	Title               string          `json:"title"`
+	URL                 string          `json:"url"`
+	Edited              Edited          `json:"edited"` // Can be a boolean or a float64 timestamp
+	Distinguished       *string         `json:"distinguished"`
+	Stickied            bool            `json:"stickied"`
 }
 
 // Comment represents a Reddit comment with all its fields
