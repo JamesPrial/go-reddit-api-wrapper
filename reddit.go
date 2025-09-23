@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -533,30 +534,32 @@ func (c *Client) GetMoreComments(ctx context.Context, linkID string, commentIDs 
 		linkID = "t3_" + linkID
 	}
 
-	req, err := c.client.NewRequest(ctx, http.MethodGet, "api/morechildren", nil)
+	// Build form data for POST request
+	formData := url.Values{}
+	formData.Set("link_id", linkID)
+	formData.Set("children", strings.Join(commentIDs, ","))
+	formData.Set("api_type", "json")
+
+	if opts != nil {
+		if opts.Sort != "" {
+			formData.Set("sort", opts.Sort)
+		}
+		if opts.Depth > 0 {
+			formData.Set("depth", fmt.Sprintf("%d", opts.Depth))
+		}
+		if opts.Limit > 0 {
+			formData.Set("limit_children", fmt.Sprintf("%d", opts.Limit))
+		}
+	}
+
+	// Create POST request with form data
+	req, err := c.client.NewRequest(ctx, http.MethodPost, "api/morechildren", strings.NewReader(formData.Encode()))
 	if err != nil {
 		return nil, &ClientError{Err: "failed to create request: " + err.Error()}
 	}
 
-	// Build query parameters
-	q := req.URL.Query()
-	q.Set("link_id", linkID)
-	q.Set("children", strings.Join(commentIDs, ","))
-	q.Set("api_type", "json")
-
-	if opts != nil {
-		if opts.Sort != "" {
-			q.Set("sort", opts.Sort)
-		}
-		if opts.Depth > 0 {
-			q.Set("depth", fmt.Sprintf("%d", opts.Depth))
-		}
-		if opts.Limit > 0 {
-			q.Set("limit_children", fmt.Sprintf("%d", opts.Limit))
-		}
-	}
-
-	req.URL.RawQuery = q.Encode()
+	// Set Content-Type header for form data
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	// The morechildren endpoint returns a different structure
 	var response struct {
