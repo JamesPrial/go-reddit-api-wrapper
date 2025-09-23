@@ -31,9 +31,17 @@
 //		log.Fatal(err)
 //	}
 //
+//	// Optional: call Connect now to surface authentication errors early.
 //	if err := client.Connect(ctx); err != nil {
 //		log.Fatal(err)
 //	}
+//
+// # Connection Lifecycle
+//
+// The client lazily establishes its authenticated HTTP session. Every public method calls
+// Connect() under the hood, and a sync.Once gate ensures the initialization logic only runs
+// once. You can still call Connect() manually during startup if you prefer to detect
+// authentication issues before issuing requests.
 //
 // # Authentication Types
 //
@@ -133,7 +141,9 @@
 //
 // # Best Practices
 //
-//   - Always check IsConnected() before making API calls
+//   - Call Connect() during startup if you want authentication errors surfaced eagerly
+//   - Lazy connection is enabled by default; the first API call will connect automatically
+//   - Use IsConnected() when you need to know whether initialization has already succeeded
 //   - Use appropriate user agents that identify your app
 //   - Respect Reddit's API guidelines and rate limits
 //   - Handle errors gracefully, especially for private/deleted content
