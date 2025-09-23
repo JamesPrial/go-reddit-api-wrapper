@@ -69,8 +69,8 @@ func main() {
 			fmt.Printf("%d. %s (score: %d, comments: %d)\n",
 				i+1, post.Title, post.Score, post.NumComments)
 		}
-		if hotPosts.After != "" {
-			fmt.Printf("Next page: %s\n", hotPosts.After)
+		if hotPosts.AfterFullname != "" {
+			fmt.Printf("Next page: %s\n", hotPosts.AfterFullname)
 		}
 	}
 
@@ -134,7 +134,7 @@ func main() {
 				}
 			}
 
-			after = resp.After
+			after = resp.AfterFullname
 			if after == "" {
 				fmt.Println("   No more pages available")
 				break

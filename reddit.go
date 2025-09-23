@@ -217,8 +217,8 @@ func (c *Client) GetSubreddit(ctx context.Context, name string) (*types.Subreddi
 // ListingOptions provides options for listing operations.
 type ListingOptions struct {
 	Limit  int    // Number of items to retrieve (max 100)
-	After  string // Get items after this item ID
-	Before string // Get items before this item ID
+	After  string // Reddit fullname (e.g. "t3_abc123") after which to get items
+	Before string // Reddit fullname (e.g. "t3_abc123") before which to get items
 }
 
 // MoreCommentsOptions provides options for loading additional comments.
@@ -280,17 +280,17 @@ func (c *Client) GetHot(ctx context.Context, subreddit string, opts *ListingOpti
 	if err == nil {
 		// If ParseThing succeeds, try to get pagination data
 		if listingData, ok := listing.(*types.ListingData); ok {
-			after = listingData.After
-			before = listingData.Before
+			after = listingData.AfterFullname
+			before = listingData.BeforeFullname
 		}
 	}
 	// If ParseThing fails or type assertion fails, we still return the posts
 	// with empty pagination values rather than panicking
 
 	return &types.PostsResponse{
-		Posts:  posts,
-		After:  after,
-		Before: before,
+		Posts:          posts,
+		AfterFullname:  after,
+		BeforeFullname: before,
 	}, nil
 }
 
@@ -346,17 +346,17 @@ func (c *Client) GetNew(ctx context.Context, subreddit string, opts *ListingOpti
 	if err == nil {
 		// If ParseThing succeeds, try to get pagination data
 		if listingData, ok := listing.(*types.ListingData); ok {
-			after = listingData.After
-			before = listingData.Before
+			after = listingData.AfterFullname
+			before = listingData.BeforeFullname
 		}
 	}
 	// If ParseThing fails or type assertion fails, we still return the posts
 	// with empty pagination values rather than panicking
 
 	return &types.PostsResponse{
-		Posts:  posts,
-		After:  after,
-		Before: before,
+		Posts:          posts,
+		AfterFullname:  after,
+		BeforeFullname: before,
 	}, nil
 }
 

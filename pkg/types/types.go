@@ -76,10 +76,10 @@ func (e *Edited) UnmarshalJSON(data []byte) error {
 
 // ListingData contains the data for a Listing, which is used for pagination.
 type ListingData struct {
-	Before   string   `json:"before"`
-	After    string   `json:"after"`
-	Modhash  string   `json:"modhash"`
-	Children []*Thing `json:"children"`
+	BeforeFullname string   `json:"before"` // Reddit fullname for pagination (previous page)
+	AfterFullname  string   `json:"after"`  // Reddit fullname for pagination (next page)
+	Modhash        string   `json:"modhash"`
+	Children       []*Thing `json:"children"`
 }
 
 
@@ -222,14 +222,16 @@ type Comment struct {
 
 // PostsResponse represents a collection of posts from a subreddit with pagination info.
 type PostsResponse struct {
-	Posts  []*Post
-	After  string // For pagination
-	Before string // For pagination
+	Posts          []*Post
+	AfterFullname  string // Reddit fullname (e.g. "t3_abc123") of last item for next page
+	BeforeFullname string // Reddit fullname (e.g. "t3_abc123") of first item for prev page
 }
 
 // CommentsResponse represents a post with its comments and more IDs for loading truncated comments.
 type CommentsResponse struct {
-	Post     *Post
-	Comments []*Comment
-	MoreIDs  []string // IDs of additional comments that can be loaded
+	Post           *Post
+	Comments       []*Comment
+	MoreIDs        []string // IDs of additional comments that can be loaded
+	AfterFullname  string   // Reddit fullname (e.g. "t1_abc123") of last comment for next page
+	BeforeFullname string   // Reddit fullname (e.g. "t1_abc123") of first comment for prev page
 }
