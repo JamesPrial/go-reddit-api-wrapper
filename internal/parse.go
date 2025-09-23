@@ -167,11 +167,27 @@ func (p *Parser) ExtractPosts(listing *types.Thing) ([]*types.Post, error) {
 			if err != nil {
 				continue
 			}
-			posts = append(posts, &types.Post{
-				ID:   child.ID,
-				Name: child.Name,
-				Data: link,
-			})
+
+			// Extract ID and name from the data JSON since Reddit includes them there
+			// for children in a listing, not at the Thing level
+			var dataFields struct {
+				ID   string `json:"id"`
+				Name string `json:"name"`
+			}
+			if err := json.Unmarshal(child.Data, &dataFields); err == nil {
+				posts = append(posts, &types.Post{
+					ID:   dataFields.ID,
+					Name: dataFields.Name,
+					Data: link,
+				})
+			} else {
+				// Fallback to Thing-level fields if present
+				posts = append(posts, &types.Post{
+					ID:   child.ID,
+					Name: child.Name,
+					Data: link,
+				})
+			}
 		}
 	}
 	return posts, nil
@@ -220,9 +236,26 @@ func (p *Parser) ExtractComments(thing *types.Thing) ([]*types.Comment, []string
 			if err != nil {
 				continue
 			}
+
+			// Extract ID and name from the data JSON since Reddit includes them there
+			// for children in a listing, not at the Thing level
+			var dataFields struct {
+				ID   string `json:"id"`
+				Name string `json:"name"`
+			}
+			id, name := child.ID, child.Name
+			if err := json.Unmarshal(child.Data, &dataFields); err == nil {
+				if dataFields.ID != "" {
+					id = dataFields.ID
+				}
+				if dataFields.Name != "" {
+					name = dataFields.Name
+				}
+			}
+
 			comments = append(comments, &types.Comment{
-				ID:   child.ID,
-				Name: child.Name,
+				ID:   id,
+				Name: name,
 				Data: commentData,
 			})
 
