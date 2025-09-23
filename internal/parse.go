@@ -257,18 +257,26 @@ func (p *Parser) ExtractPostAndComments(response []*types.Thing) (*types.Post, [
 
 	if len(response) >= 2 {
 		// Standard format: first is post, second is comments
+		var post *types.Post
 		posts, err := p.ExtractPosts(response[0])
-		if err != nil || len(posts) == 0 {
-			return nil, nil, nil, fmt.Errorf("failed to extract post: %w", err)
+		if err == nil && len(posts) > 0 {
+			post = posts[0]
 		}
+		// Even if post extraction fails, try to extract comments
 
 		// Second element should be the comments listing
 		comments, moreIDs, err := p.ExtractComments(response[1])
 		if err != nil {
-			return posts[0], nil, nil, fmt.Errorf("failed to extract comments: %w", err)
+			// If we have a post but no comments, return the post
+			if post != nil {
+				return post, nil, nil, fmt.Errorf("failed to extract comments: %w", err)
+			}
+			// If we have neither post nor comments, return error
+			return nil, nil, nil, fmt.Errorf("failed to extract both post and comments")
 		}
 
-		return posts[0], comments, moreIDs, nil
+		// Return whatever we successfully extracted (post might be nil)
+		return post, comments, moreIDs, nil
 	}
 
 	// Single listing format: just comments, no post

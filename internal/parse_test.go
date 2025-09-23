@@ -1118,7 +1118,7 @@ func TestExtractPostAndComments(t *testing.T) {
 					Data: json.RawMessage(`{"children":[]}`),
 				},
 			},
-			expectError:    true,
+			expectError:    false, // Changed: We now handle missing posts gracefully
 			expectPost:     false,
 			expectComments: 0,
 			expectMore:     0,
