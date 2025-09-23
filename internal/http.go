@@ -94,10 +94,22 @@ func (c *Client) SetLogBodyLimit(limit int) {
 
 // NewRequest creates an API request. A relative URL can be provided in path,
 // in which case it is resolved relative to the BaseURL of the Client.
-func (c *Client) NewRequest(ctx context.Context, method, path string, body io.Reader) (*http.Request, error) {
+// Optional query parameters can be provided as url.Values.
+func (c *Client) NewRequest(ctx context.Context, method, path string, body io.Reader, params ...url.Values) (*http.Request, error) {
 	u, err := c.BaseURL.Parse(path)
 	if err != nil {
 		return nil, &ClientError{OriginalErr: err}
+	}
+
+	// Add query parameters if provided
+	if len(params) > 0 && params[0] != nil {
+		q := u.Query()
+		for key, values := range params[0] {
+			for _, value := range values {
+				q.Add(key, value)
+			}
+		}
+		u.RawQuery = q.Encode()
 	}
 
 	req, err := http.NewRequestWithContext(ctx, method, u.String(), body)

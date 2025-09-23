@@ -126,7 +126,8 @@ type TokenProvider interface {
 type HTTPClient interface {
 	// NewRequest creates a new HTTP request with proper authentication headers.
 	// The path is relative to the configured base URL.
-	NewRequest(ctx context.Context, method, path string, body io.Reader) (*http.Request, error)
+	// Optional query parameters can be provided as url.Values.
+	NewRequest(ctx context.Context, method, path string, body io.Reader, params ...url.Values) (*http.Request, error)
 
 	// Do executes an HTTP request and unmarshals the response into a Reddit Thing object.
 	// This is used for most Reddit API endpoints that return structured data.
@@ -416,22 +417,22 @@ func (c *Client) GetHot(ctx context.Context, request *types.PostsRequest) (*type
 		path = "r/" + subreddit + "/hot"
 	}
 
-	httpReq, err := c.client.NewRequest(ctx, http.MethodGet, path, nil)
+	// Build query parameters
+	params := url.Values{}
+	if pagination.Limit > 0 {
+		params.Set("limit", fmt.Sprintf("%d", pagination.Limit))
+	}
+	if pagination.After != "" {
+		params.Set("after", pagination.After)
+	}
+	if pagination.Before != "" {
+		params.Set("before", pagination.Before)
+	}
+
+	httpReq, err := c.client.NewRequest(ctx, http.MethodGet, path, nil, params)
 	if err != nil {
 		return nil, &ClientError{Err: "failed to create request: " + err.Error()}
 	}
-
-	q := httpReq.URL.Query()
-	if pagination.Limit > 0 {
-		q.Set("limit", fmt.Sprintf("%d", pagination.Limit))
-	}
-	if pagination.After != "" {
-		q.Set("after", pagination.After)
-	}
-	if pagination.Before != "" {
-		q.Set("before", pagination.Before)
-	}
-	httpReq.URL.RawQuery = q.Encode()
 
 	var result types.Thing
 	_, err = c.client.Do(httpReq, &result)
@@ -487,22 +488,22 @@ func (c *Client) GetNew(ctx context.Context, request *types.PostsRequest) (*type
 		path = "r/" + subreddit + "/new"
 	}
 
-	httpReq, err := c.client.NewRequest(ctx, http.MethodGet, path, nil)
+	// Build query parameters
+	params := url.Values{}
+	if pagination.Limit > 0 {
+		params.Set("limit", fmt.Sprintf("%d", pagination.Limit))
+	}
+	if pagination.After != "" {
+		params.Set("after", pagination.After)
+	}
+	if pagination.Before != "" {
+		params.Set("before", pagination.Before)
+	}
+
+	httpReq, err := c.client.NewRequest(ctx, http.MethodGet, path, nil, params)
 	if err != nil {
 		return nil, &ClientError{Err: "failed to create request: " + err.Error()}
 	}
-
-	q := httpReq.URL.Query()
-	if pagination.Limit > 0 {
-		q.Set("limit", fmt.Sprintf("%d", pagination.Limit))
-	}
-	if pagination.After != "" {
-		q.Set("after", pagination.After)
-	}
-	if pagination.Before != "" {
-		q.Set("before", pagination.Before)
-	}
-	httpReq.URL.RawQuery = q.Encode()
 
 	var result types.Thing
 	_, err = c.client.Do(httpReq, &result)
@@ -563,22 +564,23 @@ func (c *Client) GetComments(ctx context.Context, request *types.CommentsRequest
 	}
 
 	path := "r/" + request.Subreddit + "/comments/" + request.PostID
-	httpReq, err := c.client.NewRequest(ctx, http.MethodGet, path, nil)
+
+	// Build query parameters
+	params := url.Values{}
+	if request.Limit > 0 {
+		params.Set("limit", fmt.Sprintf("%d", request.Limit))
+	}
+	if request.After != "" {
+		params.Set("after", request.After)
+	}
+	if request.Before != "" {
+		params.Set("before", request.Before)
+	}
+
+	httpReq, err := c.client.NewRequest(ctx, http.MethodGet, path, nil, params)
 	if err != nil {
 		return nil, &ClientError{Err: "failed to create request: " + err.Error()}
 	}
-
-	q := httpReq.URL.Query()
-	if request.Limit > 0 {
-		q.Set("limit", fmt.Sprintf("%d", request.Limit))
-	}
-	if request.After != "" {
-		q.Set("after", request.After)
-	}
-	if request.Before != "" {
-		q.Set("before", request.Before)
-	}
-	httpReq.URL.RawQuery = q.Encode()
 
 	resp, err := c.client.DoRaw(httpReq)
 	if err != nil {
