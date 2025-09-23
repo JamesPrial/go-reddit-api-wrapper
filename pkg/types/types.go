@@ -211,45 +211,13 @@ type Comment struct {
 	LinkURL             string     `json:"link_url,omitempty"`
 	NumReports          *int       `json:"num_reports"`
 	ParentID            string     `json:"parent_id"`
-	Replies             []*Comment `json:"-"` // Handled by custom unmarshal
-	RepliesData         json.RawMessage `json:"replies"` // Raw data for custom processing
+	Replies             []*Comment `json:"-"` // Parsed by Parser from the raw replies field
 	Saved               bool       `json:"saved"`
 	Score               int        `json:"score"`
 	ScoreHidden         bool       `json:"score_hidden"`
 	Subreddit           string     `json:"subreddit"`
 	SubredditID         string     `json:"subreddit_id"`
 	Distinguished       *string    `json:"distinguished"`
-}
-
-// UnmarshalJSON implements json.Unmarshaler to handle Reddit's mixed-type replies field
-func (c *Comment) UnmarshalJSON(data []byte) error {
-	// Use an alias to avoid infinite recursion
-	type Alias Comment
-	aux := &struct {
-		*Alias
-	}{
-		Alias: (*Alias)(c),
-	}
-
-	// First unmarshal everything normally
-	if err := json.Unmarshal(data, aux); err != nil {
-		return err
-	}
-
-	// Now handle the replies field specially
-	if len(c.RepliesData) > 0 {
-		// Check if it's an empty string
-		if string(c.RepliesData) == `""` {
-			c.Replies = nil
-		} else {
-			// It should be a Thing containing a Listing of comments
-			// We'll leave the actual parsing to the parser for now
-			// to avoid circular dependencies
-			c.Replies = nil // Parser will fill this in
-		}
-	}
-
-	return nil
 }
 
 // PostsResponse represents a collection of posts from a subreddit with pagination info.

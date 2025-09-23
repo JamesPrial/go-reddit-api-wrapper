@@ -136,12 +136,18 @@ func (p *Parser) ParseComment(thing *types.Thing) (*types.Comment, error) {
 		comment.Name = thing.Name
 	}
 
-	// Parse replies if present
-	if len(comment.RepliesData) > 0 && string(comment.RepliesData) != `""` {
-		var repliesThing types.Thing
-		if err := json.Unmarshal(comment.RepliesData, &repliesThing); err == nil {
-			replies, _, _ := p.ExtractComments(&repliesThing)
-			comment.Replies = replies
+	// Handle the replies field which can be a Listing object or an empty string
+	var rawData struct {
+		Replies json.RawMessage `json:"replies"`
+	}
+	if err := json.Unmarshal(thing.Data, &rawData); err == nil && len(rawData.Replies) > 0 {
+		// Check if it's an empty string (Reddit sends "" when there are no replies)
+		if string(rawData.Replies) != `""` {
+			var repliesThing types.Thing
+			if err := json.Unmarshal(rawData.Replies, &repliesThing); err == nil {
+				replies, _, _ := p.ExtractComments(&repliesThing)
+				comment.Replies = replies
+			}
 		}
 	}
 
