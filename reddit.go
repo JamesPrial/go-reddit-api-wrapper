@@ -37,6 +37,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jamesprial/go-reddit-api-wrapper/internal"
@@ -158,6 +159,9 @@ type Client struct {
 	auth   TokenProvider
 	config *Config
 	parser *internal.Parser
+
+	connectOnce sync.Once
+	connectErr  error
 }
 
 // NewClient creates a new Reddit client with the provided configuration.
@@ -229,7 +233,7 @@ func NewClient(config *Config) (*Client, error) {
 }
 
 // Connect authenticates with Reddit and initializes the internal HTTP client.
-// This method must be called before making any API requests.
+// It is safe to call Connect multiple times; initialization will only occur once.
 //
 // The function will:
 //   - Authenticate with Reddit using the provided credentials
@@ -243,6 +247,15 @@ func NewClient(config *Config) (*Client, error) {
 // After successful connection, IsConnected() will return true and all API
 // methods will be available for use.
 func (c *Client) Connect(ctx context.Context) error {
+	c.connectOnce.Do(func() {
+		c.connectErr = c.initialize(ctx)
+	})
+
+	return c.connectErr
+}
+
+// initialize performs the underlying connection setup work.
+func (c *Client) initialize(ctx context.Context) error {
 	// Validate that we can get a token before creating the client
 	_, err := c.auth.GetToken(ctx)
 	if err != nil {
@@ -262,6 +275,19 @@ func (c *Client) Connect(ctx context.Context) error {
 	}
 
 	c.client = client
+	return nil
+}
+
+// ensureConnected lazily initializes the client before handling a request.
+func (c *Client) ensureConnected(ctx context.Context) error {
+	if err := c.Connect(ctx); err != nil {
+		return err
+	}
+
+	if !c.IsConnected() {
+		return &ClientError{Err: "client not connected, call Connect() first"}
+	}
+
 	return nil
 }
 
@@ -285,8 +311,8 @@ func (c *Client) IsConnected() bool {
 //
 // This method requires the client to have 'read' scope for the authenticated user.
 func (c *Client) Me(ctx context.Context) (*types.AccountData, error) {
-	if !c.IsConnected() {
-		return nil, &ClientError{Err: "client not connected, call Connect() first"}
+	if err := c.ensureConnected(ctx); err != nil {
+		return nil, err
 	}
 
 	req, err := c.client.NewRequest(ctx, http.MethodGet, "api/v1/me", nil)
@@ -334,8 +360,8 @@ func (c *Client) Me(ctx context.Context) (*types.AccountData, error) {
 //
 // This method works with both application-only and user authentication.
 func (c *Client) GetSubreddit(ctx context.Context, name string) (*types.SubredditData, error) {
-	if !c.IsConnected() {
-		return nil, &ClientError{Err: "client not connected, call Connect() first"}
+	if err := c.ensureConnected(ctx); err != nil {
+		return nil, err
 	}
 
 	path := "r/" + name + "/about"
@@ -378,8 +404,8 @@ func (c *Client) GetSubreddit(ctx context.Context, name string) (*types.Subreddi
 // The returned PostsResponse includes AfterFullname and BeforeFullname fields
 // that can be used in subsequent calls for pagination.
 func (c *Client) GetHot(ctx context.Context, request *types.PostsRequest) (*types.PostsResponse, error) {
-	if !c.IsConnected() {
-		return nil, &ClientError{Err: "client not connected, call Connect() first"}
+	if err := c.ensureConnected(ctx); err != nil {
+		return nil, err
 	}
 
 	subreddit := ""
@@ -449,8 +475,8 @@ func (c *Client) GetHot(ctx context.Context, request *types.PostsRequest) (*type
 //   - PostsResponse containing the posts and pagination information
 //   - Error if the request fails
 func (c *Client) GetNew(ctx context.Context, request *types.PostsRequest) (*types.PostsResponse, error) {
-	if !c.IsConnected() {
-		return nil, &ClientError{Err: "client not connected, call Connect() first"}
+	if err := c.ensureConnected(ctx); err != nil {
+		return nil, err
 	}
 
 	subreddit := ""
@@ -530,8 +556,8 @@ func (c *Client) GetNew(ctx context.Context, request *types.PostsRequest) (*type
 //   - The post doesn't exist or is in a private subreddit
 //   - The API request fails
 func (c *Client) GetComments(ctx context.Context, request *types.CommentsRequest) (*types.CommentsResponse, error) {
-	if !c.IsConnected() {
-		return nil, &ClientError{Err: "client not connected, call Connect() first"}
+	if err := c.ensureConnected(ctx); err != nil {
+		return nil, err
 	}
 	if request == nil {
 		return nil, &ClientError{Err: "comments request cannot be nil"}
@@ -658,8 +684,8 @@ func (c *Client) GetComments(ctx context.Context, request *types.CommentsRequest
 //
 // Returns an error if any individual request fails.
 func (c *Client) GetCommentsMultiple(ctx context.Context, requests []*types.CommentsRequest) ([]*types.CommentsResponse, error) {
-	if !c.IsConnected() {
-		return nil, &ClientError{Err: "client not connected, call Connect() first"}
+	if err := c.ensureConnected(ctx); err != nil {
+		return nil, err
 	}
 
 	if len(requests) == 0 {
@@ -725,8 +751,8 @@ func (c *Client) GetCommentsMultiple(ctx context.Context, requests []*types.Comm
 //   - The comment IDs are invalid
 //   - The API request fails
 func (c *Client) GetMoreComments(ctx context.Context, request *types.MoreCommentsRequest) ([]*types.Comment, error) {
-	if !c.IsConnected() {
-		return nil, &ClientError{Err: "client not connected, call Connect() first"}
+	if err := c.ensureConnected(ctx); err != nil {
+		return nil, err
 	}
 	if request == nil {
 		return nil, &ClientError{Err: "more comments request cannot be nil"}
