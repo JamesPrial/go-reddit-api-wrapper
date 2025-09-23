@@ -391,6 +391,15 @@ func (c *Client) GetComments(ctx context.Context, subreddit, postID string, opts
 	// Reddit can return either an array [post, comments] or a single Listing object
 	var result []*types.Thing
 
+	// Log the raw response for debugging (if logger is available)
+	if c.config.Logger != nil {
+		previewLen := len(resp)
+		if previewLen > 500 {
+			previewLen = 500
+		}
+		c.config.Logger.Debug("Reddit API raw response", "path", path, "response_preview", string(resp[:previewLen]))
+	}
+
 	// First check if it's an array response
 	if len(resp) > 0 && resp[0] == '[' {
 		if err := json.Unmarshal(resp, &result); err != nil {
@@ -421,6 +430,26 @@ func (c *Client) GetComments(ctx context.Context, subreddit, postID string, opts
 		}
 	} else {
 		return nil, &ClientError{Err: "empty or invalid response from Reddit"}
+	}
+
+	// Log the parsed result structure for debugging
+	if c.config.Logger != nil {
+		c.config.Logger.Debug("Parsed result structure",
+			"path", path,
+			"result_count", len(result),
+			"first_kind", func() string {
+				if len(result) > 0 && result[0] != nil {
+					return result[0].Kind
+				}
+				return "none"
+			}(),
+			"second_kind", func() string {
+				if len(result) > 1 && result[1] != nil {
+					return result[1].Kind
+				}
+				return "none"
+			}(),
+		)
 	}
 
 	// Parse the post and comments
