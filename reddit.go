@@ -292,8 +292,6 @@ func (c *Client) ensureConnected(ctx context.Context) error {
 }
 
 // IsConnected returns true if the client is authenticated and ready to make requests.
-// This should be checked before calling any API methods to ensure the client
-// has been properly connected via Connect().
 func (c *Client) IsConnected() bool {
 	return c.client != nil
 }
@@ -305,7 +303,6 @@ func (c *Client) IsConnected() bool {
 // For user authentication, this will return detailed information about the authenticated user.
 //
 // Returns an error if:
-//   - The client is not connected (call Connect() first)
 //   - The API request fails
 //   - The response cannot be parsed
 //
@@ -353,7 +350,6 @@ func (c *Client) Me(ctx context.Context) (*types.AccountData, error) {
 //   - User permissions (if authenticated with user credentials)
 //
 // Returns an error if:
-//   - The client is not connected
 //   - The subreddit doesn't exist or is private/banned
 //   - The API request fails
 //   - The response cannot be parsed
