@@ -172,14 +172,14 @@ func (c *Client) Do(req *http.Request, v *types.Thing) (*http.Response, error) {
 	return resp, nil
 }
 
-// DoRaw sends an API request and returns the raw response body as bytes.
-// It automatically adds authentication headers to the request.
-func (c *Client) DoRaw(req *http.Request) ([]byte, error) {
+// DoThingArray sends an API request and returns either an array of Things or a single Thing wrapped in an array.
+// Used for the comments endpoint which can return [post, comments] or a single Listing.
+func (c *Client) DoThingArray(req *http.Request) ([]*types.Thing, error) {
 	ctx := req.Context()
 	start := time.Now()
 
 	// Only set auth headers if not already present
-	// (NewRequest already sets them, so this handles direct DoRaw calls)
+	// (NewRequest already sets them, so this handles direct calls)
 	if req.Header.Get("Authorization") == "" {
 		token, err := c.tokenProvider.GetToken(ctx)
 		if err != nil {
@@ -217,7 +217,105 @@ func (c *Client) DoRaw(req *http.Request) ([]byte, error) {
 		return nil, &APIError{Response: resp, Message: fmt.Sprintf("request failed with status %d: %s", resp.StatusCode, string(bodyBytes))}
 	}
 
-	return bodyBytes, nil
+	// Parse the response which can be either an array or a single Thing
+	var result []*types.Thing
+
+	if len(bodyBytes) > 0 && bodyBytes[0] == '[' {
+		// It's an array response
+		if err := json.Unmarshal(bodyBytes, &result); err != nil {
+			return nil, &ClientError{OriginalErr: fmt.Errorf("failed to parse array response: %w", err)}
+		}
+	} else if len(bodyBytes) > 0 && bodyBytes[0] == '{' {
+		// It's a single object - could be a Listing or an error
+		var singleThing types.Thing
+		if err := json.Unmarshal(bodyBytes, &singleThing); err != nil {
+			// Check if it's an error response
+			var errObj struct {
+				Error   string `json:"error"`
+				Message string `json:"message"`
+			}
+			if err := json.Unmarshal(bodyBytes, &errObj); err == nil && errObj.Error != "" {
+				return nil, &APIError{Response: resp, Message: fmt.Sprintf("API error [%s]: %s", errObj.Error, errObj.Message)}
+			}
+			return nil, &ClientError{OriginalErr: fmt.Errorf("failed to parse response: %w", err)}
+		}
+
+		// If it's a Listing with comments, wrap it in an array
+		if singleThing.Kind == "Listing" {
+			result = []*types.Thing{&singleThing}
+		} else {
+			return nil, &ClientError{OriginalErr: fmt.Errorf("unexpected response kind: %s", singleThing.Kind)}
+		}
+	} else {
+		return nil, &ClientError{OriginalErr: fmt.Errorf("empty or invalid response from Reddit")}
+	}
+
+	return result, nil
+}
+
+// DoMoreChildren sends an API request to the morechildren endpoint and returns the Things array.
+func (c *Client) DoMoreChildren(req *http.Request) ([]*types.Thing, error) {
+	ctx := req.Context()
+	start := time.Now()
+
+	// Only set auth headers if not already present
+	if req.Header.Get("Authorization") == "" {
+		token, err := c.tokenProvider.GetToken(ctx)
+		if err != nil {
+			return nil, &ClientError{OriginalErr: fmt.Errorf("failed to get auth token: %w", err)}
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	if req.Header.Get("User-Agent") == "" {
+		req.Header.Set("User-Agent", c.UserAgent)
+	}
+
+	if err := c.waitForRateLimit(ctx); err != nil {
+		c.logWaitFailure(ctx, req, err)
+		return nil, &ClientError{OriginalErr: err}
+	}
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		c.logTransportError(ctx, req, time.Since(start), err)
+		return nil, &ClientError{OriginalErr: err}
+	}
+	defer resp.Body.Close()
+
+	c.applyRateHeaders(resp)
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		c.logBodyReadError(ctx, req, resp, time.Since(start), err)
+		return nil, &ClientError{OriginalErr: err}
+	}
+
+	c.logHTTPResult(ctx, req, resp, bodyBytes, time.Since(start))
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, &APIError{Response: resp, Message: fmt.Sprintf("request failed with status %d: %s", resp.StatusCode, string(bodyBytes))}
+	}
+
+	// Parse the morechildren response structure
+	var response struct {
+		JSON struct {
+			Errors [][]string `json:"errors"`
+			Data   struct {
+				Things []*types.Thing `json:"things"`
+			} `json:"data"`
+		} `json:"json"`
+	}
+
+	if err := json.Unmarshal(bodyBytes, &response); err != nil {
+		return nil, &ClientError{OriginalErr: fmt.Errorf("failed to parse morechildren response: %w", err)}
+	}
+
+	// Check for API errors
+	if len(response.JSON.Errors) > 0 {
+		return nil, &APIError{Response: resp, Message: fmt.Sprintf("API error: %v", response.JSON.Errors[0])}
+	}
+
+	return response.JSON.Data.Things, nil
 }
 
 func buildLimiter(cfg RateLimitConfig) *rate.Limiter {

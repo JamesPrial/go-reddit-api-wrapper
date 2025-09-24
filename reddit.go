@@ -26,7 +26,6 @@ package graw
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -134,9 +133,13 @@ type HTTPClient interface {
 	// This is used for most Reddit API endpoints that return structured data.
 	Do(req *http.Request, v *types.Thing) (*http.Response, error)
 
-	// DoRaw executes an HTTP request and returns the raw response bytes.
-	// This is used for endpoints that return non-standard JSON structures.
-	DoRaw(req *http.Request) ([]byte, error)
+	// DoThingArray executes an HTTP request and returns either an array of Things or a single Thing.
+	// This is used for the comments endpoint which can return [post, comments] or a single Listing.
+	DoThingArray(req *http.Request) ([]*types.Thing, error)
+
+	// DoMoreChildren executes an HTTP request for the morechildren endpoint.
+	// Returns the Things array from the nested json.data structure.
+	DoMoreChildren(req *http.Request) ([]*types.Thing, error)
 }
 
 // Client is the main Reddit API client.
@@ -490,73 +493,9 @@ func (c *Client) GetComments(ctx context.Context, request *types.CommentsRequest
 		return nil, &RequestError{Operation: "create request", URL: path, Err: err}
 	}
 
-	resp, err := c.client.DoRaw(httpReq)
+	result, err := c.client.DoThingArray(httpReq)
 	if err != nil {
 		return nil, &RequestError{Operation: "get comments", URL: path, Err: err}
-	}
-
-	// Reddit can return either an array [post, comments] or a single Listing object
-	var result []*types.Thing
-
-	// Log the raw response for debugging (if logger is available)
-	if c.config.Logger != nil {
-		previewLen := len(resp)
-		if previewLen > 500 {
-			previewLen = 500
-		}
-		c.config.Logger.Debug("Reddit API raw response", "path", path, "response_preview", string(resp[:previewLen]))
-	}
-
-	// First check if it's an array response
-	if len(resp) > 0 && resp[0] == '[' {
-		if err := json.Unmarshal(resp, &result); err != nil {
-			return nil, &ParseError{Operation: "parse comments array response", Err: err}
-		}
-	} else if len(resp) > 0 && resp[0] == '{' {
-		// It's a single object - could be a Listing or an error
-		var singleThing types.Thing
-		if err := json.Unmarshal(resp, &singleThing); err != nil {
-			// Check if it's an error response
-			var errObj struct {
-				Error   string `json:"error"`
-				Message string `json:"message"`
-				Reason  string `json:"reason"`
-			}
-			if err := json.Unmarshal(resp, &errObj); err == nil && errObj.Error != "" {
-				return nil, &APIError{ErrorCode: errObj.Error, Message: errObj.Message}
-			}
-			return nil, &ParseError{Operation: "parse comments response", Err: err}
-		}
-
-		// If it's a Listing with comments, wrap it in an array
-		// Some endpoints return just the comments listing without the post
-		if singleThing.Kind == "Listing" {
-			result = []*types.Thing{&singleThing}
-		} else {
-			return nil, &ParseError{Operation: "comments response", Err: fmt.Errorf("unexpected response kind: %s", singleThing.Kind)}
-		}
-	} else {
-		return nil, &ParseError{Operation: "comments response", Err: fmt.Errorf("empty or invalid response from Reddit")}
-	}
-
-	// Log the parsed result structure for debugging
-	if c.config.Logger != nil {
-		c.config.Logger.Debug("Parsed result structure",
-			"path", path,
-			"result_count", len(result),
-			"first_kind", func() string {
-				if len(result) > 0 && result[0] != nil {
-					return result[0].Kind
-				}
-				return "none"
-			}(),
-			"second_kind", func() string {
-				if len(result) > 1 && result[1] != nil {
-					return result[1].Kind
-				}
-				return "none"
-			}(),
-		)
 	}
 
 	// Parse the post and comments
@@ -694,34 +633,15 @@ func (c *Client) GetMoreComments(ctx context.Context, request *types.MoreComment
 	// Set Content-Type header for form data
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	// The morechildren endpoint returns a different structure
-	var response struct {
-		JSON struct {
-			Errors [][]string `json:"errors"`
-			Data   struct {
-				Things []*types.Thing `json:"things"`
-			} `json:"data"`
-		} `json:"json"`
-	}
-
-	// Make authenticated request
-	respBody, err := c.client.DoRaw(req)
+	// Make authenticated request to morechildren endpoint
+	things, err := c.client.DoMoreChildren(req)
 	if err != nil {
 		return nil, &RequestError{Operation: "get more comments", URL: MoreChildrenURL, Err: err}
 	}
 
-	if err := json.Unmarshal(respBody, &response); err != nil {
-		return nil, &ParseError{Operation: "parse more comments response", Err: err}
-	}
-
-	// Check for API errors
-	if len(response.JSON.Errors) > 0 {
-		return nil, &APIError{Message: fmt.Sprintf("API error: %v", response.JSON.Errors[0])}
-	}
-
 	// Extract comments from the response
 	var comments []*types.Comment
-	for _, thing := range response.JSON.Data.Things {
+	for _, thing := range things {
 		if thing.Kind == "t1" {
 			comment, err := c.parser.ParseComment(thing)
 			if err != nil {
