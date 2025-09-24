@@ -362,54 +362,7 @@ func (c *Client) GetSubreddit(ctx context.Context, name string) (*types.Subreddi
 // The returned PostsResponse includes AfterFullname and BeforeFullname fields
 // that can be used in subsequent calls for pagination.
 func (c *Client) GetHot(ctx context.Context, request *types.PostsRequest) (*types.PostsResponse, error) {
-	subreddit := ""
-	if request != nil {
-		subreddit = request.Subreddit
-	}
-
-	path := "hot"
-	if subreddit != "" {
-		path = SubURL + subreddit + "/hot"
-	}
-
-	// Build query parameters
-	params := buildPaginationParams(&request.Pagination)
-
-	httpReq, err := c.client.NewRequest(ctx, http.MethodGet, path, nil, params)
-	if err != nil {
-		return nil, &RequestError{Operation: "create request", URL: path, Err: err}
-	}
-
-	// Add authentication headers
-	if err := c.addAuthHeaders(ctx, httpReq); err != nil {
-		return nil, &AuthError{Message: "failed to add auth headers", Err: err}
-	}
-
-	var result types.Thing
-	_, err = c.client.Do(httpReq, &result)
-	if err != nil {
-		return nil, &RequestError{Operation: "get hot posts", URL: path, Err: err}
-	}
-
-	posts, err := c.parser.ExtractPosts(&result)
-	if err != nil {
-		return nil, &ParseError{Operation: "parse posts", Err: err}
-	}
-
-	var after, before string
-	listing, err := c.parser.ParseThing(&result)
-	if err == nil {
-		if listingData, ok := listing.(*types.ListingData); ok {
-			after = listingData.AfterFullname
-			before = listingData.BeforeFullname
-		}
-	}
-
-	return &types.PostsResponse{
-		Posts:          posts,
-		AfterFullname:  after,
-		BeforeFullname: before,
-	}, nil
+	return c.getPosts(ctx, request, "hot")
 }
 
 // GetNew retrieves new posts from a subreddit or the Reddit front page.
@@ -423,20 +376,25 @@ func (c *Client) GetHot(ctx context.Context, request *types.PostsRequest) (*type
 //   - PostsResponse containing the posts and pagination information
 //   - Error if the request fails
 func (c *Client) GetNew(ctx context.Context, request *types.PostsRequest) (*types.PostsResponse, error) {
-	subreddit := ""
+	return c.getPosts(ctx, request, "new")
+}
 
+// getPosts is the common implementation for fetching posts from different sort endpoints.
+func (c *Client) getPosts(ctx context.Context, request *types.PostsRequest, sort string) (*types.PostsResponse, error) {
+	subreddit := ""
+	var pagination *types.Pagination
 	if request != nil {
 		subreddit = request.Subreddit
-
+		pagination = &request.Pagination
 	}
 
-	path := "new"
+	path := sort
 	if subreddit != "" {
-		path = SubURL + subreddit + "/new"
+		path = SubURL + subreddit + "/" + sort
 	}
 
 	// Build query parameters
-	params := buildPaginationParams(&request.Pagination)
+	params := buildPaginationParams(pagination)
 
 	httpReq, err := c.client.NewRequest(ctx, http.MethodGet, path, nil, params)
 	if err != nil {
@@ -451,7 +409,7 @@ func (c *Client) GetNew(ctx context.Context, request *types.PostsRequest) (*type
 	var result types.Thing
 	_, err = c.client.Do(httpReq, &result)
 	if err != nil {
-		return nil, &RequestError{Operation: "get new posts", URL: path, Err: err}
+		return nil, &RequestError{Operation: "get " + sort + " posts", URL: path, Err: err}
 	}
 
 	posts, err := c.parser.ExtractPosts(&result)
