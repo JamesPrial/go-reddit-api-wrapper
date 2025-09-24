@@ -232,7 +232,7 @@ if err != nil {
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+This project is licensed under the MIT License - see the LICENSE.md file for details.
 
 ## Reddit API Documentation
 
