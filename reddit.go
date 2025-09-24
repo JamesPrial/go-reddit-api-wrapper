@@ -51,6 +51,12 @@ const (
 	DefaultAuthURL = "https://www.reddit.com/"
 	// DefaultUserAgent is the default user agent string
 	DefaultUserAgent = "go-reddit-api-wrapper/0.01"
+	// MoreChildrenURL is the endpoint for loading more comments
+	MoreChildrenURL = "api/morechildren"
+	// MeURL is the endpoint for fetching the authenticated user's info
+	MeURL = "api/v1/me"
+
+	SubURL = "r/"
 	// DefaultTimeout is the default HTTP client timeout
 	DefaultTimeout = 30 * time.Second
 )
@@ -313,15 +319,15 @@ func (c *Client) Me(ctx context.Context) (*types.AccountData, error) {
 		return nil, err
 	}
 
-	req, err := c.client.NewRequest(ctx, http.MethodGet, "api/v1/me", nil)
+	req, err := c.client.NewRequest(ctx, http.MethodGet, MeURL, nil)
 	if err != nil {
-		return nil, &RequestError{Operation: "create request", URL: "api/v1/me", Err: err}
+		return nil, &RequestError{Operation: "create request", URL: MeURL, Err: err}
 	}
 
 	var result types.Thing
 	_, err = c.client.Do(req, &result)
 	if err != nil {
-		return nil, &RequestError{Operation: "get user info", URL: "api/v1/me", Err: err}
+		return nil, &RequestError{Operation: "get user info", URL: MeURL, Err: err}
 	}
 
 	// Parse the account data
@@ -361,7 +367,7 @@ func (c *Client) GetSubreddit(ctx context.Context, name string) (*types.Subreddi
 		return nil, err
 	}
 
-	path := "r/" + name + "/about"
+	path := SubURL + name + "/about"
 	req, err := c.client.NewRequest(ctx, http.MethodGet, path, nil)
 	if err != nil {
 		return nil, &RequestError{Operation: "create request", URL: path, Err: err}
@@ -370,7 +376,7 @@ func (c *Client) GetSubreddit(ctx context.Context, name string) (*types.Subreddi
 	var result types.Thing
 	_, err = c.client.Do(req, &result)
 	if err != nil {
-		return nil, &RequestError{Operation: "get subreddit", URL: "r/" + name + "/about", Err: err}
+		return nil, &RequestError{Operation: "get subreddit", URL: SubURL + name + "/about", Err: err}
 	}
 
 	// Parse the subreddit data
@@ -412,7 +418,7 @@ func (c *Client) GetHot(ctx context.Context, request *types.PostsRequest) (*type
 
 	path := "hot"
 	if subreddit != "" {
-		path = "r/" + subreddit + "/hot"
+		path = SubURL + subreddit + "/hot"
 	}
 
 	// Build query parameters
@@ -474,7 +480,7 @@ func (c *Client) GetNew(ctx context.Context, request *types.PostsRequest) (*type
 
 	path := "new"
 	if subreddit != "" {
-		path = "r/" + subreddit + "/new"
+		path = SubURL + subreddit + "/new"
 	}
 
 	// Build query parameters
@@ -543,7 +549,7 @@ func (c *Client) GetComments(ctx context.Context, request *types.CommentsRequest
 		return nil, &ConfigError{Message: "subreddit and postID are required"}
 	}
 
-	path := "r/" + request.Subreddit + "/comments/" + request.PostID
+	path := SubURL + request.Subreddit + "/comments/" + request.PostID
 
 	// Build query parameters
 	params := buildPaginationParams(&request.Pagination)
@@ -679,7 +685,7 @@ func (c *Client) GetCommentsMultiple(ctx context.Context, requests []*types.Comm
 	// Collect results
 	results := make([]*types.CommentsResponse, len(requests))
 	var firstError error
-	for i := 0; i < len(requests); i++ {
+	for range requests {
 		res := <-resultChan
 		if res.err != nil && firstError == nil {
 			firstError = res.err
@@ -755,9 +761,9 @@ func (c *Client) GetMoreComments(ctx context.Context, request *types.MoreComment
 	}
 
 	// Create POST request with form data
-	req, err := c.client.NewRequest(ctx, http.MethodPost, "api/morechildren", strings.NewReader(formData.Encode()))
+	req, err := c.client.NewRequest(ctx, http.MethodPost, MoreChildrenURL, strings.NewReader(formData.Encode()))
 	if err != nil {
-		return nil, &RequestError{Operation: "create request", URL: "api/morechildren", Err: err}
+		return nil, &RequestError{Operation: "create request", URL: MoreChildrenURL, Err: err}
 	}
 
 	// Set Content-Type header for form data
@@ -776,7 +782,7 @@ func (c *Client) GetMoreComments(ctx context.Context, request *types.MoreComment
 	// Make authenticated request
 	respBody, err := c.client.DoRaw(req)
 	if err != nil {
-		return nil, &RequestError{Operation: "get more comments", URL: "api/morechildren", Err: err}
+		return nil, &RequestError{Operation: "get more comments", URL: MoreChildrenURL, Err: err}
 	}
 
 	if err := json.Unmarshal(respBody, &response); err != nil {
