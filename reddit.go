@@ -18,10 +18,6 @@
 //		log.Fatal(err)
 //	}
 //
-//	if err := client.Connect(ctx); err != nil {
-//		log.Fatal(err)
-//	}
-//
 //	posts, err := client.GetHot(ctx, &types.PostsRequest{Subreddit: "golang"})
 //	if err != nil {
 //		log.Fatal(err)
@@ -145,7 +141,7 @@ type HTTPClient interface {
 
 // Client is the main Reddit API client.
 // It provides methods for common Reddit operations like fetching posts, comments,
-// and subreddit information. All methods require the client to be connected first.
+// and subreddit information. The client is ready to use immediately after creation.
 //
 // Example usage:
 //
@@ -154,37 +150,40 @@ type HTTPClient interface {
 //		return err
 //	}
 //
-//	if err := client.Connect(ctx); err != nil {
-//		return err
-//	}
-//
-//	// Now the client is ready to make API calls
+//	// The client is ready to make API calls
 //	posts, err := client.GetHot(ctx, &types.PostsRequest{Subreddit: "golang", Limit: 25})
 type Client struct {
-	client  HTTPClient
-	auth    TokenProvider
-	config  *Config
-	parser  *internal.Parser
-	connMgr *internal.ConnectionManager
+	client HTTPClient
+	auth   TokenProvider
+	config *Config
+	parser *internal.Parser
 }
 
 // NewClient creates a new Reddit client with the provided configuration.
-// It validates the configuration and sets up the authentication mechanism.
+// It validates the configuration, authenticates with Reddit, and returns a ready-to-use client.
 //
 // The function will:
 //   - Validate that required configuration fields are present
 //   - Set default values for optional fields
 //   - Create an appropriate authenticator based on the provided credentials
-//   - Return a client ready to be connected
+//   - Authenticate with Reddit and obtain an access token
+//   - Initialize the internal HTTP client with authentication
+//   - Return a client ready for making API calls
 //
 // Returns an error if:
 //   - config is nil
 //   - ClientID or ClientSecret are missing
-//   - Authentication setup fails
+//   - Authentication fails (invalid credentials, network issues, etc.)
+//   - HTTP client initialization fails
 //
-// Note: This function does not perform authentication. Call Connect() after
-// creating the client to authenticate and prepare it for API calls.
+// After successful creation, the client is immediately ready to use for API calls.
 func NewClient(config *Config) (*Client, error) {
+	return NewClientWithContext(context.Background(), config)
+}
+
+// NewClientWithContext creates a new Reddit client with the provided context and configuration.
+// This allows cancellation of the authentication process if needed.
+func NewClientWithContext(ctx context.Context, config *Config) (*Client, error) {
 	if config == nil {
 		return nil, &ConfigError{Message: "config cannot be nil"}
 	}
@@ -229,70 +228,41 @@ func NewClient(config *Config) (*Client, error) {
 		return nil, &AuthError{Message: "failed to create authenticator", Err: err}
 	}
 
-	return &Client{
-		auth:    auth,
-		config:  config,
-		parser:  internal.NewParser(),
-		connMgr: internal.NewConnectionManager(),
-	}, nil
-}
-
-// Connect authenticates with Reddit and initializes the internal HTTP client.
-// It is safe to call Connect multiple times; initialization will only occur once.
-//
-// The function will:
-//   - Authenticate with Reddit using the provided credentials
-//   - Set up the internal HTTP client with proper authentication
-//   - Prepare the client for making API requests
-//
-// Returns an error if:
-//   - Authentication fails (invalid credentials, network issues, etc.)
-//   - HTTP client initialization fails
-//
-// After successful connection, IsConnected() will return true and all API
-// methods will be available for use.
-func (c *Client) Connect(ctx context.Context) error {
-	return c.connMgr.Initialize(ctx, c.initialize)
-}
-
-// initialize performs the underlying connection setup work.
-func (c *Client) initialize(ctx context.Context) error {
 	// Validate that we can get a token before creating the client
-	_, err := c.auth.GetToken(ctx)
+	_, err = auth.GetToken(ctx)
 	if err != nil {
-		return &AuthError{Message: "failed to authenticate", Err: err}
+		return nil, &AuthError{Message: "failed to authenticate", Err: err}
 	}
 
 	// Create internal HTTP client with token provider
-	client, err := internal.NewClient(
-		c.config.HTTPClient,
-		c.auth,
-		c.config.BaseURL,
-		c.config.UserAgent,
-		c.config.Logger,
+	httpClient, err := internal.NewClient(
+		config.HTTPClient,
+		auth,
+		config.BaseURL,
+		config.UserAgent,
+		config.Logger,
 	)
 	if err != nil {
-		return &RequestError{Operation: "create HTTP client", Err: err}
+		return nil, &RequestError{Operation: "create HTTP client", Err: err}
 	}
 
-	c.client = client
-	return nil
+	return &Client{
+		client: httpClient,
+		auth:   auth,
+		config: config,
+		parser: internal.NewParser(),
+	}, nil
 }
 
-// ensureConnected lazily initializes the client before handling a request.
-func (c *Client) ensureConnected(ctx context.Context) error {
-	if err := c.Connect(ctx); err != nil {
-		return err
-	}
-
+// ensureConnected verifies the client is properly initialized.
+func (c *Client) ensureConnected(_ context.Context) error {
 	if !c.IsConnected() {
-		return &StateError{Message: "client not connected, call Connect() first"}
+		return &StateError{Message: "client not properly initialized"}
 	}
-
 	return nil
 }
 
-// IsConnected returns true if the client is authenticated and ready to make requests.
+// IsConnected returns true if the client is properly initialized and ready to make requests.
 func (c *Client) IsConnected() bool {
 	return c.client != nil
 }

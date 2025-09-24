@@ -1,6 +1,6 @@
 // Package main demonstrates usage of the go-reddit-api-wrapper library.
 // This example shows how to:
-//   - Configure and connect to Reddit's API
+//   - Configure and authenticate with Reddit's API
 //   - Fetch hot posts from a subreddit
 //   - Get subreddit information
 //   - Retrieve comments for posts
@@ -61,16 +61,11 @@ func main() {
 		Logger:       logger,
 	}
 
-	// Create the client
-	client, err := graw.NewClient(config)
+	// Create the client (automatically authenticates)
+	ctx := context.Background()
+	client, err := graw.NewClientWithContext(ctx, config)
 	if err != nil {
 		log.Fatalf("Failed to create client: %v", err)
-	}
-
-	// Connect to Reddit (authenticate)
-	ctx := context.Background()
-	if err := client.Connect(ctx); err != nil {
-		log.Fatalf("Failed to connect to Reddit: %v", err)
 	}
 
 	fmt.Println("Successfully connected to Reddit!")
