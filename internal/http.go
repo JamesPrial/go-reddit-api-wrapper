@@ -172,24 +172,27 @@ func (c *Client) Do(req *http.Request, v *types.Thing) (*http.Response, error) {
 	return resp, nil
 }
 
+// ensureAuth verifies that authentication headers are present on the request.
+// Returns an error if Authorization or User-Agent headers are missing.
+func (c *Client) ensureAuth(req *http.Request) error {
+	if req.Header.Get("Authorization") == "" {
+		return &ClientError{OriginalErr: fmt.Errorf("request missing Authorization header")}
+	}
+	if req.Header.Get("User-Agent") == "" {
+		return &ClientError{OriginalErr: fmt.Errorf("request missing User-Agent header")}
+	}
+	return nil
+}
+
 // DoThingArray sends an API request and returns either an array of Things or a single Thing wrapped in an array.
 // Used for the comments endpoint which can return [post, comments] or a single Listing.
 func (c *Client) DoThingArray(req *http.Request) ([]*types.Thing, error) {
+	if err := c.ensureAuth(req); err != nil {
+		return nil, err
+	}
+
 	ctx := req.Context()
 	start := time.Now()
-
-	// Only set auth headers if not already present
-	// (NewRequest already sets them, so this handles direct calls)
-	if req.Header.Get("Authorization") == "" {
-		token, err := c.tokenProvider.GetToken(ctx)
-		if err != nil {
-			return nil, &ClientError{OriginalErr: fmt.Errorf("failed to get auth token: %w", err)}
-		}
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	if req.Header.Get("User-Agent") == "" {
-		req.Header.Set("User-Agent", c.UserAgent)
-	}
 
 	if err := c.waitForRateLimit(ctx); err != nil {
 		c.logWaitFailure(ctx, req, err)
@@ -255,20 +258,12 @@ func (c *Client) DoThingArray(req *http.Request) ([]*types.Thing, error) {
 
 // DoMoreChildren sends an API request to the morechildren endpoint and returns the Things array.
 func (c *Client) DoMoreChildren(req *http.Request) ([]*types.Thing, error) {
+	if err := c.ensureAuth(req); err != nil {
+		return nil, err
+	}
+
 	ctx := req.Context()
 	start := time.Now()
-
-	// Only set auth headers if not already present
-	if req.Header.Get("Authorization") == "" {
-		token, err := c.tokenProvider.GetToken(ctx)
-		if err != nil {
-			return nil, &ClientError{OriginalErr: fmt.Errorf("failed to get auth token: %w", err)}
-		}
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	if req.Header.Get("User-Agent") == "" {
-		req.Header.Set("User-Agent", c.UserAgent)
-	}
 
 	if err := c.waitForRateLimit(ctx); err != nil {
 		c.logWaitFailure(ctx, req, err)
