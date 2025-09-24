@@ -50,7 +50,7 @@ const (
 	// MeURL is the endpoint for fetching the authenticated user's info
 	MeURL = "api/v1/me"
 
-	SubURL = "r/"
+	SubPrefixURL = "r/"
 	// DefaultTimeout is the default HTTP client timeout
 	DefaultTimeout = 30 * time.Second
 )
@@ -317,7 +317,7 @@ func (c *Client) Me(ctx context.Context) (*types.AccountData, error) {
 //
 // This method works with both application-only and user authentication.
 func (c *Client) GetSubreddit(ctx context.Context, name string) (*types.SubredditData, error) {
-	path := SubURL + name + "/about"
+	path := SubPrefixURL + name + "/about"
 	req, err := c.client.NewRequest(ctx, http.MethodGet, path, nil)
 	if err != nil {
 		return nil, &RequestError{Operation: "create request", URL: path, Err: err}
@@ -331,7 +331,7 @@ func (c *Client) GetSubreddit(ctx context.Context, name string) (*types.Subreddi
 	var result types.Thing
 	_, err = c.client.Do(req, &result)
 	if err != nil {
-		return nil, &RequestError{Operation: "get subreddit", URL: SubURL + name + "/about", Err: err}
+		return nil, &RequestError{Operation: "get subreddit", URL: SubPrefixURL + name + "/about", Err: err}
 	}
 
 	// Parse the subreddit data
@@ -390,7 +390,7 @@ func (c *Client) getPosts(ctx context.Context, request *types.PostsRequest, sort
 
 	path := sort
 	if subreddit != "" {
-		path = SubURL + subreddit + "/" + sort
+		path = SubPrefixURL + subreddit + "/" + sort
 	}
 
 	// Build query parameters
@@ -461,7 +461,7 @@ func (c *Client) GetComments(ctx context.Context, request *types.CommentsRequest
 		return nil, &ConfigError{Message: "subreddit and postID are required"}
 	}
 
-	path := SubURL + request.Subreddit + "/comments/" + request.PostID
+	path := SubPrefixURL + request.Subreddit + "/comments/" + request.PostID
 
 	// Build query parameters
 	params := buildPaginationParams(&request.Pagination)
