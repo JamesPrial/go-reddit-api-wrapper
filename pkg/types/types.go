@@ -159,6 +159,7 @@ type MoreCommentsRequest struct {
 
 // SubredditData contains the data for a Subreddit.
 type SubredditData struct {
+	ThingData
 	AccountsActive       int     `json:"accounts_active"`
 	CommentScoreHideMins int     `json:"comment_score_hide_mins"`
 	Description          string  `json:"description"`
@@ -185,6 +186,7 @@ type SubredditData struct {
 
 // MessageData contains the data for a private Message.
 type MessageData struct {
+	ThingData
 	Created
 	Author           string          `json:"author"`
 	Body             string          `json:"body"`
@@ -194,7 +196,6 @@ type MessageData struct {
 	FirstMessageName *string         `json:"first_message_name"`
 	Likes            *bool           `json:"likes"`
 	LinkTitle        string          `json:"link_title"`
-	Name             string          `json:"name"`
 	New              bool            `json:"new"`
 	ParentID         *string         `json:"parent_id"`
 	RepliesData      json.RawMessage `json:"replies"` // Raw replies data, handled separately
@@ -205,27 +206,25 @@ type MessageData struct {
 
 // AccountData contains the data for a user Account.
 type AccountData struct {
+	ThingData
 	Created
 	CommentKarma     int    `json:"comment_karma"`
 	HasMail          *bool  `json:"has_mail"`
 	HasModMail       *bool  `json:"has_mod_mail"`
 	HasVerifiedEmail *bool  `json:"has_verified_email"`
-	ID               string `json:"id"`
 	InboxCount       int    `json:"inbox_count,omitempty"`
 	IsFriend         bool   `json:"is_friend"`
 	IsGold           bool   `json:"is_gold"`
 	IsMod            bool   `json:"is_mod"`
 	LinkKarma        int    `json:"link_karma"`
 	Modhash          string `json:"modhash,omitempty"`
-	Name             string `json:"name"`
 	Over18           bool   `json:"over_18"`
 }
 
 // MoreData represents a "more" object, used for comment pagination.
 type MoreData struct {
+	ThingData
 	Children []string `json:"children"`
-	ID       string   `json:"id"`
-	Name     string   `json:"name"`
 }
 
 // Post represents a Reddit post with all its fields
