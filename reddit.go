@@ -183,12 +183,12 @@ type Client struct {
 // creating the client to authenticate and prepare it for API calls.
 func NewClient(config *Config) (*Client, error) {
 	if config == nil {
-		return nil, &ClientError{Err: "config cannot be nil"}
+		return nil, &ConfigError{Message: "config cannot be nil"}
 	}
 
 	// Validate required fields
 	if config.ClientID == "" || config.ClientSecret == "" {
-		return nil, &ClientError{Err: "ClientID and ClientSecret are required"}
+		return nil, &ConfigError{Message: "ClientID and ClientSecret are required"}
 	}
 
 	// Set defaults
@@ -223,7 +223,7 @@ func NewClient(config *Config) (*Client, error) {
 		config.Logger,
 	)
 	if err != nil {
-		return nil, &ClientError{Err: err.Error()}
+		return nil, &AuthError{Message: "failed to create authenticator", Err: err}
 	}
 
 	return &Client{
@@ -260,7 +260,7 @@ func (c *Client) initialize(ctx context.Context) error {
 	// Validate that we can get a token before creating the client
 	_, err := c.auth.GetToken(ctx)
 	if err != nil {
-		return &ClientError{Err: "failed to authenticate: " + err.Error()}
+		return &AuthError{Message: "failed to authenticate", Err: err}
 	}
 
 	// Create internal HTTP client with token provider
@@ -272,7 +272,7 @@ func (c *Client) initialize(ctx context.Context) error {
 		c.config.Logger,
 	)
 	if err != nil {
-		return &ClientError{Err: "failed to create HTTP client: " + err.Error()}
+		return &RequestError{Operation: "create HTTP client", Err: err}
 	}
 
 	c.client = client
@@ -286,7 +286,7 @@ func (c *Client) ensureConnected(ctx context.Context) error {
 	}
 
 	if !c.IsConnected() {
-		return &ClientError{Err: "client not connected, call Connect() first"}
+		return &StateError{Message: "client not connected, call Connect() first"}
 	}
 
 	return nil
@@ -315,24 +315,24 @@ func (c *Client) Me(ctx context.Context) (*types.AccountData, error) {
 
 	req, err := c.client.NewRequest(ctx, http.MethodGet, "api/v1/me", nil)
 	if err != nil {
-		return nil, &ClientError{Err: "failed to create request: " + err.Error()}
+		return nil, &RequestError{Operation: "create request", URL: "api/v1/me", Err: err}
 	}
 
 	var result types.Thing
 	_, err = c.client.Do(req, &result)
 	if err != nil {
-		return nil, &ClientError{Err: "failed to get user info: " + err.Error()}
+		return nil, &RequestError{Operation: "get user info", URL: "api/v1/me", Err: err}
 	}
 
 	// Parse the account data
 	parsed, err := c.parser.ParseThing(&result)
 	if err != nil {
-		return nil, &ClientError{Err: "failed to parse user info: " + err.Error()}
+		return nil, &ParseError{Operation: "parse user info", Err: err}
 	}
 
 	account, ok := parsed.(*types.AccountData)
 	if !ok {
-		return nil, &ClientError{Err: "unexpected response type"}
+		return nil, &ParseError{Operation: "user info response", Err: fmt.Errorf("unexpected response type")}
 	}
 
 	return account, nil
@@ -364,24 +364,24 @@ func (c *Client) GetSubreddit(ctx context.Context, name string) (*types.Subreddi
 	path := "r/" + name + "/about"
 	req, err := c.client.NewRequest(ctx, http.MethodGet, path, nil)
 	if err != nil {
-		return nil, &ClientError{Err: "failed to create request: " + err.Error()}
+		return nil, &RequestError{Operation: "create request", URL: path, Err: err}
 	}
 
 	var result types.Thing
 	_, err = c.client.Do(req, &result)
 	if err != nil {
-		return nil, &ClientError{Err: "failed to get subreddit: " + err.Error()}
+		return nil, &RequestError{Operation: "get subreddit", URL: "r/" + name + "/about", Err: err}
 	}
 
 	// Parse the subreddit data
 	parsed, err := c.parser.ParseThing(&result)
 	if err != nil {
-		return nil, &ClientError{Err: "failed to parse subreddit: " + err.Error()}
+		return nil, &ParseError{Operation: "parse subreddit", Err: err}
 	}
 
 	subreddit, ok := parsed.(*types.SubredditData)
 	if !ok {
-		return nil, &ClientError{Err: "unexpected response type"}
+		return nil, &ParseError{Operation: "subreddit response", Err: fmt.Errorf("unexpected response type")}
 	}
 
 	return subreddit, nil
@@ -420,18 +420,18 @@ func (c *Client) GetHot(ctx context.Context, request *types.PostsRequest) (*type
 
 	httpReq, err := c.client.NewRequest(ctx, http.MethodGet, path, nil, params)
 	if err != nil {
-		return nil, &ClientError{Err: "failed to create request: " + err.Error()}
+		return nil, &RequestError{Operation: "create request", URL: path, Err: err}
 	}
 
 	var result types.Thing
 	_, err = c.client.Do(httpReq, &result)
 	if err != nil {
-		return nil, &ClientError{Err: "failed to get hot posts: " + err.Error()}
+		return nil, &RequestError{Operation: "get hot posts", URL: path, Err: err}
 	}
 
 	posts, err := c.parser.ExtractPosts(&result)
 	if err != nil {
-		return nil, &ClientError{Err: "failed to parse posts: " + err.Error()}
+		return nil, &ParseError{Operation: "parse posts", Err: err}
 	}
 
 	var after, before string
@@ -482,18 +482,18 @@ func (c *Client) GetNew(ctx context.Context, request *types.PostsRequest) (*type
 
 	httpReq, err := c.client.NewRequest(ctx, http.MethodGet, path, nil, params)
 	if err != nil {
-		return nil, &ClientError{Err: "failed to create request: " + err.Error()}
+		return nil, &RequestError{Operation: "create request", URL: path, Err: err}
 	}
 
 	var result types.Thing
 	_, err = c.client.Do(httpReq, &result)
 	if err != nil {
-		return nil, &ClientError{Err: "failed to get new posts: " + err.Error()}
+		return nil, &RequestError{Operation: "get new posts", URL: path, Err: err}
 	}
 
 	posts, err := c.parser.ExtractPosts(&result)
 	if err != nil {
-		return nil, &ClientError{Err: "failed to parse posts: " + err.Error()}
+		return nil, &ParseError{Operation: "parse posts", Err: err}
 	}
 
 	var after, before string
@@ -537,10 +537,10 @@ func (c *Client) GetComments(ctx context.Context, request *types.CommentsRequest
 		return nil, err
 	}
 	if request == nil {
-		return nil, &ClientError{Err: "comments request cannot be nil"}
+		return nil, &ConfigError{Message: "comments request cannot be nil"}
 	}
 	if request.Subreddit == "" || request.PostID == "" {
-		return nil, &ClientError{Err: "subreddit and postID are required"}
+		return nil, &ConfigError{Message: "subreddit and postID are required"}
 	}
 
 	path := "r/" + request.Subreddit + "/comments/" + request.PostID
@@ -549,12 +549,12 @@ func (c *Client) GetComments(ctx context.Context, request *types.CommentsRequest
 	params := buildPaginationParams(&request.Pagination)
 	httpReq, err := c.client.NewRequest(ctx, http.MethodGet, path, nil, params)
 	if err != nil {
-		return nil, &ClientError{Err: "failed to create request: " + err.Error()}
+		return nil, &RequestError{Operation: "create request", URL: path, Err: err}
 	}
 
 	resp, err := c.client.DoRaw(httpReq)
 	if err != nil {
-		return nil, &ClientError{Err: "failed to get comments: " + err.Error()}
+		return nil, &RequestError{Operation: "get comments", URL: path, Err: err}
 	}
 
 	// Reddit can return either an array [post, comments] or a single Listing object
@@ -572,7 +572,7 @@ func (c *Client) GetComments(ctx context.Context, request *types.CommentsRequest
 	// First check if it's an array response
 	if len(resp) > 0 && resp[0] == '[' {
 		if err := json.Unmarshal(resp, &result); err != nil {
-			return nil, &ClientError{Err: "failed to parse comments array response: " + err.Error()}
+			return nil, &ParseError{Operation: "parse comments array response", Err: err}
 		}
 	} else if len(resp) > 0 && resp[0] == '{' {
 		// It's a single object - could be a Listing or an error
@@ -585,9 +585,9 @@ func (c *Client) GetComments(ctx context.Context, request *types.CommentsRequest
 				Reason  string `json:"reason"`
 			}
 			if err := json.Unmarshal(resp, &errObj); err == nil && errObj.Error != "" {
-				return nil, &ClientError{Err: fmt.Sprintf("reddit API error: %s - %s", errObj.Error, errObj.Message)}
+				return nil, &APIError{ErrorCode: errObj.Error, Message: errObj.Message}
 			}
-			return nil, &ClientError{Err: "failed to parse comments response: " + err.Error()}
+			return nil, &ParseError{Operation: "parse comments response", Err: err}
 		}
 
 		// If it's a Listing with comments, wrap it in an array
@@ -595,10 +595,10 @@ func (c *Client) GetComments(ctx context.Context, request *types.CommentsRequest
 		if singleThing.Kind == "Listing" {
 			result = []*types.Thing{&singleThing}
 		} else {
-			return nil, &ClientError{Err: fmt.Sprintf("unexpected response kind: %s", singleThing.Kind)}
+			return nil, &ParseError{Operation: "comments response", Err: fmt.Errorf("unexpected response kind: %s", singleThing.Kind)}
 		}
 	} else {
-		return nil, &ClientError{Err: "empty or invalid response from Reddit"}
+		return nil, &ParseError{Operation: "comments response", Err: fmt.Errorf("empty or invalid response from Reddit")}
 	}
 
 	// Log the parsed result structure for debugging
@@ -624,7 +624,7 @@ func (c *Client) GetComments(ctx context.Context, request *types.CommentsRequest
 	// Parse the post and comments
 	post, comments, moreIDs, err := c.parser.ExtractPostAndComments(result)
 	if err != nil {
-		return nil, &ClientError{Err: "failed to parse comments: " + err.Error()}
+		return nil, &ParseError{Operation: "parse comments", Err: err}
 	}
 
 	// Note: post may be nil if Reddit only returned comments without the post
@@ -723,10 +723,10 @@ func (c *Client) GetMoreComments(ctx context.Context, request *types.MoreComment
 		return nil, err
 	}
 	if request == nil {
-		return nil, &ClientError{Err: "more comments request cannot be nil"}
+		return nil, &ConfigError{Message: "more comments request cannot be nil"}
 	}
 	if request.LinkID == "" {
-		return nil, &ClientError{Err: "linkID is required"}
+		return nil, &ConfigError{Message: "linkID is required"}
 	}
 	if len(request.CommentIDs) == 0 {
 		return []*types.Comment{}, nil
@@ -757,7 +757,7 @@ func (c *Client) GetMoreComments(ctx context.Context, request *types.MoreComment
 	// Create POST request with form data
 	req, err := c.client.NewRequest(ctx, http.MethodPost, "api/morechildren", strings.NewReader(formData.Encode()))
 	if err != nil {
-		return nil, &ClientError{Err: "failed to create request: " + err.Error()}
+		return nil, &RequestError{Operation: "create request", URL: "api/morechildren", Err: err}
 	}
 
 	// Set Content-Type header for form data
@@ -776,16 +776,16 @@ func (c *Client) GetMoreComments(ctx context.Context, request *types.MoreComment
 	// Make authenticated request
 	respBody, err := c.client.DoRaw(req)
 	if err != nil {
-		return nil, &ClientError{Err: "failed to get more comments: " + err.Error()}
+		return nil, &RequestError{Operation: "get more comments", URL: "api/morechildren", Err: err}
 	}
 
 	if err := json.Unmarshal(respBody, &response); err != nil {
-		return nil, &ClientError{Err: "failed to parse more comments response: " + err.Error()}
+		return nil, &ParseError{Operation: "parse more comments response", Err: err}
 	}
 
 	// Check for API errors
 	if len(response.JSON.Errors) > 0 {
-		return nil, &ClientError{Err: fmt.Sprintf("API error: %v", response.JSON.Errors[0])}
+		return nil, &APIError{Message: fmt.Sprintf("API error: %v", response.JSON.Errors[0])}
 	}
 
 	// Extract comments from the response
@@ -821,19 +821,128 @@ func buildPaginationParams(pagination *types.Pagination) url.Values {
 	return params
 }
 
-// ClientError represents an error from the Reddit client.
-// It wraps various types of errors that can occur during API operations,
-// including authentication errors, network errors, and API-specific errors.
-//
-// ClientError provides a consistent error interface for all client operations.
-// The underlying error details are stored in the Err field.
-type ClientError struct {
-	// Err contains the detailed error message describing what went wrong
-	Err string
+// ConfigError represents a configuration or validation error.
+// This error is returned when the client configuration is invalid or incomplete.
+type ConfigError struct {
+	// Message contains the detailed error message describing the configuration issue
+	Message string
 }
 
-// Error implements the error interface for ClientError.
-// It returns a formatted error message prefixed with "reddit client error: ".
-func (e *ClientError) Error() string {
-	return "reddit client error: " + e.Err
+// Error implements the error interface for ConfigError.
+func (e *ConfigError) Error() string {
+	return "reddit config error: " + e.Message
+}
+
+// AuthError represents an authentication or authorization error.
+// This error is returned when authentication fails or credentials are invalid.
+type AuthError struct {
+	// Message contains the detailed error message
+	Message string
+	// Err contains the underlying error if available
+	Err error
+}
+
+// Error implements the error interface for AuthError.
+func (e *AuthError) Error() string {
+	if e.Err != nil {
+		return "reddit auth error: " + e.Message + ": " + e.Err.Error()
+	}
+	return "reddit auth error: " + e.Message
+}
+
+// Unwrap returns the underlying error for AuthError.
+func (e *AuthError) Unwrap() error {
+	return e.Err
+}
+
+// StateError represents a client state error.
+// This error is returned when the client is not in the correct state for an operation.
+type StateError struct {
+	// Message contains the detailed error message
+	Message string
+}
+
+// Error implements the error interface for StateError.
+func (e *StateError) Error() string {
+	return "reddit client state error: " + e.Message
+}
+
+// RequestError represents an HTTP request error.
+// This error is returned when creating or executing an HTTP request fails.
+type RequestError struct {
+	// Operation describes the operation that failed (e.g., "create request", "execute request")
+	Operation string
+	// URL is the URL that was being accessed (if available)
+	URL string
+	// Err contains the underlying error
+	Err error
+}
+
+// Error implements the error interface for RequestError.
+func (e *RequestError) Error() string {
+	msg := "reddit request error"
+	if e.Operation != "" {
+		msg += " (" + e.Operation + ")"
+	}
+	if e.URL != "" {
+		msg += " for " + e.URL
+	}
+	if e.Err != nil {
+		msg += ": " + e.Err.Error()
+	}
+	return msg
+}
+
+// Unwrap returns the underlying error for RequestError.
+func (e *RequestError) Unwrap() error {
+	return e.Err
+}
+
+// ParseError represents a JSON parsing or response structure error.
+// This error is returned when the API response cannot be parsed or has an unexpected structure.
+type ParseError struct {
+	// Operation describes what was being parsed
+	Operation string
+	// Err contains the underlying error
+	Err error
+}
+
+// Error implements the error interface for ParseError.
+func (e *ParseError) Error() string {
+	msg := "reddit parse error"
+	if e.Operation != "" {
+		msg += " (" + e.Operation + ")"
+	}
+	if e.Err != nil {
+		msg += ": " + e.Err.Error()
+	}
+	return msg
+}
+
+// Unwrap returns the underlying error for ParseError.
+func (e *ParseError) Unwrap() error {
+	return e.Err
+}
+
+// APIError represents an error returned by the Reddit API.
+// This error is returned when Reddit's API explicitly returns an error response.
+type APIError struct {
+	// ErrorCode is the error code from Reddit (if available)
+	ErrorCode string
+	// Message is the error message from Reddit
+	Message string
+	// Details contains any additional error details from the API
+	Details interface{}
+}
+
+// Error implements the error interface for APIError.
+func (e *APIError) Error() string {
+	msg := "reddit API error"
+	if e.ErrorCode != "" {
+		msg += " [" + e.ErrorCode + "]"
+	}
+	if e.Message != "" {
+		msg += ": " + e.Message
+	}
+	return msg
 }

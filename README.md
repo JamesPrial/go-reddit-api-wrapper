@@ -190,14 +190,33 @@ go run example/main.go
 
 ## Error Handling
 
-The library provides structured error handling through `ClientError` and `AuthError` types:
+The library provides structured error handling through specific error types:
+
+- `ConfigError` - Configuration and validation errors
+- `AuthError` - Authentication and authorization errors
+- `StateError` - Client state errors (e.g., not connected)
+- `RequestError` - HTTP request creation/execution errors
+- `ParseError` - JSON parsing and response structure errors
+- `APIError` - Errors returned by Reddit's API
 
 ```go
 if err != nil {
-    if clientErr, ok := err.(*graw.ClientError); ok {
-        fmt.Printf("Client error: %s\n", clientErr.Error())
+    switch e := err.(type) {
+    case *graw.ConfigError:
+        fmt.Printf("Configuration error: %s\n", e.Message)
+    case *graw.AuthError:
+        fmt.Printf("Authentication error: %s\n", e.Message)
+    case *graw.RequestError:
+        fmt.Printf("Request error for %s: %v\n", e.URL, e.Err)
+    case *graw.ParseError:
+        fmt.Printf("Failed to parse %s: %v\n", e.Operation, e.Err)
+    case *graw.APIError:
+        fmt.Printf("Reddit API error [%s]: %s\n", e.ErrorCode, e.Message)
+    case *graw.StateError:
+        fmt.Printf("Client state error: %s\n", e.Message)
+    default:
+        fmt.Printf("Unexpected error: %v\n", err)
     }
-    // Handle other error types...
 }
 ```
 

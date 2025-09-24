@@ -116,13 +116,23 @@
 //
 // # Error Handling
 //
-// All methods return *ClientError for consistent error handling:
+// The library uses specific error types for different failure scenarios:
 //
-//	posts, err := client.GetHot(ctx, &types.PostsRequest{Subreddit: "nonexistent"})
+//	posts, err := client.GetHot(ctx, &types.PostsRequest{Subreddit: "private"})
 //	if err != nil {
-//		var clientErr *graw.ClientError
-//		if errors.As(err, &clientErr) {
-//			fmt.Printf("Reddit API error: %s\n", clientErr.Error())
+//		switch e := err.(type) {
+//		case *graw.ConfigError:
+//			// Configuration or validation error
+//		case *graw.AuthError:
+//			// Authentication failed
+//		case *graw.RequestError:
+//			// HTTP request failed
+//		case *graw.ParseError:
+//			// Response parsing failed
+//		case *graw.APIError:
+//			// Reddit API returned an error
+//		case *graw.StateError:
+//			// Client not in correct state
 //		}
 //	}
 //
