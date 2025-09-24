@@ -2,102 +2,116 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Repository Overview
+## Project Overview
 
-This is a Go wrapper for the Reddit API that provides OAuth2 authentication and clean interfaces for Reddit operations. The library uses structured logging via slog and includes built-in rate limiting.
+Go wrapper for the Reddit API providing OAuth2 authentication and a clean interface for common Reddit operations. The library supports both application-only and user authentication modes.
 
-## Common Commands
+## Key Commands
 
 ### Testing
 ```bash
 # Run all tests
 go test ./...
 
+# Run tests with verbose output
+go test -v ./...
+
 # Run tests with coverage
 go test -cover ./...
 
-# Run tests with race detection
-go test -race ./...
+# Run benchmarks
+go test -bench=. ./internal
 
 # Run a specific test
-go test -run TestFunctionName ./...
-
-# Run tests in verbose mode
-go test -v ./...
+go test -run TestName ./internal
 ```
 
 ### Building
 ```bash
-# Build the library
-go build ./...
-
 # Build the example application
 go build -o reddit-example ./cmd/example
 
-# Run the example
-go run cmd/example/main.go
+# Build with race detection
+go build -race -o reddit-example ./cmd/example
 ```
 
-### Code Quality
+### Linting & Code Quality
 ```bash
-# Format code
-go fmt ./...
-
-# Vet code for common issues
+# Run go vet for static analysis
 go vet ./...
 
-# Check for module issues
-go mod verify
+# Format all code
+go fmt ./...
 
-# Update dependencies
+# Tidy dependencies
 go mod tidy
+```
+
+### Running the Example
+```bash
+# Set required environment variables
+export REDDIT_CLIENT_ID="your-client-id"
+export REDDIT_CLIENT_SECRET="your-client-secret"
+# Optional for user auth:
+export REDDIT_USERNAME="your-username"
+export REDDIT_PASSWORD="your-password"
+
+# Run the example
+go run ./cmd/example
 ```
 
 ## Architecture
 
 ### Package Structure
-- **`reddit.go`**: Main client implementation and public API surface
-  - `Client` struct: Main Reddit API client
-  - `Config` struct: Client configuration including auth credentials and optional logger
-  - Public methods: `NewClient()`, `Connect()`, `GetHot()`, `GetNew()`, `GetComments()`, etc.
+- **Main Package (`/`)**: Core Reddit client implementation in `reddit.go`
+  - `Client` struct: Main client with OAuth token management
+  - `Config` struct: Client configuration including auth credentials and customization
+  - Public API methods: `GetHot`, `GetNew`, `GetComments`, etc.
 
-- **`internal/`**: Internal implementation details (not exposed to library users)
-  - `auth.go`: OAuth2 authentication handling via `Authenticator` struct
-    - Handles both app-only and user authentication flows
-    - Token management and refresh logic
-  - `http.go`: HTTP client wrapper with rate limiting via `Client` struct
-    - Uses `golang.org/x/time/rate` for rate limiting
-    - Handles Reddit's rate limit headers (X-Ratelimit-*)
-    - Structured logging of requests/responses
+- **`internal/` Package**: Internal implementation details
+  - `auth.go`: OAuth2 authentication logic, token management
+  - `http.go`: HTTP client with rate limiting, request/response handling, structured logging
+  - `parse.go`: Response parsing and Thing/Listing extraction helpers
+  - Comprehensive test coverage including benchmarks
 
-- **`pkg/types/`**: Public type definitions
-  - `types.go`: Reddit API object models (`Thing`, `Votable`, `Created`, `Edited`)
-  - Implements custom unmarshalers for Reddit's mixed-type fields
+- **`pkg/types/` Package**: Public API types
+  - Reddit data structures (`Thing`, `Link`, `Comment`, `Subreddit`)
+  - Request/Response types for API operations
+  - Custom unmarshalers for handling Reddit's mixed-type fields
 
 ### Key Design Patterns
 
-1. **Token Provider Interface**: Abstraction for token retrieval, allowing different auth strategies
-2. **HTTP Client Interface**: Abstraction over internal HTTP client for testing
-3. **Rate Limiting**: Dual approach using local rate limiter and respecting Reddit's headers
-4. **Structured Logging**: Optional slog integration for debugging
+1. **Authentication Flow**:
+   - Uses OAuth2 password grant for user auth, client credentials for app-only auth
+   - Token stored in `Client.token`, automatically refreshed as needed
+   - Auth handled by internal `Authenticator` abstraction
 
-### Authentication Flow
-1. Client creation with credentials (`NewClient`)
-2. Connection establishment (`Connect`) - obtains OAuth2 token
-3. Authenticated requests using bearer token
-4. Automatic token refresh on expiry
+2. **HTTP Client Architecture**:
+   - Custom `HTTPClient` interface allows testing with mocks
+   - Built-in exponential backoff retry logic
+   - Structured logging with slog, configurable debug payload capture
+   - Respects Reddit rate limit headers
 
-### Rate Limiting Strategy
-- Automatic: 1000 requests/minute with burst of 10 (Reddit's default limits)
-- Respects Reddit's X-Ratelimit-Reset and Retry-After headers
-- Proactive throttling when approaching limits
-- Handled internally by the library (not user-configurable)
+3. **Error Handling**:
+   - Typed errors (`ConfigError`, `AuthError`, `StateError`, `RequestError`, `ParseError`, `APIError`)
+   - Each error type includes relevant context (URLs, status codes, operations)
+   - Errors implement `Unwrap()` for error chain inspection
 
-## Environment Variables
+4. **Response Parsing**:
+   - Reddit returns nested `Thing` objects with `kind` and `data` fields
+   - Internal parse helpers extract typed data from raw JSON
+   - Supports Reddit's listing structure for pagination
 
-The example application (`cmd/example/main.go`) uses:
-- `REDDIT_CLIENT_ID`: OAuth2 client ID
-- `REDDIT_CLIENT_SECRET`: OAuth2 client secret
-- `REDDIT_USERNAME`: Reddit username (optional, for user auth)
-- `REDDIT_PASSWORD`: Reddit password (optional, for user auth)
+5. **Pagination**:
+   - Uses Reddit "fullnames" (e.g., "t3_abc123" for posts)
+   - `Pagination` struct in requests with `Limit`, `After`, `Before` fields
+   - Response includes `AfterFullname`/`BeforeFullname` for next/prev page
+
+## Testing Strategy
+
+- Unit tests in `internal/*_test.go` cover auth, HTTP client, and parsing logic
+- Mock HTTP client (`mockHTTPClient`) enables deterministic testing without API calls
+- Benchmarks measure performance of HTTP operations with/without logging
+- Example application (`cmd/example`) serves as integration test and usage demo
+
 ### git commit after finishing anything ###
