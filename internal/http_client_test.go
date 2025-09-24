@@ -15,17 +15,8 @@ import (
 	"golang.org/x/time/rate"
 )
 
-// mockTokenProvider is a simple TokenProvider for testing
-type mockTokenProvider struct {
-	token string
-}
-
-func (m *mockTokenProvider) GetToken(ctx context.Context) (string, error) {
-	return m.token, nil
-}
-
 func TestNewClient_DefaultRateLimiter(t *testing.T) {
-	client, err := NewClient(nil, &mockTokenProvider{token: "token"}, "https://example.com/api/", "agent", nil)
+	client, err := NewClient(nil, "https://example.com/api/", "agent", nil)
 	if err != nil {
 		t.Fatalf("NewClient returned error: %v", err)
 	}
@@ -44,7 +35,7 @@ func TestNewClient_DefaultRateLimiter(t *testing.T) {
 }
 
 func TestNewClient_InvalidBaseURL(t *testing.T) {
-	_, err := NewClient(nil, &mockTokenProvider{token: "token"}, "://bad", "agent", nil)
+	_, err := NewClient(nil, "://bad", "agent", nil)
 	if err == nil {
 		t.Fatal("expected error for invalid base URL")
 	}
@@ -56,7 +47,7 @@ func TestNewClient_InvalidBaseURL(t *testing.T) {
 }
 
 func TestNewClient_BaseURLHandling(t *testing.T) {
-	client, err := NewClient(nil, &mockTokenProvider{token: "token"}, "https://example.com/api", "agent", nil)
+	client, err := NewClient(nil, "https://example.com/api", "agent", nil)
 	if err != nil {
 		t.Fatalf("NewClient returned error: %v", err)
 	}
@@ -72,7 +63,7 @@ func TestNewClient_BaseURLHandling(t *testing.T) {
 
 func TestClient_NewRequestSetsHeaders(t *testing.T) {
 	httpClient := &http.Client{}
-	c, err := NewClient(httpClient, &mockTokenProvider{token: "token-value"}, "https://example.com", "my-agent", nil)
+	c, err := NewClient(httpClient, "https://example.com", "my-agent", nil)
 	if err != nil {
 		t.Fatalf("NewClient returned error: %v", err)
 	}
@@ -82,9 +73,7 @@ func TestClient_NewRequestSetsHeaders(t *testing.T) {
 		t.Fatalf("NewRequest returned error: %v", err)
 	}
 
-	if got := req.Header.Get("Authorization"); got != "Bearer token-value" {
-		t.Errorf("expected Authorization header 'Bearer token-value', got %q", got)
-	}
+	// Authorization header is now set by the caller, not by NewRequest
 	if got := req.Header.Get("User-Agent"); got != "my-agent" {
 		t.Errorf("expected User-Agent 'my-agent', got %q", got)
 	}
@@ -95,7 +84,7 @@ func TestClient_NewRequestSetsHeaders(t *testing.T) {
 }
 
 func TestClient_NewRequestInvalidPath(t *testing.T) {
-	c, err := NewClient(nil, &mockTokenProvider{token: "token"}, "https://example.com", "agent", nil)
+	c, err := NewClient(nil, "https://example.com", "agent", nil)
 	if err != nil {
 		t.Fatalf("NewClient returned error: %v", err)
 	}
@@ -112,7 +101,7 @@ func TestClient_NewRequestInvalidPath(t *testing.T) {
 }
 
 func TestClient_NewRequestPreservesBody(t *testing.T) {
-	c, err := NewClient(nil, &mockTokenProvider{token: "token"}, "https://example.com", "agent", nil)
+	c, err := NewClient(nil, "https://example.com", "agent", nil)
 	if err != nil {
 		t.Fatalf("NewClient returned error: %v", err)
 	}
@@ -141,7 +130,7 @@ func TestClient_DoDecodesResponse(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	httpClient := server.Client()
-	c, err := NewClient(httpClient, &mockTokenProvider{token: "token"}, server.URL+"/", "agent", nil)
+	c, err := NewClient(httpClient, server.URL+"/", "agent", nil)
 	if err != nil {
 		t.Fatalf("NewClient returned error: %v", err)
 	}
@@ -176,7 +165,7 @@ func TestClient_DoTransportErrorWrapped(t *testing.T) {
 		return nil, expectedErr
 	})}
 
-	c, err := NewClient(httpClient, &mockTokenProvider{token: "token"}, "https://example.com/", "agent", nil)
+	c, err := NewClient(httpClient, "https://example.com/", "agent", nil)
 	if err != nil {
 		t.Fatalf("NewClient returned error: %v", err)
 	}
@@ -208,7 +197,7 @@ func TestClient_DoNonSuccessStatusReturnsAPIError(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	httpClient := server.Client()
-	c, err := NewClient(httpClient, &mockTokenProvider{token: "token"}, server.URL+"/", "agent", nil)
+	c, err := NewClient(httpClient, server.URL+"/", "agent", nil)
 	if err != nil {
 		t.Fatalf("NewClient returned error: %v", err)
 	}
@@ -243,7 +232,7 @@ func TestClient_DoJSONDecodeErrorWrapped(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	httpClient := server.Client()
-	c, err := NewClient(httpClient, &mockTokenProvider{token: "token"}, server.URL+"/", "agent", nil)
+	c, err := NewClient(httpClient, server.URL+"/", "agent", nil)
 	if err != nil {
 		t.Fatalf("NewClient returned error: %v", err)
 	}
@@ -273,7 +262,7 @@ func TestClient_DoSkipsDecodeWhenTargetNil(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	httpClient := server.Client()
-	c, err := NewClient(httpClient, &mockTokenProvider{token: "token"}, server.URL+"/", "agent", nil)
+	c, err := NewClient(httpClient, server.URL+"/", "agent", nil)
 	if err != nil {
 		t.Fatalf("NewClient returned error: %v", err)
 	}
@@ -318,7 +307,7 @@ func TestClient_DoEnforcesRetryAfter(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	httpClient := server.Client()
-	c, err := NewClient(httpClient, &mockTokenProvider{token: "token"}, server.URL+"/", "agent", nil)
+	c, err := NewClient(httpClient, server.URL+"/", "agent", nil)
 	if err != nil {
 		t.Fatalf("NewClient returned error: %v", err)
 	}
@@ -371,7 +360,7 @@ func TestClient_DoHonorsCanceledContextBeforeSend(t *testing.T) {
 		return nil, errors.New("unexpected transport call")
 	})}
 
-	c, err := NewClient(httpClient, &mockTokenProvider{token: "token"}, "https://example.com/", "agent", nil)
+	c, err := NewClient(httpClient, "https://example.com/", "agent", nil)
 	if err != nil {
 		t.Fatalf("NewClient returned error: %v", err)
 	}

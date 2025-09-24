@@ -17,17 +17,11 @@ import (
 	"golang.org/x/time/rate"
 )
 
-// TokenProvider defines the interface for retrieving an access token.
-type TokenProvider interface {
-	GetToken(ctx context.Context) (string, error)
-}
-
 // Client manages communication with the Reddit API.
 type Client struct {
 	client          *http.Client
 	BaseURL         *url.URL
 	UserAgent       string
-	tokenProvider   TokenProvider
 	logger          *slog.Logger
 	maxLogBodyBytes int
 
@@ -54,7 +48,7 @@ const (
 
 // NewClient returns a new Reddit API client.
 // If a nil httpClient is provided, http.DefaultClient will be used.
-func NewClient(httpClient *http.Client, tokenProvider TokenProvider, baseURL string, userAgent string, logger *slog.Logger) (*Client, error) {
+func NewClient(httpClient *http.Client, baseURL string, userAgent string, logger *slog.Logger) (*Client, error) {
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}
@@ -73,7 +67,6 @@ func NewClient(httpClient *http.Client, tokenProvider TokenProvider, baseURL str
 		client:          httpClient,
 		BaseURL:         parsedURL,
 		UserAgent:       userAgent,
-		tokenProvider:   tokenProvider,
 		limiter:         limiter,
 		logger:          logger,
 		maxLogBodyBytes: defaultLogBodyBytes,
@@ -95,6 +88,7 @@ func (c *Client) SetLogBodyLimit(limit int) {
 // NewRequest creates an API request. A relative URL can be provided in path,
 // in which case it is resolved relative to the BaseURL of the Client.
 // Optional query parameters can be provided as url.Values.
+// Note: The caller is responsible for setting authentication headers.
 func (c *Client) NewRequest(ctx context.Context, method, path string, body io.Reader, params ...url.Values) (*http.Request, error) {
 	u, err := c.BaseURL.Parse(path)
 	if err != nil {
@@ -117,13 +111,6 @@ func (c *Client) NewRequest(ctx context.Context, method, path string, body io.Re
 		return nil, &ClientError{OriginalErr: err}
 	}
 
-	// Get token and set auth header
-	token, err := c.tokenProvider.GetToken(ctx)
-	if err != nil {
-		return nil, &ClientError{OriginalErr: fmt.Errorf("failed to get auth token: %w", err)}
-	}
-
-	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("User-Agent", c.UserAgent)
 
 	return req, nil
@@ -133,9 +120,6 @@ func (c *Client) NewRequest(ctx context.Context, method, path string, body io.Re
 // JSON decoded and stored in the value pointed to by v, or returned as an
 // error if an API error has occurred.
 func (c *Client) Do(req *http.Request, v *types.Thing) (*http.Response, error) {
-	if err := c.ensureAuth(req); err != nil {
-		return nil, err
-	}
 
 	ctx := req.Context()
 	start := time.Now()
@@ -179,9 +163,6 @@ func (c *Client) Do(req *http.Request, v *types.Thing) (*http.Response, error) {
 // DoThingArray sends an API request and returns either an array of Things or a single Thing wrapped in an array.
 // Used for the comments endpoint which can return [post, comments] or a single Listing.
 func (c *Client) DoThingArray(req *http.Request) ([]*types.Thing, error) {
-	if err := c.ensureAuth(req); err != nil {
-		return nil, err
-	}
 
 	ctx := req.Context()
 	start := time.Now()
@@ -250,9 +231,6 @@ func (c *Client) DoThingArray(req *http.Request) ([]*types.Thing, error) {
 
 // DoMoreChildren sends an API request to the morechildren endpoint and returns the Things array.
 func (c *Client) DoMoreChildren(req *http.Request) ([]*types.Thing, error) {
-	if err := c.ensureAuth(req); err != nil {
-		return nil, err
-	}
 
 	ctx := req.Context()
 	start := time.Now()
@@ -303,18 +281,6 @@ func (c *Client) DoMoreChildren(req *http.Request) ([]*types.Thing, error) {
 	}
 
 	return response.JSON.Data.Things, nil
-}
-
-// ensureAuth verifies that authentication headers are present on the request.
-// Returns an error if Authorization or User-Agent headers are missing.
-func (c *Client) ensureAuth(req *http.Request) error {
-	if req.Header.Get("Authorization") == "" {
-		return &ClientError{OriginalErr: fmt.Errorf("request missing Authorization header")}
-	}
-	if req.Header.Get("User-Agent") == "" {
-		return &ClientError{OriginalErr: fmt.Errorf("request missing User-Agent header")}
-	}
-	return nil
 }
 
 func buildLimiter(cfg RateLimitConfig) *rate.Limiter {

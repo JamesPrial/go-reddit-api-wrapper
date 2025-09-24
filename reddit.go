@@ -237,10 +237,9 @@ func NewClientWithContext(ctx context.Context, config *Config) (*Client, error) 
 		return nil, &AuthError{Message: "failed to authenticate", Err: err}
 	}
 
-	// Create internal HTTP client with token provider
+	// Create internal HTTP client
 	httpClient, err := internal.NewClient(
 		config.HTTPClient,
-		auth,
 		config.BaseURL,
 		config.UserAgent,
 		config.Logger,
@@ -272,6 +271,11 @@ func (c *Client) Me(ctx context.Context) (*types.AccountData, error) {
 	req, err := c.client.NewRequest(ctx, http.MethodGet, MeURL, nil)
 	if err != nil {
 		return nil, &RequestError{Operation: "create request", URL: MeURL, Err: err}
+	}
+
+	// Add authentication headers
+	if err := c.addAuthHeaders(ctx, req); err != nil {
+		return nil, &AuthError{Message: "failed to add auth headers", Err: err}
 	}
 
 	var result types.Thing
@@ -317,6 +321,11 @@ func (c *Client) GetSubreddit(ctx context.Context, name string) (*types.Subreddi
 	req, err := c.client.NewRequest(ctx, http.MethodGet, path, nil)
 	if err != nil {
 		return nil, &RequestError{Operation: "create request", URL: path, Err: err}
+	}
+
+	// Add authentication headers
+	if err := c.addAuthHeaders(ctx, req); err != nil {
+		return nil, &AuthError{Message: "failed to add auth headers", Err: err}
 	}
 
 	var result types.Thing
@@ -369,6 +378,11 @@ func (c *Client) GetHot(ctx context.Context, request *types.PostsRequest) (*type
 	httpReq, err := c.client.NewRequest(ctx, http.MethodGet, path, nil, params)
 	if err != nil {
 		return nil, &RequestError{Operation: "create request", URL: path, Err: err}
+	}
+
+	// Add authentication headers
+	if err := c.addAuthHeaders(ctx, httpReq); err != nil {
+		return nil, &AuthError{Message: "failed to add auth headers", Err: err}
 	}
 
 	var result types.Thing
@@ -427,6 +441,11 @@ func (c *Client) GetNew(ctx context.Context, request *types.PostsRequest) (*type
 	httpReq, err := c.client.NewRequest(ctx, http.MethodGet, path, nil, params)
 	if err != nil {
 		return nil, &RequestError{Operation: "create request", URL: path, Err: err}
+	}
+
+	// Add authentication headers
+	if err := c.addAuthHeaders(ctx, httpReq); err != nil {
+		return nil, &AuthError{Message: "failed to add auth headers", Err: err}
 	}
 
 	var result types.Thing
@@ -491,6 +510,11 @@ func (c *Client) GetComments(ctx context.Context, request *types.CommentsRequest
 	httpReq, err := c.client.NewRequest(ctx, http.MethodGet, path, nil, params)
 	if err != nil {
 		return nil, &RequestError{Operation: "create request", URL: path, Err: err}
+	}
+
+	// Add authentication headers
+	if err := c.addAuthHeaders(ctx, httpReq); err != nil {
+		return nil, &AuthError{Message: "failed to add auth headers", Err: err}
 	}
 
 	result, err := c.client.DoThingArray(httpReq)
@@ -628,6 +652,11 @@ func (c *Client) GetMoreComments(ctx context.Context, request *types.MoreComment
 	req, err := c.client.NewRequest(ctx, http.MethodPost, MoreChildrenURL, strings.NewReader(formData.Encode()))
 	if err != nil {
 		return nil, &RequestError{Operation: "create request", URL: MoreChildrenURL, Err: err}
+	}
+
+	// Add authentication headers
+	if err := c.addAuthHeaders(ctx, req); err != nil {
+		return nil, &AuthError{Message: "failed to add auth headers", Err: err}
 	}
 
 	// Set Content-Type header for form data
@@ -773,6 +802,17 @@ func (e *ParseError) Error() string {
 // Unwrap returns the underlying error for ParseError.
 func (e *ParseError) Unwrap() error {
 	return e.Err
+}
+
+// addAuthHeaders adds authentication headers to a request.
+// This is called internally before each API request.
+func (c *Client) addAuthHeaders(ctx context.Context, req *http.Request) error {
+	token, err := c.auth.GetToken(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get auth token: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	return nil
 }
 
 // APIError represents an error returned by the Reddit API.
