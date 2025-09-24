@@ -406,10 +406,8 @@ func (c *Client) GetHot(ctx context.Context, request *types.PostsRequest) (*type
 	}
 
 	subreddit := ""
-	pagination := types.Pagination{}
 	if request != nil {
 		subreddit = request.Subreddit
-		pagination = request.Pagination
 	}
 
 	path := "hot"
@@ -418,16 +416,7 @@ func (c *Client) GetHot(ctx context.Context, request *types.PostsRequest) (*type
 	}
 
 	// Build query parameters
-	params := url.Values{}
-	if pagination.Limit > 0 {
-		params.Set("limit", fmt.Sprintf("%d", pagination.Limit))
-	}
-	if pagination.After != "" {
-		params.Set("after", pagination.After)
-	}
-	if pagination.Before != "" {
-		params.Set("before", pagination.Before)
-	}
+	params := buildPaginationParams(&request.Pagination)
 
 	httpReq, err := c.client.NewRequest(ctx, http.MethodGet, path, nil, params)
 	if err != nil {
@@ -477,10 +466,10 @@ func (c *Client) GetNew(ctx context.Context, request *types.PostsRequest) (*type
 	}
 
 	subreddit := ""
-	pagination := types.Pagination{}
+
 	if request != nil {
 		subreddit = request.Subreddit
-		pagination = request.Pagination
+
 	}
 
 	path := "new"
@@ -489,16 +478,7 @@ func (c *Client) GetNew(ctx context.Context, request *types.PostsRequest) (*type
 	}
 
 	// Build query parameters
-	params := url.Values{}
-	if pagination.Limit > 0 {
-		params.Set("limit", fmt.Sprintf("%d", pagination.Limit))
-	}
-	if pagination.After != "" {
-		params.Set("after", pagination.After)
-	}
-	if pagination.Before != "" {
-		params.Set("before", pagination.Before)
-	}
+	params := buildPaginationParams(&request.Pagination)
 
 	httpReq, err := c.client.NewRequest(ctx, http.MethodGet, path, nil, params)
 	if err != nil {
@@ -566,17 +546,7 @@ func (c *Client) GetComments(ctx context.Context, request *types.CommentsRequest
 	path := "r/" + request.Subreddit + "/comments/" + request.PostID
 
 	// Build query parameters
-	params := url.Values{}
-	if request.Limit > 0 {
-		params.Set("limit", fmt.Sprintf("%d", request.Limit))
-	}
-	if request.After != "" {
-		params.Set("after", request.After)
-	}
-	if request.Before != "" {
-		params.Set("before", request.Before)
-	}
-
+	params := buildPaginationParams(&request.Pagination)
 	httpReq, err := c.client.NewRequest(ctx, http.MethodGet, path, nil, params)
 	if err != nil {
 		return nil, &ClientError{Err: "failed to create request: " + err.Error()}
@@ -831,6 +801,24 @@ func (c *Client) GetMoreComments(ctx context.Context, request *types.MoreComment
 	}
 
 	return comments, nil
+}
+
+// buildPaginationParams creates url.Values for pagination.
+func buildPaginationParams(pagination *types.Pagination) url.Values {
+	params := url.Values{}
+	if pagination == nil {
+		return params
+	}
+	if pagination.Limit > 0 {
+		params.Set("limit", fmt.Sprintf("%d", pagination.Limit))
+	}
+	if pagination.After != "" {
+		params.Set("after", pagination.After)
+	}
+	if pagination.Before != "" {
+		params.Set("before", pagination.Before)
+	}
+	return params
 }
 
 // ClientError represents an error from the Reddit client.
