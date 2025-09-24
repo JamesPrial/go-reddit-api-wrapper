@@ -71,30 +71,6 @@ func (p *Parser) ParseLink(thing *types.Thing) (*types.Post, error) {
 		return nil, fmt.Errorf("failed to parse Link data: %w", err)
 	}
 
-	// Extract ID and Name from the data if not already set
-	if post.ID == "" || post.Name == "" {
-		var dataFields struct {
-			ID   string `json:"id"`
-			Name string `json:"name"`
-		}
-		if err := json.Unmarshal(thing.Data, &dataFields); err == nil {
-			if post.ID == "" && dataFields.ID != "" {
-				post.ID = dataFields.ID
-			}
-			if post.Name == "" && dataFields.Name != "" {
-				post.Name = dataFields.Name
-			}
-		}
-	}
-
-	// Fallback to Thing-level fields if still missing
-	if post.ID == "" && thing.ID != "" {
-		post.ID = thing.ID
-	}
-	if post.Name == "" && thing.Name != "" {
-		post.Name = thing.Name
-	}
-
 	return &post, nil
 }
 
@@ -110,30 +86,6 @@ func (p *Parser) ParseComment(thing *types.Thing) (*types.Comment, error) {
 	var comment types.Comment
 	if err := json.Unmarshal(thing.Data, &comment); err != nil {
 		return nil, fmt.Errorf("failed to parse Comment data: %w", err)
-	}
-
-	// Extract ID and Name from the data if not already set
-	if comment.ID == "" || comment.Name == "" {
-		var dataFields struct {
-			ID   string `json:"id"`
-			Name string `json:"name"`
-		}
-		if err := json.Unmarshal(thing.Data, &dataFields); err == nil {
-			if comment.ID == "" && dataFields.ID != "" {
-				comment.ID = dataFields.ID
-			}
-			if comment.Name == "" && dataFields.Name != "" {
-				comment.Name = dataFields.Name
-			}
-		}
-	}
-
-	// Fallback to Thing-level fields if still missing
-	if comment.ID == "" && thing.ID != "" {
-		comment.ID = thing.ID
-	}
-	if comment.Name == "" && thing.Name != "" {
-		comment.Name = thing.Name
 	}
 
 	// Handle the replies field which can be a Listing object or an empty string
