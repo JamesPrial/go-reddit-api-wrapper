@@ -133,6 +133,10 @@ func (c *Client) NewRequest(ctx context.Context, method, path string, body io.Re
 // JSON decoded and stored in the value pointed to by v, or returned as an
 // error if an API error has occurred.
 func (c *Client) Do(req *http.Request, v *types.Thing) (*http.Response, error) {
+	if err := c.ensureAuth(req); err != nil {
+		return nil, err
+	}
+
 	ctx := req.Context()
 	start := time.Now()
 
@@ -170,18 +174,6 @@ func (c *Client) Do(req *http.Request, v *types.Thing) (*http.Response, error) {
 	}
 
 	return resp, nil
-}
-
-// ensureAuth verifies that authentication headers are present on the request.
-// Returns an error if Authorization or User-Agent headers are missing.
-func (c *Client) ensureAuth(req *http.Request) error {
-	if req.Header.Get("Authorization") == "" {
-		return &ClientError{OriginalErr: fmt.Errorf("request missing Authorization header")}
-	}
-	if req.Header.Get("User-Agent") == "" {
-		return &ClientError{OriginalErr: fmt.Errorf("request missing User-Agent header")}
-	}
-	return nil
 }
 
 // DoThingArray sends an API request and returns either an array of Things or a single Thing wrapped in an array.
@@ -311,6 +303,18 @@ func (c *Client) DoMoreChildren(req *http.Request) ([]*types.Thing, error) {
 	}
 
 	return response.JSON.Data.Things, nil
+}
+
+// ensureAuth verifies that authentication headers are present on the request.
+// Returns an error if Authorization or User-Agent headers are missing.
+func (c *Client) ensureAuth(req *http.Request) error {
+	if req.Header.Get("Authorization") == "" {
+		return &ClientError{OriginalErr: fmt.Errorf("request missing Authorization header")}
+	}
+	if req.Header.Get("User-Agent") == "" {
+		return &ClientError{OriginalErr: fmt.Errorf("request missing User-Agent header")}
+	}
+	return nil
 }
 
 func buildLimiter(cfg RateLimitConfig) *rate.Limiter {
