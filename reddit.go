@@ -37,7 +37,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/jamesprial/go-reddit-api-wrapper/internal"
@@ -162,13 +161,11 @@ type HTTPClient interface {
 //	// Now the client is ready to make API calls
 //	posts, err := client.GetHot(ctx, &types.PostsRequest{Subreddit: "golang", Limit: 25})
 type Client struct {
-	client HTTPClient
-	auth   TokenProvider
-	config *Config
-	parser *internal.Parser
-
-	connectOnce sync.Once
-	connectErr  error
+	client  HTTPClient
+	auth    TokenProvider
+	config  *Config
+	parser  *internal.Parser
+	connMgr *internal.ConnectionManager
 }
 
 // NewClient creates a new Reddit client with the provided configuration.
@@ -233,9 +230,10 @@ func NewClient(config *Config) (*Client, error) {
 	}
 
 	return &Client{
-		auth:   auth,
-		config: config,
-		parser: internal.NewParser(),
+		auth:    auth,
+		config:  config,
+		parser:  internal.NewParser(),
+		connMgr: internal.NewConnectionManager(),
 	}, nil
 }
 
@@ -254,11 +252,7 @@ func NewClient(config *Config) (*Client, error) {
 // After successful connection, IsConnected() will return true and all API
 // methods will be available for use.
 func (c *Client) Connect(ctx context.Context) error {
-	c.connectOnce.Do(func() {
-		c.connectErr = c.initialize(ctx)
-	})
-
-	return c.connectErr
+	return c.connMgr.Initialize(ctx, c.initialize)
 }
 
 // initialize performs the underlying connection setup work.
