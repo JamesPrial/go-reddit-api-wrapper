@@ -40,9 +40,11 @@ func TestParseThing(t *testing.T) {
 		{
 			name: "t1 comment",
 			thing: &types.Thing{
+				ThingData: types.ThingData{
+					ID:   "comment123",
+					Name: "t1_comment123",
+				},
 				Kind: "t1",
-				ID:   "comment123",
-				Name: "t1_comment123",
 				Data: json.RawMessage(`{"author":"testuser","body":"test comment","score":10,"replies":""}`),
 			},
 			expectError:  false,
@@ -60,9 +62,11 @@ func TestParseThing(t *testing.T) {
 		{
 			name: "t3 link",
 			thing: &types.Thing{
+				ThingData: types.ThingData{
+					ID:   "post123",
+					Name: "t3_post123",
+				},
 				Kind: "t3",
-				ID:   "post123",
-				Name: "t3_post123",
 				Data: json.RawMessage(`{"author":"testuser","title":"Test Post","url":"http://example.com","score":100}`),
 			},
 			expectError:  false,
@@ -811,9 +815,11 @@ func TestExtractComments(t *testing.T) {
 		{
 			name: "single comment without replies",
 			thing: &types.Thing{
+				ThingData: types.ThingData{
+					ID:   "comment1",
+					Name: "t1_comment1",
+				},
 				Kind: "t1",
-				ID:   "comment1",
-				Name: "t1_comment1",
 				Data: json.RawMessage(`{
 					"author":"user1",
 					"body":"Test comment",
@@ -828,9 +834,11 @@ func TestExtractComments(t *testing.T) {
 		{
 			name: "single comment with replies",
 			thing: &types.Thing{
+				ThingData: types.ThingData{
+					ID:   "comment1",
+					Name: "t1_comment1",
+				},
 				Kind: "t1",
-				ID:   "comment1",
-				Name: "t1_comment1",
 				Data: json.RawMessage(`{
 					"author":"user1",
 					"body":"Parent comment",
@@ -1262,4 +1270,3 @@ func TestEditedUnmarshalJSON(t *testing.T) {
 		})
 	}
 }
-

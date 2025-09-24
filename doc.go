@@ -31,7 +31,7 @@
 //		log.Fatal(err)
 //	}
 //
-//// # Connection Lifecycle
+// // # Connection Lifecycle
 //
 // The client establishes its authenticated HTTP session immediately during creation.
 // NewClient() performs authentication and returns a ready-to-use client.

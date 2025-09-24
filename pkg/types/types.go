@@ -6,11 +6,34 @@ import (
 	"strings"
 )
 
+// RedditObject defines the common behavior for all Reddit API objects like
+// Posts, Comments, and Subreddits.
+type RedditObject interface {
+	GetID() string
+	GetName() string
+}
+
+// ThingData holds the common fields for Reddit objects.
+// It can be embedded into specific types like Post and Comment.
+type ThingData struct {
+	ID   string `json:"id"`   // ID (without prefix)
+	Name string `json:"name"` // Full name (e.g., "t3_abc123")
+}
+
+// GetID returns the object's ID.
+func (td ThingData) GetID() string {
+	return td.ID
+}
+
+// GetName returns the object's full name.
+func (td ThingData) GetName() string {
+	return td.Name
+}
+
 // Thing is the base class for all Reddit API objects. It provides a common
 // structure for different types of content like comments, links, and subreddits.
 type Thing struct {
-	ID   string          `json:"id,omitempty"`
-	Name string          `json:"name,omitempty"`
+	ThingData
 	Kind string          `json:"kind"`
 	Data json.RawMessage `json:"data"`
 }
@@ -207,10 +230,9 @@ type MoreData struct {
 
 // Post represents a Reddit post with all its fields
 type Post struct {
+	ThingData
 	Votable
 	Created
-	ID                  string          `json:"id"`   // Post ID (without prefix)
-	Name                string          `json:"name"` // Full name (e.g., "t3_abc123")
 	Author              string          `json:"author"`
 	AuthorFlairCSSClass *string         `json:"author_flair_css_class"`
 	AuthorFlairText     *string         `json:"author_flair_text"`
@@ -242,10 +264,9 @@ type Post struct {
 
 // Comment represents a Reddit comment with all its fields
 type Comment struct {
+	ThingData
 	Votable
 	Created
-	ID                  string     `json:"id"`   // Comment ID (without prefix)
-	Name                string     `json:"name"` // Full name (e.g., "t1_abc123")
 	ApprovedBy          *string    `json:"approved_by"`
 	Author              string     `json:"author"`
 	AuthorFlairCSSClass *string    `json:"author_flair_css_class"`
