@@ -254,19 +254,6 @@ func NewClientWithContext(ctx context.Context, config *Config) (*Client, error) 
 	}, nil
 }
 
-// ensureConnected verifies the client is properly initialized.
-func (c *Client) ensureConnected(_ context.Context) error {
-	if !c.IsConnected() {
-		return &StateError{Message: "client not properly initialized"}
-	}
-	return nil
-}
-
-// IsConnected returns true if the client is properly initialized and ready to make requests.
-func (c *Client) IsConnected() bool {
-	return c.client != nil
-}
-
 // Me returns information about the authenticated user.
 // This is useful for testing authentication and getting user details.
 //
@@ -279,10 +266,6 @@ func (c *Client) IsConnected() bool {
 //
 // This method requires the client to have 'read' scope for the authenticated user.
 func (c *Client) Me(ctx context.Context) (*types.AccountData, error) {
-	if err := c.ensureConnected(ctx); err != nil {
-		return nil, err
-	}
-
 	req, err := c.client.NewRequest(ctx, http.MethodGet, MeURL, nil)
 	if err != nil {
 		return nil, &RequestError{Operation: "create request", URL: MeURL, Err: err}
@@ -327,10 +310,6 @@ func (c *Client) Me(ctx context.Context) (*types.AccountData, error) {
 //
 // This method works with both application-only and user authentication.
 func (c *Client) GetSubreddit(ctx context.Context, name string) (*types.SubredditData, error) {
-	if err := c.ensureConnected(ctx); err != nil {
-		return nil, err
-	}
-
 	path := SubURL + name + "/about"
 	req, err := c.client.NewRequest(ctx, http.MethodGet, path, nil)
 	if err != nil {
@@ -371,10 +350,6 @@ func (c *Client) GetSubreddit(ctx context.Context, name string) (*types.Subreddi
 // The returned PostsResponse includes AfterFullname and BeforeFullname fields
 // that can be used in subsequent calls for pagination.
 func (c *Client) GetHot(ctx context.Context, request *types.PostsRequest) (*types.PostsResponse, error) {
-	if err := c.ensureConnected(ctx); err != nil {
-		return nil, err
-	}
-
 	subreddit := ""
 	if request != nil {
 		subreddit = request.Subreddit
@@ -431,10 +406,6 @@ func (c *Client) GetHot(ctx context.Context, request *types.PostsRequest) (*type
 //   - PostsResponse containing the posts and pagination information
 //   - Error if the request fails
 func (c *Client) GetNew(ctx context.Context, request *types.PostsRequest) (*types.PostsResponse, error) {
-	if err := c.ensureConnected(ctx); err != nil {
-		return nil, err
-	}
-
 	subreddit := ""
 
 	if request != nil {
@@ -503,9 +474,6 @@ func (c *Client) GetNew(ctx context.Context, request *types.PostsRequest) (*type
 //   - The post doesn't exist or is in a private subreddit
 //   - The API request fails
 func (c *Client) GetComments(ctx context.Context, request *types.CommentsRequest) (*types.CommentsResponse, error) {
-	if err := c.ensureConnected(ctx); err != nil {
-		return nil, err
-	}
 	if request == nil {
 		return nil, &ConfigError{Message: "comments request cannot be nil"}
 	}
@@ -622,10 +590,6 @@ func (c *Client) GetComments(ctx context.Context, request *types.CommentsRequest
 //
 // Returns an error if any individual request fails.
 func (c *Client) GetCommentsMultiple(ctx context.Context, requests []*types.CommentsRequest) ([]*types.CommentsResponse, error) {
-	if err := c.ensureConnected(ctx); err != nil {
-		return nil, err
-	}
-
 	if len(requests) == 0 {
 		return []*types.CommentsResponse{}, nil
 	}
@@ -689,9 +653,6 @@ func (c *Client) GetCommentsMultiple(ctx context.Context, requests []*types.Comm
 //   - The comment IDs are invalid
 //   - The API request fails
 func (c *Client) GetMoreComments(ctx context.Context, request *types.MoreCommentsRequest) ([]*types.Comment, error) {
-	if err := c.ensureConnected(ctx); err != nil {
-		return nil, err
-	}
 	if request == nil {
 		return nil, &ConfigError{Message: "more comments request cannot be nil"}
 	}
