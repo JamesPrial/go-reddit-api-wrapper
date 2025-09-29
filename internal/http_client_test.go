@@ -562,3 +562,361 @@ func TestClientError_Unwrap(t *testing.T) {
 		t.Fatalf("expected Error to match inner error message")
 	}
 }
+
+func TestClient_DoThingArray_ArrayResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`[{"kind":"Listing","data":{"children":[]}},{"kind":"Listing","data":{"children":[]}}]`))
+	}))
+	t.Cleanup(server.Close)
+
+	httpClient := server.Client()
+	c, err := NewClient(httpClient, server.URL+"/", "agent", nil)
+	if err != nil {
+		t.Fatalf("NewClient returned error: %v", err)
+	}
+
+	req, err := c.NewRequest(context.Background(), http.MethodGet, "comments", nil)
+	if err != nil {
+		t.Fatalf("NewRequest returned error: %v", err)
+	}
+
+	things, err := c.DoThingArray(req)
+	if err != nil {
+		t.Fatalf("DoThingArray returned error: %v", err)
+	}
+
+	if len(things) != 2 {
+		t.Fatalf("expected 2 Things, got %d", len(things))
+	}
+	if things[0].Kind != "Listing" {
+		t.Errorf("expected first Thing kind 'Listing', got %q", things[0].Kind)
+	}
+	if things[1].Kind != "Listing" {
+		t.Errorf("expected second Thing kind 'Listing', got %q", things[1].Kind)
+	}
+}
+
+func TestClient_DoThingArray_SingleListingWrapped(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"kind":"Listing","data":{"children":[{"kind":"t1","data":{}}]}}`))
+	}))
+	t.Cleanup(server.Close)
+
+	httpClient := server.Client()
+	c, err := NewClient(httpClient, server.URL+"/", "agent", nil)
+	if err != nil {
+		t.Fatalf("NewClient returned error: %v", err)
+	}
+
+	req, err := c.NewRequest(context.Background(), http.MethodGet, "comments", nil)
+	if err != nil {
+		t.Fatalf("NewRequest returned error: %v", err)
+	}
+
+	things, err := c.DoThingArray(req)
+	if err != nil {
+		t.Fatalf("DoThingArray returned error: %v", err)
+	}
+
+	if len(things) != 1 {
+		t.Fatalf("expected 1 Thing wrapped in array, got %d", len(things))
+	}
+	if things[0].Kind != "Listing" {
+		t.Errorf("expected Thing kind 'Listing', got %q", things[0].Kind)
+	}
+}
+
+func TestClient_DoThingArray_APIErrorResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"error":"USER_REQUIRED","message":"Please log in to do that."}`))
+	}))
+	t.Cleanup(server.Close)
+
+	httpClient := server.Client()
+	c, err := NewClient(httpClient, server.URL+"/", "agent", nil)
+	if err != nil {
+		t.Fatalf("NewClient returned error: %v", err)
+	}
+
+	req, err := c.NewRequest(context.Background(), http.MethodGet, "restricted", nil)
+	if err != nil {
+		t.Fatalf("NewRequest returned error: %v", err)
+	}
+
+	things, err := c.DoThingArray(req)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if things != nil {
+		t.Fatalf("expected nil Things on error, got %v", things)
+	}
+
+	// Error objects without "kind" field unmarshal as Thing with empty kind,
+	// which triggers "unexpected response kind" error
+	var clientErr *ClientError
+	if !errors.As(err, &clientErr) {
+		t.Fatalf("expected ClientError, got %T", err)
+	}
+	if !bytes.Contains([]byte(clientErr.Error()), []byte("unexpected response kind")) {
+		t.Errorf("expected error about unexpected kind, got %q", clientErr.Error())
+	}
+}
+
+func TestClient_DoThingArray_EmptyResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(``))
+	}))
+	t.Cleanup(server.Close)
+
+	httpClient := server.Client()
+	c, err := NewClient(httpClient, server.URL+"/", "agent", nil)
+	if err != nil {
+		t.Fatalf("NewClient returned error: %v", err)
+	}
+
+	req, err := c.NewRequest(context.Background(), http.MethodGet, "empty", nil)
+	if err != nil {
+		t.Fatalf("NewRequest returned error: %v", err)
+	}
+
+	things, err := c.DoThingArray(req)
+	if err == nil {
+		t.Fatal("expected error for empty response")
+	}
+	if things != nil {
+		t.Fatalf("expected nil Things on error, got %v", things)
+	}
+
+	var clientErr *ClientError
+	if !errors.As(err, &clientErr) {
+		t.Fatalf("expected ClientError, got %T", err)
+	}
+}
+
+func TestClient_DoThingArray_InvalidJSON(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`[{bad json}`))
+	}))
+	t.Cleanup(server.Close)
+
+	httpClient := server.Client()
+	c, err := NewClient(httpClient, server.URL+"/", "agent", nil)
+	if err != nil {
+		t.Fatalf("NewClient returned error: %v", err)
+	}
+
+	req, err := c.NewRequest(context.Background(), http.MethodGet, "bad", nil)
+	if err != nil {
+		t.Fatalf("NewRequest returned error: %v", err)
+	}
+
+	things, err := c.DoThingArray(req)
+	if err == nil {
+		t.Fatal("expected error for invalid JSON")
+	}
+	if things != nil {
+		t.Fatalf("expected nil Things on error, got %v", things)
+	}
+
+	var clientErr *ClientError
+	if !errors.As(err, &clientErr) {
+		t.Fatalf("expected ClientError, got %T", err)
+	}
+}
+
+func TestClient_DoThingArray_UnexpectedKind(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"kind":"t3","data":{"id":"abc"}}`))
+	}))
+	t.Cleanup(server.Close)
+
+	httpClient := server.Client()
+	c, err := NewClient(httpClient, server.URL+"/", "agent", nil)
+	if err != nil {
+		t.Fatalf("NewClient returned error: %v", err)
+	}
+
+	req, err := c.NewRequest(context.Background(), http.MethodGet, "wrong-kind", nil)
+	if err != nil {
+		t.Fatalf("NewRequest returned error: %v", err)
+	}
+
+	things, err := c.DoThingArray(req)
+	if err == nil {
+		t.Fatal("expected error for unexpected kind")
+	}
+	if things != nil {
+		t.Fatalf("expected nil Things on error, got %v", things)
+	}
+
+	var clientErr *ClientError
+	if !errors.As(err, &clientErr) {
+		t.Fatalf("expected ClientError, got %T", err)
+	}
+	if !bytes.Contains([]byte(clientErr.Error()), []byte("unexpected response kind")) {
+		t.Errorf("expected error about unexpected kind, got %q", clientErr.Error())
+	}
+}
+
+func TestClient_DoMoreChildren_Success(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"json":{"errors":[],"data":{"things":[{"kind":"t1","data":{"id":"comment1"}},{"kind":"t1","data":{"id":"comment2"}}]}}}`))
+	}))
+	t.Cleanup(server.Close)
+
+	httpClient := server.Client()
+	c, err := NewClient(httpClient, server.URL+"/", "agent", nil)
+	if err != nil {
+		t.Fatalf("NewClient returned error: %v", err)
+	}
+
+	req, err := c.NewRequest(context.Background(), http.MethodGet, "morechildren", nil)
+	if err != nil {
+		t.Fatalf("NewRequest returned error: %v", err)
+	}
+
+	things, err := c.DoMoreChildren(req)
+	if err != nil {
+		t.Fatalf("DoMoreChildren returned error: %v", err)
+	}
+
+	if len(things) != 2 {
+		t.Fatalf("expected 2 Things, got %d", len(things))
+	}
+	if things[0].Kind != "t1" {
+		t.Errorf("expected first Thing kind 't1', got %q", things[0].Kind)
+	}
+	if things[1].Kind != "t1" {
+		t.Errorf("expected second Thing kind 't1', got %q", things[1].Kind)
+	}
+}
+
+func TestClient_DoMoreChildren_EmptyThings(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"json":{"errors":[],"data":{"things":[]}}}`))
+	}))
+	t.Cleanup(server.Close)
+
+	httpClient := server.Client()
+	c, err := NewClient(httpClient, server.URL+"/", "agent", nil)
+	if err != nil {
+		t.Fatalf("NewClient returned error: %v", err)
+	}
+
+	req, err := c.NewRequest(context.Background(), http.MethodGet, "morechildren", nil)
+	if err != nil {
+		t.Fatalf("NewRequest returned error: %v", err)
+	}
+
+	things, err := c.DoMoreChildren(req)
+	if err != nil {
+		t.Fatalf("DoMoreChildren returned error: %v", err)
+	}
+
+	if len(things) != 0 {
+		t.Fatalf("expected 0 Things, got %d", len(things))
+	}
+}
+
+func TestClient_DoMoreChildren_APIError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"json":{"errors":[["THREAD_LOCKED","that comment is archived"]],"data":{"things":[]}}}`))
+	}))
+	t.Cleanup(server.Close)
+
+	httpClient := server.Client()
+	c, err := NewClient(httpClient, server.URL+"/", "agent", nil)
+	if err != nil {
+		t.Fatalf("NewClient returned error: %v", err)
+	}
+
+	req, err := c.NewRequest(context.Background(), http.MethodGet, "morechildren", nil)
+	if err != nil {
+		t.Fatalf("NewRequest returned error: %v", err)
+	}
+
+	things, err := c.DoMoreChildren(req)
+	if err == nil {
+		t.Fatal("expected API error, got nil")
+	}
+	if things != nil {
+		t.Fatalf("expected nil Things on error, got %v", things)
+	}
+
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("expected APIError, got %T", err)
+	}
+	if !bytes.Contains([]byte(apiErr.Error()), []byte("THREAD_LOCKED")) {
+		t.Errorf("expected error to contain 'THREAD_LOCKED', got %q", apiErr.Error())
+	}
+}
+
+func TestClient_DoMoreChildren_InvalidJSON(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{bad json`))
+	}))
+	t.Cleanup(server.Close)
+
+	httpClient := server.Client()
+	c, err := NewClient(httpClient, server.URL+"/", "agent", nil)
+	if err != nil {
+		t.Fatalf("NewClient returned error: %v", err)
+	}
+
+	req, err := c.NewRequest(context.Background(), http.MethodGet, "bad", nil)
+	if err != nil {
+		t.Fatalf("NewRequest returned error: %v", err)
+	}
+
+	things, err := c.DoMoreChildren(req)
+	if err == nil {
+		t.Fatal("expected error for invalid JSON")
+	}
+	if things != nil {
+		t.Fatalf("expected nil Things on error, got %v", things)
+	}
+
+	var clientErr *ClientError
+	if !errors.As(err, &clientErr) {
+		t.Fatalf("expected ClientError, got %T", err)
+	}
+}
+
+func TestClient_DoMoreChildren_MalformedStructure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"different":"structure"}`))
+	}))
+	t.Cleanup(server.Close)
+
+	httpClient := server.Client()
+	c, err := NewClient(httpClient, server.URL+"/", "agent", nil)
+	if err != nil {
+		t.Fatalf("NewClient returned error: %v", err)
+	}
+
+	req, err := c.NewRequest(context.Background(), http.MethodGet, "malformed", nil)
+	if err != nil {
+		t.Fatalf("NewRequest returned error: %v", err)
+	}
+
+	things, err := c.DoMoreChildren(req)
+	if err != nil {
+		t.Fatalf("DoMoreChildren should handle missing nested fields, got error: %v", err)
+	}
+
+	if len(things) != 0 {
+		t.Fatalf("expected empty Things for missing data.things field, got %d", len(things))
+	}
+}
