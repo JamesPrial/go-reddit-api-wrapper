@@ -122,6 +122,73 @@ func TestClient_NewRequestPreservesBody(t *testing.T) {
 	}
 }
 
+func TestClient_NewRequestWithQueryParams(t *testing.T) {
+	c, err := NewClient(nil, "https://example.com", "agent", nil)
+	if err != nil {
+		t.Fatalf("NewClient returned error: %v", err)
+	}
+
+	params := make(map[string][]string)
+	params["limit"] = []string{"10"}
+	params["sort"] = []string{"hot"}
+
+	req, err := c.NewRequest(context.Background(), http.MethodGet, "resource", nil, params)
+	if err != nil {
+		t.Fatalf("NewRequest returned error: %v", err)
+	}
+
+	query := req.URL.Query()
+	if query.Get("limit") != "10" {
+		t.Errorf("expected limit=10, got %q", query.Get("limit"))
+	}
+	if query.Get("sort") != "hot" {
+		t.Errorf("expected sort=hot, got %q", query.Get("sort"))
+	}
+}
+
+func TestClient_NewRequestWithMultipleValuesForSameKey(t *testing.T) {
+	c, err := NewClient(nil, "https://example.com", "agent", nil)
+	if err != nil {
+		t.Fatalf("NewClient returned error: %v", err)
+	}
+
+	params := make(map[string][]string)
+	params["id"] = []string{"abc", "def", "ghi"}
+
+	req, err := c.NewRequest(context.Background(), http.MethodGet, "resource", nil, params)
+	if err != nil {
+		t.Fatalf("NewRequest returned error: %v", err)
+	}
+
+	query := req.URL.Query()
+	ids := query["id"]
+	if len(ids) != 3 {
+		t.Fatalf("expected 3 id values, got %d", len(ids))
+	}
+	expected := map[string]bool{"abc": true, "def": true, "ghi": true}
+	for _, id := range ids {
+		if !expected[id] {
+			t.Errorf("unexpected id value: %q", id)
+		}
+	}
+}
+
+func TestClient_NewRequestWithEmptyParams(t *testing.T) {
+	c, err := NewClient(nil, "https://example.com", "agent", nil)
+	if err != nil {
+		t.Fatalf("NewClient returned error: %v", err)
+	}
+
+	req, err := c.NewRequest(context.Background(), http.MethodGet, "resource", nil, make(map[string][]string))
+	if err != nil {
+		t.Fatalf("NewRequest returned error: %v", err)
+	}
+
+	if req.URL.RawQuery != "" {
+		t.Errorf("expected empty query string, got %q", req.URL.RawQuery)
+	}
+}
+
 func TestClient_DoDecodesResponse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -248,6 +315,54 @@ func TestClient_DoJSONDecodeErrorWrapped(t *testing.T) {
 	var clientErr *ClientError
 	if !errors.As(err, &clientErr) {
 		t.Fatalf("expected ClientError, got %T", err)
+	}
+}
+
+// failingReader simulates a body read error
+type failingReader struct{}
+
+func (f *failingReader) Read(p []byte) (n int, err error) {
+	return 0, errors.New("simulated read failure")
+}
+
+func (f *failingReader) Close() error {
+	return nil
+}
+
+func TestClient_DoBodyReadError(t *testing.T) {
+	// Create a custom RoundTripper that returns a response with a failing body
+	httpClient := &http.Client{
+		Transport: roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       &failingReader{},
+				Header:     make(http.Header),
+				Request:    r,
+			}, nil
+		}),
+	}
+
+	c, err := NewClient(httpClient, "https://example.com/", "agent", nil)
+	if err != nil {
+		t.Fatalf("NewClient returned error: %v", err)
+	}
+
+	req, err := c.NewRequest(context.Background(), http.MethodGet, "resource", nil)
+	if err != nil {
+		t.Fatalf("NewRequest returned error: %v", err)
+	}
+
+	err = c.Do(req, nil)
+	if err == nil {
+		t.Fatal("expected body read error")
+	}
+
+	var clientErr *ClientError
+	if !errors.As(err, &clientErr) {
+		t.Fatalf("expected ClientError, got %T", err)
+	}
+	if !bytes.Contains([]byte(clientErr.Error()), []byte("simulated read failure")) {
+		t.Errorf("expected error to contain 'simulated read failure', got %q", clientErr.Error())
 	}
 }
 

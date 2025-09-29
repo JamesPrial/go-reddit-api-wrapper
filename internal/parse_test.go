@@ -1203,6 +1203,134 @@ func TestExtractPostAndComments(t *testing.T) {
 	}
 }
 
+func TestExtractPostAndComments_EdgeCases(t *testing.T) {
+	parser := NewParser()
+
+	t.Run("single listing with post only", func(t *testing.T) {
+		// Single listing format tries ExtractComments first, which succeeds with 0 comments
+		// when children are posts (t3). This is expected behavior - single listing is assumed
+		// to be comments, not posts.
+		response := []*types.Thing{
+			{
+				Kind: "Listing",
+				Data: json.RawMessage(`{
+					"children":[
+						{
+							"kind":"t3",
+							"id":"post1",
+							"name":"t3_post1",
+							"data":{
+								"author":"author",
+								"title":"Post",
+								"url":"http://example.com"
+							}
+						}
+					]
+				}`),
+			},
+		}
+
+		post, comments, moreIDs, err := parser.ExtractPostAndComments(response)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		// ExtractComments succeeds but finds no t1 children, returns nil post
+		if post != nil {
+			t.Errorf("expected no post for single listing, got %v", post)
+		}
+		if len(comments) != 0 {
+			t.Errorf("expected 0 comments, got %d", len(comments))
+		}
+		if len(moreIDs) != 0 {
+			t.Errorf("expected 0 more IDs, got %d", len(moreIDs))
+		}
+	})
+
+	t.Run("first listing fails to parse, second has comments", func(t *testing.T) {
+		response := []*types.Thing{
+			{
+				Kind: "t3", // Wrong kind, should be Listing
+				Data: json.RawMessage(`{}`),
+			},
+			{
+				Kind: "Listing",
+				Data: json.RawMessage(`{
+					"children":[
+						{
+							"kind":"t1",
+							"id":"comment1",
+							"name":"t1_comment1",
+							"data":{
+								"author":"commenter",
+								"body":"Comment",
+								"replies":""
+							}
+						}
+					]
+				}`),
+			},
+		}
+
+		post, comments, moreIDs, err := parser.ExtractPostAndComments(response)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if post != nil {
+			t.Errorf("expected no post but got one")
+		}
+		if len(comments) != 1 {
+			t.Errorf("expected 1 comment, got %d", len(comments))
+		}
+		if len(moreIDs) != 0 {
+			t.Errorf("expected 0 more IDs, got %d", len(moreIDs))
+		}
+	})
+
+	t.Run("both post and comment extraction fail", func(t *testing.T) {
+		response := []*types.Thing{
+			{
+				Kind: "t1", // Wrong kind for posts
+				Data: json.RawMessage(`{}`),
+			},
+			{
+				Kind: "t3", // Wrong kind for comments
+				Data: json.RawMessage(`{}`),
+			},
+		}
+
+		post, comments, moreIDs, err := parser.ExtractPostAndComments(response)
+		if err == nil {
+			t.Fatal("expected error but got none")
+		}
+		if post != nil {
+			t.Errorf("expected no post but got one")
+		}
+		if comments != nil {
+			t.Errorf("expected nil comments but got %v", comments)
+		}
+		if moreIDs != nil {
+			t.Errorf("expected nil more IDs but got %v", moreIDs)
+		}
+	})
+
+	t.Run("single listing with invalid data", func(t *testing.T) {
+		response := []*types.Thing{
+			{
+				Kind: "t3", // Wrong kind, not Listing or t1
+				Data: json.RawMessage(`{}`),
+			},
+		}
+
+		post, comments, moreIDs, err := parser.ExtractPostAndComments(response)
+		if err == nil {
+			t.Fatal("expected error but got none")
+		}
+		if post != nil || comments != nil || moreIDs != nil {
+			t.Error("expected all nil on error")
+		}
+	})
+}
+
 // Test edge cases for Edited type unmarshaling
 func TestEditedUnmarshalJSON(t *testing.T) {
 	tests := []struct {
