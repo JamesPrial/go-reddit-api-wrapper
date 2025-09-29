@@ -51,8 +51,6 @@ type Client struct {
 	logger          *slog.Logger
 	maxLogBodyBytes int
 
-	parser *Parser // Parses reddit API responses from JSON into typed structs (may break this dependency later idk)
-
 	limiter        *rate.Limiter
 	forceWaitUntil atomic.Int64 // Unix nanoseconds
 }
@@ -88,7 +86,6 @@ func NewClient(httpClient *http.Client, baseURL string, userAgent string, logger
 		UserAgent:       userAgent,
 		limiter:         limiter,
 		logger:          logger,
-		parser:          NewParser(),
 		maxLogBodyBytes: defaultLogBodyBytes,
 	}
 

@@ -121,10 +121,6 @@ type TokenProvider interface {
 	GetToken(ctx context.Context) (string, error)
 }
 
-type Parser interface {
-	ParseThing(thing *types.Thing) (interface{}, error)
-}
-
 // HTTPClient defines the behavior required from the internal HTTP client.
 // This interface allows for easy testing and customization of HTTP behavior.
 type HTTPClient interface {
