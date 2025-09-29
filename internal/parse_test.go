@@ -203,7 +203,7 @@ func TestParseListing(t *testing.T) {
 	}
 }
 
-func TestParseLink(t *testing.T) {
+func TestParsePost(t *testing.T) {
 	parser := NewParser()
 
 	tests := []struct {
@@ -225,7 +225,7 @@ func TestParseLink(t *testing.T) {
 			expectError: true,
 		},
 		{
-			name: "valid link",
+			name: "valid post",
 			thing: &types.Thing{
 				Kind: "t3",
 				Data: json.RawMessage(`{
@@ -273,7 +273,7 @@ func TestParseLink(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := parser.ParseLink(tt.thing)
+			result, err := parser.ParsePost(tt.thing)
 
 			if tt.expectError {
 				if err == nil {

@@ -29,7 +29,7 @@ func (p *Parser) ParseThing(thing *types.Thing) (interface{}, error) {
 	case "t2":
 		return p.ParseAccount(thing)
 	case "t3":
-		return p.ParseLink(thing)
+		return p.ParsePost(thing)
 	case "t4":
 		return p.ParseMessage(thing)
 	case "t5":
@@ -50,28 +50,29 @@ func (p *Parser) ParseListing(thing *types.Thing) (*types.ListingData, error) {
 		return nil, fmt.Errorf("expected Listing, got %s", thing.Kind)
 	}
 
-	var listing types.ListingData
-	if err := json.Unmarshal(thing.Data, &listing); err != nil {
+	var result types.ListingData
+	if err := json.Unmarshal(thing.Data, &result); err != nil {
 		return nil, fmt.Errorf("failed to parse Listing data: %w", err)
 	}
-	return &listing, nil
+
+	return &result, nil
 }
 
-// ParseLink extracts a Post from a Thing of kind "t3".
-func (p *Parser) ParseLink(thing *types.Thing) (*types.Post, error) {
+// ParsePost extracts a Post from a Thing of kind "t3".
+func (p *Parser) ParsePost(thing *types.Thing) (*types.Post, error) {
 	if thing == nil {
 		return nil, fmt.Errorf("thing is nil")
 	}
 	if thing.Kind != "t3" {
-		return nil, fmt.Errorf("expected t3 (Link), got %s", thing.Kind)
+		return nil, fmt.Errorf("expected t3 (Post), got %s", thing.Kind)
 	}
 
-	var post types.Post
-	if err := json.Unmarshal(thing.Data, &post); err != nil {
-		return nil, fmt.Errorf("failed to parse Link data: %w", err)
+	var result types.Post
+	if err := json.Unmarshal(thing.Data, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse Post data: %w", err)
 	}
 
-	return &post, nil
+	return &result, nil
 }
 
 // ParseComment extracts a Comment from a Thing of kind "t1".
@@ -83,8 +84,8 @@ func (p *Parser) ParseComment(thing *types.Thing) (*types.Comment, error) {
 		return nil, fmt.Errorf("expected t1 (Comment), got %s", thing.Kind)
 	}
 
-	var comment types.Comment
-	if err := json.Unmarshal(thing.Data, &comment); err != nil {
+	var result types.Comment
+	if err := json.Unmarshal(thing.Data, &result); err != nil {
 		return nil, fmt.Errorf("failed to parse Comment data: %w", err)
 	}
 
@@ -95,15 +96,16 @@ func (p *Parser) ParseComment(thing *types.Thing) (*types.Comment, error) {
 	if err := json.Unmarshal(thing.Data, &rawData); err == nil && len(rawData.Replies) > 0 {
 		// Check if it's an empty string (Reddit sends "" when there are no replies)
 		if string(rawData.Replies) != `""` {
+			// Parse the replies Thing - already have the raw JSON, no new buffer needed
 			var repliesThing types.Thing
 			if err := json.Unmarshal(rawData.Replies, &repliesThing); err == nil {
 				replies, _, _ := p.ExtractComments(&repliesThing)
-				comment.Replies = replies
+				result.Replies = replies
 			}
 		}
 	}
 
-	return &comment, nil
+	return &result, nil
 }
 
 // ParseSubreddit extracts a SubredditData from a Thing of kind "t5".
@@ -115,11 +117,12 @@ func (p *Parser) ParseSubreddit(thing *types.Thing) (*types.SubredditData, error
 		return nil, fmt.Errorf("expected t5 (Subreddit), got %s", thing.Kind)
 	}
 
-	var subreddit types.SubredditData
-	if err := json.Unmarshal(thing.Data, &subreddit); err != nil {
+	var result types.SubredditData
+	if err := json.Unmarshal(thing.Data, &result); err != nil {
 		return nil, fmt.Errorf("failed to parse Subreddit data: %w", err)
 	}
-	return &subreddit, nil
+
+	return &result, nil
 }
 
 // ParseAccount extracts an AccountData from a Thing of kind "t2".
@@ -131,11 +134,12 @@ func (p *Parser) ParseAccount(thing *types.Thing) (*types.AccountData, error) {
 		return nil, fmt.Errorf("expected t2 (Account), got %s", thing.Kind)
 	}
 
-	var account types.AccountData
-	if err := json.Unmarshal(thing.Data, &account); err != nil {
+	var result types.AccountData
+	if err := json.Unmarshal(thing.Data, &result); err != nil {
 		return nil, fmt.Errorf("failed to parse Account data: %w", err)
 	}
-	return &account, nil
+
+	return &result, nil
 }
 
 // ParseMessage extracts a MessageData from a Thing of kind "t4".
@@ -147,11 +151,12 @@ func (p *Parser) ParseMessage(thing *types.Thing) (*types.MessageData, error) {
 		return nil, fmt.Errorf("expected t4 (Message), got %s", thing.Kind)
 	}
 
-	var message types.MessageData
-	if err := json.Unmarshal(thing.Data, &message); err != nil {
+	var result types.MessageData
+	if err := json.Unmarshal(thing.Data, &result); err != nil {
 		return nil, fmt.Errorf("failed to parse Message data: %w", err)
 	}
-	return &message, nil
+
+	return &result, nil
 }
 
 // ParseMore extracts a MoreData from a Thing of kind "more".
@@ -163,16 +168,24 @@ func (p *Parser) ParseMore(thing *types.Thing) (*types.MoreData, error) {
 		return nil, fmt.Errorf("expected more, got %s", thing.Kind)
 	}
 
-	var more types.MoreData
-	if err := json.Unmarshal(thing.Data, &more); err != nil {
+	var result types.MoreData
+	if err := json.Unmarshal(thing.Data, &result); err != nil {
 		return nil, fmt.Errorf("failed to parse More data: %w", err)
 	}
-	return &more, nil
+
+	return &result, nil
 }
 
 // ExtractPosts extracts all Post objects from a listing Thing.
-func (p *Parser) ExtractPosts(listing *types.Thing) ([]*types.Post, error) {
-	listingData, err := p.ParseListing(listing)
+func (p *Parser) ExtractPosts(thing *types.Thing) ([]*types.Post, error) {
+	if thing == nil {
+		return nil, fmt.Errorf("thing is nil")
+	}
+	if thing.Kind != "Listing" {
+		return nil, fmt.Errorf("expected Listing, got %s", thing.Kind)
+	}
+
+	listingData, err := p.ParseListing(thing)
 	if err != nil {
 		return nil, err
 	}
@@ -180,13 +193,14 @@ func (p *Parser) ExtractPosts(listing *types.Thing) ([]*types.Post, error) {
 	posts := make([]*types.Post, 0, len(listingData.Children))
 	for _, child := range listingData.Children {
 		if child.Kind == "t3" {
-			post, err := p.ParseLink(child)
+			post, err := p.ParsePost(child)
 			if err != nil {
-				continue
+				continue // Skip unparseable posts
 			}
 			posts = append(posts, post)
 		}
 	}
+
 	return posts, nil
 }
 
@@ -225,7 +239,7 @@ func (p *Parser) ExtractComments(thing *types.Thing) ([]*types.Comment, []string
 		case "t1":
 			comment, err := p.ParseComment(child)
 			if err != nil {
-				continue
+				continue // Skip unparseable comments
 			}
 
 			comments = append(comments, comment)

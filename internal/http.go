@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -10,11 +11,36 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 	"golang.org/x/time/rate"
+)
+
+var bodyBufferPool = sync.Pool{
+	New: func() interface{} {
+		return new(bytes.Buffer)
+	},
+}
+
+func getBuffer() *bytes.Buffer {
+	return bodyBufferPool.Get().(*bytes.Buffer)
+}
+
+func putBuffer(buf *bytes.Buffer) {
+	buf.Reset()
+	bodyBufferPool.Put(buf)
+}
+
+const (
+	DefaultRequestsPerMinute    = 1000
+	DefaultRateLimitBurst       = 10
+	SecondsPerMinute            = 60.0
+	ParseFloatBitSize           = 64
+	defaultLogBodyBytes         = 4 * 1024
+	ProactiveRateLimitThreshold = 5 // Start throttling when remaining requests drop below this
 )
 
 // Client manages communication with the Reddit API.
@@ -24,6 +50,8 @@ type Client struct {
 	UserAgent       string
 	logger          *slog.Logger
 	maxLogBodyBytes int
+
+	parser *Parser // Parses reddit API responses from JSON into typed structs (may break this dependency later idk)
 
 	limiter        *rate.Limiter
 	forceWaitUntil atomic.Int64 // Unix nanoseconds
@@ -36,15 +64,6 @@ type RateLimitConfig struct {
 	// Burst allows short spikes above the steady-state rate. Defaults to 10 if zero.
 	Burst int
 }
-
-const (
-	DefaultRequestsPerMinute    = 1000
-	DefaultRateLimitBurst       = 10
-	SecondsPerMinute            = 60.0
-	ParseFloatBitSize           = 64
-	defaultLogBodyBytes         = 4 * 1024
-	ProactiveRateLimitThreshold = 5 // Start throttling when remaining requests drop below this
-)
 
 // NewClient returns a new Reddit API client.
 // If a nil httpClient is provided, http.DefaultClient will be used.
@@ -69,6 +88,7 @@ func NewClient(httpClient *http.Client, baseURL string, userAgent string, logger
 		UserAgent:       userAgent,
 		limiter:         limiter,
 		logger:          logger,
+		parser:          NewParser(),
 		maxLogBodyBytes: defaultLogBodyBytes,
 	}
 
@@ -116,81 +136,77 @@ func (c *Client) NewRequest(ctx context.Context, method, path string, body io.Re
 	return req, nil
 }
 
-// Do sends an API request and returns the API response. The API response is
-// JSON decoded and stored in the value pointed to by v, or returned as an
-// error if an API error has occurred.
-func (c *Client) Do(req *http.Request, v *types.Thing) (*http.Response, error) {
-
+// doRequest handles the common HTTP request flow and returns raw response body.
+// This centralizes rate limiting, logging, and error handling for all HTTP operations.
+func (c *Client) doRequest(req *http.Request) ([]byte, *http.Response, error) {
 	ctx := req.Context()
 	start := time.Now()
 
+	// Rate limiting
 	if err := c.waitForRateLimit(ctx); err != nil {
 		c.logWaitFailure(ctx, req, err)
-		return nil, &ClientError{OriginalErr: err}
+		return nil, nil, &ClientError{OriginalErr: err}
 	}
 
+	// Execute request
 	resp, err := c.client.Do(req)
 	if err != nil {
 		c.logTransportError(ctx, req, time.Since(start), err)
-		return nil, &ClientError{OriginalErr: err}
+		return nil, nil, &ClientError{OriginalErr: err}
 	}
 	defer resp.Body.Close()
 
+	// Apply rate limit headers
 	c.applyRateHeaders(resp)
 
-	bodyBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
+	// Read body using pooled buffer
+	buf := getBuffer()
+	defer putBuffer(buf)
+
+	if _, err := io.Copy(buf, resp.Body); err != nil {
 		c.logBodyReadError(ctx, req, resp, time.Since(start), err)
-		return resp, &ClientError{OriginalErr: err}
+		return nil, resp, &ClientError{OriginalErr: err}
 	}
+
+	// Copy buffer contents to returned byte slice
+	bodyBytes := make([]byte, buf.Len())
+	copy(bodyBytes, buf.Bytes())
 
 	c.logHTTPResult(ctx, req, resp, bodyBytes, time.Since(start))
 
+	// Check HTTP status
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return resp, &APIError{Response: resp, Message: "request failed"}
+		return bodyBytes, resp, &APIError{Response: resp, Message: "request failed"}
+	}
+
+	return bodyBytes, resp, nil
+}
+
+// Do sends an API request and returns the API response. The API response is
+// JSON decoded and stored in the value pointed to by v, or returned as an
+// error if an API error has occurred.
+func (c *Client) Do(req *http.Request, v *types.Thing) error {
+	bodyBytes, resp, err := c.doRequest(req)
+	if err != nil {
+		return err
 	}
 
 	if v != nil && len(bodyBytes) > 0 {
 		if err := json.Unmarshal(bodyBytes, v); err != nil {
-			c.logDecodeError(ctx, req, resp, err)
-			return resp, &ClientError{OriginalErr: err}
+			c.logDecodeError(req.Context(), req, resp, err)
+			return &ClientError{OriginalErr: err}
 		}
 	}
 
-	return resp, nil
+	return nil
 }
 
 // DoThingArray sends an API request and returns either an array of Things or a single Thing wrapped in an array.
 // Used for the comments endpoint which can return [post, comments] or a single Listing.
 func (c *Client) DoThingArray(req *http.Request) ([]*types.Thing, error) {
-
-	ctx := req.Context()
-	start := time.Now()
-
-	if err := c.waitForRateLimit(ctx); err != nil {
-		c.logWaitFailure(ctx, req, err)
-		return nil, &ClientError{OriginalErr: err}
-	}
-
-	resp, err := c.client.Do(req)
+	bodyBytes, resp, err := c.doRequest(req)
 	if err != nil {
-		c.logTransportError(ctx, req, time.Since(start), err)
-		return nil, &ClientError{OriginalErr: err}
-	}
-	defer resp.Body.Close()
-
-	c.applyRateHeaders(resp)
-
-	bodyBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		c.logBodyReadError(ctx, req, resp, time.Since(start), err)
-		return nil, &ClientError{OriginalErr: err}
-	}
-
-	c.logHTTPResult(ctx, req, resp, bodyBytes, time.Since(start))
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, &APIError{Response: resp, Message: fmt.Sprintf("request failed with status %d: %s", resp.StatusCode, string(bodyBytes))}
+		return nil, err
 	}
 
 	// Parse the response which can be either an array or a single Thing
@@ -231,34 +247,9 @@ func (c *Client) DoThingArray(req *http.Request) ([]*types.Thing, error) {
 
 // DoMoreChildren sends an API request to the morechildren endpoint and returns the Things array.
 func (c *Client) DoMoreChildren(req *http.Request) ([]*types.Thing, error) {
-
-	ctx := req.Context()
-	start := time.Now()
-
-	if err := c.waitForRateLimit(ctx); err != nil {
-		c.logWaitFailure(ctx, req, err)
-		return nil, &ClientError{OriginalErr: err}
-	}
-
-	resp, err := c.client.Do(req)
+	bodyBytes, resp, err := c.doRequest(req)
 	if err != nil {
-		c.logTransportError(ctx, req, time.Since(start), err)
-		return nil, &ClientError{OriginalErr: err}
-	}
-	defer resp.Body.Close()
-
-	c.applyRateHeaders(resp)
-
-	bodyBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		c.logBodyReadError(ctx, req, resp, time.Since(start), err)
-		return nil, &ClientError{OriginalErr: err}
-	}
-
-	c.logHTTPResult(ctx, req, resp, bodyBytes, time.Since(start))
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, &APIError{Response: resp, Message: fmt.Sprintf("request failed with status %d: %s", resp.StatusCode, string(bodyBytes))}
+		return nil, err
 	}
 
 	// Parse the morechildren response structure

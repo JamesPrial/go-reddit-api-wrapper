@@ -141,7 +141,7 @@ func TestClient_DoDecodesResponse(t *testing.T) {
 	}
 
 	var thing types.Thing
-	if _, err := c.Do(req, &thing); err != nil {
+	if err := c.Do(req, &thing); err != nil {
 		t.Fatalf("Do returned error: %v", err)
 	}
 
@@ -175,7 +175,7 @@ func TestClient_DoTransportErrorWrapped(t *testing.T) {
 		t.Fatalf("NewRequest returned error: %v", err)
 	}
 
-	_, err = c.Do(req, nil)
+	err = c.Do(req, nil)
 	if err == nil {
 		t.Fatal("expected transport error")
 	}
@@ -207,12 +207,9 @@ func TestClient_DoNonSuccessStatusReturnsAPIError(t *testing.T) {
 		t.Fatalf("NewRequest returned error: %v", err)
 	}
 
-	resp, err := c.Do(req, nil)
+	err = c.Do(req, nil)
 	if err == nil {
 		t.Fatal("expected API error")
-	}
-	if resp == nil {
-		t.Fatal("expected response to be returned alongside error")
 	}
 
 	var apiErr *APIError
@@ -243,7 +240,7 @@ func TestClient_DoJSONDecodeErrorWrapped(t *testing.T) {
 	}
 
 	var thing types.Thing
-	_, err = c.Do(req, &thing)
+	err = c.Do(req, &thing)
 	if err == nil {
 		t.Fatal("expected decode error")
 	}
@@ -272,12 +269,9 @@ func TestClient_DoSkipsDecodeWhenTargetNil(t *testing.T) {
 		t.Fatalf("NewRequest returned error: %v", err)
 	}
 
-	resp, err := c.Do(req, nil)
+	err = c.Do(req, nil)
 	if err != nil {
 		t.Fatalf("expected no error when decode target nil, got %v", err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("unexpected status: %d", resp.StatusCode)
 	}
 }
 
@@ -317,7 +311,7 @@ func TestClient_DoEnforcesRetryAfter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRequest returned error: %v", err)
 	}
-	if _, err := c.Do(req1, nil); err != nil {
+	if err := c.Do(req1, nil); err != nil {
 		t.Fatalf("Do on first request returned error: %v", err)
 	}
 
@@ -327,7 +321,7 @@ func TestClient_DoEnforcesRetryAfter(t *testing.T) {
 	}
 
 	start := time.Now()
-	if _, err := c.Do(req2, nil); err != nil {
+	if err := c.Do(req2, nil); err != nil {
 		t.Fatalf("Do on second request returned error: %v", err)
 	}
 	elapsed := time.Since(start)
@@ -372,7 +366,7 @@ func TestClient_DoHonorsCanceledContextBeforeSend(t *testing.T) {
 		t.Fatalf("NewRequest returned error: %v", err)
 	}
 
-	_, err = c.Do(req, nil)
+	err = c.Do(req, nil)
 	if err == nil {
 		t.Fatal("expected error due to canceled context")
 	}

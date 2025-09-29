@@ -121,6 +121,10 @@ type TokenProvider interface {
 	GetToken(ctx context.Context) (string, error)
 }
 
+type Parser interface {
+	ParseThing(thing *types.Thing) (interface{}, error)
+}
+
 // HTTPClient defines the behavior required from the internal HTTP client.
 // This interface allows for easy testing and customization of HTTP behavior.
 type HTTPClient interface {
@@ -131,7 +135,7 @@ type HTTPClient interface {
 
 	// Do executes an HTTP request and unmarshals the response into a Reddit Thing object.
 	// This is used for most Reddit API endpoints that return structured data.
-	Do(req *http.Request, v *types.Thing) (*http.Response, error)
+	Do(req *http.Request, v *types.Thing) error
 
 	// DoThingArray executes an HTTP request and returns either an array of Things or a single Thing.
 	// This is used for the comments endpoint which can return [post, comments] or a single Listing.
@@ -279,7 +283,7 @@ func (c *Client) Me(ctx context.Context) (*types.AccountData, error) {
 	}
 
 	var result types.Thing
-	_, err = c.client.Do(req, &result)
+	err = c.client.Do(req, &result)
 	if err != nil {
 		return nil, &RequestError{Operation: "get user info", URL: MeURL, Err: err}
 	}
@@ -329,7 +333,7 @@ func (c *Client) GetSubreddit(ctx context.Context, name string) (*types.Subreddi
 	}
 
 	var result types.Thing
-	_, err = c.client.Do(req, &result)
+	err = c.client.Do(req, &result)
 	if err != nil {
 		return nil, &RequestError{Operation: "get subreddit", URL: SubPrefixURL + name + "/about", Err: err}
 	}
@@ -407,7 +411,7 @@ func (c *Client) getPosts(ctx context.Context, request *types.PostsRequest, sort
 	}
 
 	var result types.Thing
-	_, err = c.client.Do(httpReq, &result)
+	err = c.client.Do(httpReq, &result)
 	if err != nil {
 		return nil, &RequestError{Operation: "get " + sort + " posts", URL: path, Err: err}
 	}

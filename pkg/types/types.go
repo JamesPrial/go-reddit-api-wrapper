@@ -101,7 +101,7 @@ type ListingData struct {
 	BeforeFullname string   `json:"before"` // Reddit fullname for pagination (previous page)
 	AfterFullname  string   `json:"after"`  // Reddit fullname for pagination (next page)
 	Modhash        string   `json:"modhash"`
-	Children       []*Thing `json:"children"`
+	Children       []*Thing `json:"children"` // Raw Things with kind+data, parsed by caller
 }
 
 // Pagination captures the shared pagination behaviour for Reddit listing endpoints.
