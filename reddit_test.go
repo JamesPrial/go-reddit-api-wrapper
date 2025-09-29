@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/jamesprial/go-reddit-api-wrapper/internal"
@@ -663,11 +664,11 @@ func TestClient_GetCommentsMultiple(t *testing.T) {
 				{Subreddit: "golang", PostID: "invalid"},
 			},
 			setupMock: func() HTTPClient {
-				callCount := 0
+				var callCount atomic.Int32
 				return &mockHTTPClient{
 					doThingArrayFunc: func(req *http.Request) ([]*types.Thing, error) {
-						callCount++
-						if callCount == 2 {
+						count := callCount.Add(1)
+						if count == 2 {
 							return nil, errors.New("post not found")
 						}
 						postData := `{"id":"abc","title":"Test"}`
