@@ -173,7 +173,7 @@ func (c *Client) doRequest(req *http.Request) ([]byte, *http.Response, error) {
 
 	// Check HTTP status
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return bodyBytes, resp, &APIError{Response: resp, Message: "request failed"}
+		return bodyBytes, resp, &APIError{StatusCode: resp.StatusCode, Message: "request failed"}
 	}
 
 	return bodyBytes, resp, nil
@@ -224,7 +224,7 @@ func (c *Client) DoThingArray(req *http.Request) ([]*types.Thing, error) {
 				Message string `json:"message"`
 			}
 			if err := json.Unmarshal(bodyBytes, &errObj); err == nil && errObj.Error != "" {
-				return nil, &APIError{Response: resp, Message: fmt.Sprintf("API error [%s]: %s", errObj.Error, errObj.Message)}
+				return nil, &APIError{StatusCode: resp.StatusCode, Message: fmt.Sprintf("API error [%s]: %s", errObj.Error, errObj.Message)}
 			}
 			return nil, &ClientError{OriginalErr: fmt.Errorf("failed to parse response: %w", err)}
 		}
@@ -265,7 +265,7 @@ func (c *Client) DoMoreChildren(req *http.Request) ([]*types.Thing, error) {
 
 	// Check for API errors
 	if len(response.JSON.Errors) > 0 {
-		return nil, &APIError{Response: resp, Message: fmt.Sprintf("API error: %v", response.JSON.Errors[0])}
+		return nil, &APIError{StatusCode: resp.StatusCode, Message: fmt.Sprintf("API error: %v", response.JSON.Errors[0])}
 	}
 
 	return response.JSON.Data.Things, nil
@@ -542,13 +542,13 @@ func contextOrBackground(ctx context.Context) context.Context {
 
 // APIError represents an error returned by the Reddit API.
 type APIError struct {
-	Response *http.Response
-	Message  string
+	StatusCode int
+	Message    string
 }
 
 // Error returns the error message for the APIError.
 func (e *APIError) Error() string {
-	return fmt.Sprintf("API request failed with status %s: %s", e.Response.Status, e.Message)
+	return fmt.Sprintf("API request failed with status %d: %s", e.StatusCode, e.Message)
 }
 
 // ClientError represents an error that occurred within the client.

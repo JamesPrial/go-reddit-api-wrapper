@@ -283,8 +283,8 @@ func TestClient_DoNonSuccessStatusReturnsAPIError(t *testing.T) {
 	if !errors.As(err, &apiErr) {
 		t.Fatalf("expected APIError, got %T", err)
 	}
-	if apiErr.Response.StatusCode != http.StatusServiceUnavailable {
-		t.Fatalf("unexpected status on APIError: %d", apiErr.Response.StatusCode)
+	if apiErr.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("unexpected status on APIError: %d", apiErr.StatusCode)
 	}
 }
 
@@ -658,10 +658,9 @@ func TestClient_ProactiveRateLimiting(t *testing.T) {
 }
 
 func TestAPIError_ErrorFormatting(t *testing.T) {
-	resp := &http.Response{Status: "503 Service Unavailable", StatusCode: http.StatusServiceUnavailable}
-	err := &APIError{Response: resp, Message: "temporary outage"}
+	err := &APIError{StatusCode: http.StatusServiceUnavailable, Message: "temporary outage"}
 
-	if got := err.Error(); got != "API request failed with status 503 Service Unavailable: temporary outage" {
+	if got := err.Error(); got != "API request failed with status 503: temporary outage" {
 		t.Fatalf("unexpected error string: %q", got)
 	}
 }
