@@ -48,20 +48,14 @@ func main() {
         ClientID:     "your-client-id",
         ClientSecret: "your-client-secret",
         UserAgent:   "my-bot/1.0 by YourUsername",
-        Logger:       logger,      // Optional: capture structured logs
-        LogBodyLimit: 4 * 1024,    // Optional: adjust response bytes in debug logs
+        Logger:       logger, // Optional: capture structured logs
     }
 
-    // Create the client
+    // Create the client (automatically authenticates)
+    ctx := context.Background()
     client, err := graw.NewClient(config)
     if err != nil {
         log.Fatalf("Failed to create client: %v", err)
-    }
-
-    // Connect to Reddit (authenticate)
-    ctx := context.Background()
-    if err := client.Connect(ctx); err != nil {
-        log.Fatalf("Failed to connect to Reddit: %v", err)
     }
 
     // Get hot posts from r/golang
@@ -72,7 +66,7 @@ func main() {
     if err != nil {
         log.Fatalf("Failed to get hot posts: %v", err)
     }
-    
+
     fmt.Printf("Retrieved %d posts\n", len(posts.Posts))
 }
 ```
@@ -112,10 +106,9 @@ type Config struct {
 
 ### Available Methods
 
-- `NewClient(config *Config) (*Client, error)` - Create a new Reddit client
-- `Connect(ctx context.Context) error` - Authenticate with Reddit
-- `Me(ctx context.Context) (*Thing, error)` - Get authenticated user info
-- `GetSubreddit(ctx context.Context, name string) (*Thing, error)` - Get subreddit info
+- `NewClient(config *Config) (*Client, error)` - Create and authenticate a new Reddit client
+- `Me(ctx context.Context) (*types.AccountData, error)` - Get authenticated user info
+- `GetSubreddit(ctx context.Context, name string) (*types.SubredditData, error)` - Get subreddit info
 - `GetHot(ctx context.Context, request *types.PostsRequest) (*types.PostsResponse, error)` - Get hot posts
 - `GetNew(ctx context.Context, request *types.PostsRequest) (*types.PostsResponse, error)` - Get new posts
 - `GetComments(ctx context.Context, request *types.CommentsRequest) (*types.CommentsResponse, error)` - Get post comments
@@ -176,17 +169,275 @@ config := &graw.Config{
 
 The client logs request method, URL, status, duration, and rate limit headers. When debug logging is enabled, response bodies are included up to `LogBodyLimit` bytes.
 
-## Running the Example
+## Running the Examples
 
 ```bash
 export REDDIT_CLIENT_ID="your-client-id"
 export REDDIT_CLIENT_SECRET="your-client-secret"
 # Optional for user authentication:
-export REDDIT_USERNAME="your-username"  
+export REDDIT_USERNAME="your-username"
 export REDDIT_PASSWORD="your-password"
 
-go run example/main.go
+# Run basic example
+go run ./cmd/example/main.go
+
+# Run specific examples (see examples/ directory)
+go run ./examples/monitor/main.go
+go run ./examples/analyzer/main.go
 ```
+
+## Real-World Usage Examples
+
+### 1. Monitoring a Subreddit for New Posts
+
+```go
+// Monitor r/golang for new posts every 60 seconds
+func monitorSubreddit(ctx context.Context, client *graw.Client, subreddit string) {
+    var lastSeen string
+    ticker := time.NewTicker(60 * time.Second)
+    defer ticker.Stop()
+
+    for {
+        select {
+        case <-ctx.Done():
+            return
+        case <-ticker.C:
+            // Get new posts
+            resp, err := client.GetNew(ctx, &types.PostsRequest{
+                Subreddit:  subreddit,
+                Pagination: types.Pagination{Limit: 10, Before: lastSeen},
+            })
+            if err != nil {
+                log.Printf("Error fetching posts: %v", err)
+                continue
+            }
+
+            // Process new posts
+            for _, post := range resp.Posts {
+                fmt.Printf("[NEW] %s - %s\n", post.Title, post.URL)
+                // Do something with the post (send notification, analyze, etc.)
+            }
+
+            // Update last seen
+            if len(resp.Posts) > 0 {
+                lastSeen = "t3_" + resp.Posts[0].ID
+            }
+        }
+    }
+}
+```
+
+### 2. Analyzing Comment Sentiment
+
+```go
+// Fetch comments from a post and analyze them
+func analyzePostComments(ctx context.Context, client *graw.Client, subreddit, postID string) {
+    // Get all comments for the post
+    resp, err := client.GetComments(ctx, &types.CommentsRequest{
+        Subreddit:  subreddit,
+        PostID:     postID,
+        Pagination: types.Pagination{Limit: 100},
+    })
+    if err != nil {
+        log.Fatalf("Failed to get comments: %v", err)
+    }
+
+    // Analyze comments
+    var totalScore int
+    authorStats := make(map[string]int)
+
+    for _, comment := range resp.Comments {
+        totalScore += comment.Score
+        authorStats[comment.Author]++
+    }
+
+    fmt.Printf("Post: %s\n", resp.Post.Title)
+    fmt.Printf("Total comments: %d\n", len(resp.Comments))
+    fmt.Printf("Average score: %.2f\n", float64(totalScore)/float64(len(resp.Comments)))
+    fmt.Printf("Unique authors: %d\n", len(authorStats))
+
+    // Load more comments if truncated
+    if len(resp.MoreIDs) > 0 {
+        moreComments, err := client.GetMoreComments(ctx, &types.MoreCommentsRequest{
+            LinkID:     postID,
+            CommentIDs: resp.MoreIDs[:min(100, len(resp.MoreIDs))],
+        })
+        if err == nil {
+            fmt.Printf("Loaded %d additional comments\n", len(moreComments))
+        }
+    }
+}
+```
+
+### 3. Paginating Through Top Posts
+
+```go
+// Get top posts from multiple pages
+func getTopPosts(ctx context.Context, client *graw.Client, subreddit string, count int) []*types.Post {
+    var allPosts []*types.Post
+    after := ""
+
+    for len(allPosts) < count {
+        limit := min(100, count-len(allPosts))
+
+        resp, err := client.GetHot(ctx, &types.PostsRequest{
+            Subreddit:  subreddit,
+            Pagination: types.Pagination{
+                Limit: limit,
+                After: after,
+            },
+        })
+        if err != nil {
+            log.Printf("Error fetching posts: %v", err)
+            break
+        }
+
+        allPosts = append(allPosts, resp.Posts...)
+
+        // Check if there are more posts
+        if resp.AfterFullname == "" {
+            break
+        }
+        after = resp.AfterFullname
+    }
+
+    return allPosts
+}
+```
+
+### 4. Batch Processing Multiple Subreddits
+
+```go
+// Fetch hot posts from multiple subreddits concurrently
+func getMultiSubredditPosts(ctx context.Context, client *graw.Client, subreddits []string) map[string][]*types.Post {
+    results := make(map[string][]*types.Post)
+    var mu sync.Mutex
+    var wg sync.WaitGroup
+
+    for _, sub := range subreddits {
+        wg.Add(1)
+        go func(subreddit string) {
+            defer wg.Done()
+
+            resp, err := client.GetHot(ctx, &types.PostsRequest{
+                Subreddit:  subreddit,
+                Pagination: types.Pagination{Limit: 25},
+            })
+            if err != nil {
+                log.Printf("Error fetching r/%s: %v", subreddit, err)
+                return
+            }
+
+            mu.Lock()
+            results[subreddit] = resp.Posts
+            mu.Unlock()
+        }(sub)
+    }
+
+    wg.Wait()
+    return results
+}
+```
+
+### 5. Building a Comment Thread Tree
+
+```go
+// Build a hierarchical comment tree
+type CommentNode struct {
+    Comment  *types.Comment
+    Children []*CommentNode
+}
+
+func buildCommentTree(comments []*types.Comment) []*CommentNode {
+    // Create lookup map
+    nodeMap := make(map[string]*CommentNode)
+    var roots []*CommentNode
+
+    // First pass: create all nodes
+    for _, comment := range comments {
+        nodeMap[comment.ID] = &CommentNode{
+            Comment:  comment,
+            Children: []*CommentNode{},
+        }
+    }
+
+    // Second pass: build tree structure
+    for _, comment := range comments {
+        node := nodeMap[comment.ID]
+
+        if comment.ParentID == "" || comment.ParentID[:3] == "t3_" {
+            // Top-level comment
+            roots = append(roots, node)
+        } else {
+            // Child comment - extract parent ID
+            parentID := comment.ParentID[3:] // Remove "t1_" prefix
+            if parent, exists := nodeMap[parentID]; exists {
+                parent.Children = append(parent.Children, node)
+            }
+        }
+    }
+
+    return roots
+}
+
+// Print comment tree
+func printTree(node *CommentNode, depth int) {
+    indent := strings.Repeat("  ", depth)
+    fmt.Printf("%s- %s: %s (score: %d)\n",
+        indent, node.Comment.Author,
+        truncate(node.Comment.Body, 60),
+        node.Comment.Score)
+
+    for _, child := range node.Children {
+        printTree(child, depth+1)
+    }
+}
+```
+
+### 6. Error Handling Best Practices
+
+```go
+func robustFetch(ctx context.Context, client *graw.Client, subreddit string) {
+    resp, err := client.GetHot(ctx, &types.PostsRequest{
+        Subreddit:  subreddit,
+        Pagination: types.Pagination{Limit: 25},
+    })
+
+    if err != nil {
+        // Handle specific error types
+        switch e := err.(type) {
+        case *graw.AuthError:
+            log.Printf("Authentication failed: %s", e.Message)
+            // Maybe refresh credentials or notify user
+
+        case *graw.RequestError:
+            // Check if it's a rate limit issue
+            if apiErr, ok := e.Err.(*internal.APIError); ok {
+                if apiErr.StatusCode == 429 {
+                    log.Printf("Rate limited. Waiting before retry...")
+                    time.Sleep(60 * time.Second)
+                    // Retry the request
+                }
+            }
+
+        case *graw.ParseError:
+            log.Printf("Failed to parse response: %v", e.Err)
+            // Maybe log the raw response for debugging
+
+        default:
+            log.Printf("Unexpected error: %v", err)
+        }
+        return
+    }
+
+    // Process posts
+    for _, post := range resp.Posts {
+        fmt.Printf("%s (%d points)\n", post.Title, post.Score)
+    }
+}
+```
+
+For complete working examples, see the `examples/` directory.
 
 ## Error Handling
 
