@@ -539,6 +539,14 @@ func (c *Client) GetCommentsMultiple(ctx context.Context, requests []*types.Comm
 	// Launch goroutines for parallel fetching
 	for i, req := range requests {
 		go func(index int, r *types.CommentsRequest) {
+			// Check if context is already cancelled before starting
+			select {
+			case <-ctx.Done():
+				resultChan <- result{index: index, response: nil, err: ctx.Err()}
+				return
+			default:
+			}
+
 			resp, err := c.GetComments(ctx, r)
 			resultChan <- result{index: index, response: resp, err: err}
 		}(i, req)
@@ -547,12 +555,24 @@ func (c *Client) GetCommentsMultiple(ctx context.Context, requests []*types.Comm
 	// Collect results
 	results := make([]*types.CommentsResponse, len(requests))
 	var firstError error
-	for range requests {
-		res := <-resultChan
-		if res.err != nil && firstError == nil {
-			firstError = res.err
+	for i := range len(requests) {
+		select {
+		case res := <-resultChan:
+			if res.err != nil && firstError == nil {
+				firstError = res.err
+			}
+			results[res.index] = res.response
+		case <-ctx.Done():
+			// Context cancelled, collect remaining results but set error
+			if firstError == nil {
+				firstError = ctx.Err()
+			}
+			// Drain remaining results to prevent goroutine leaks
+			for j := i; j < len(requests); j++ {
+				<-resultChan
+			}
+			return results, firstError
 		}
-		results[res.index] = res.response
 	}
 
 	if firstError != nil {
