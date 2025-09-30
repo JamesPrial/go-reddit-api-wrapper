@@ -862,7 +862,7 @@ func TestExtractComments(t *testing.T) {
 				}`),
 			},
 			expectError:    false,
-			expectComments: 2, // Parent + reply
+			expectComments: 1, // Parent only (reply is in Replies field)
 			expectMore:     0,
 		},
 		{
@@ -957,7 +957,7 @@ func TestExtractComments(t *testing.T) {
 				}`),
 			},
 			expectError:    false,
-			expectComments: 3, // Parent + child + grandchild
+			expectComments: 1, // Parent only (tree structure maintained)
 			expectMore:     0,
 		},
 		{
@@ -1111,7 +1111,7 @@ func TestExtractPostAndComments(t *testing.T) {
 			},
 			expectError:    false,
 			expectPost:     true,
-			expectComments: 3, // 2 top-level comments + 1 reply
+			expectComments: 2, // 2 top-level comments (reply is in Replies field)
 			expectMore:     2,
 		},
 		{
@@ -1396,5 +1396,162 @@ func TestEditedUnmarshalJSON(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestCommentTreeStructure verifies that comments maintain a proper tree structure
+// where each comment's Replies field contains only direct children, not all descendants.
+func TestCommentTreeStructure(t *testing.T) {
+	parser := NewParser()
+
+	// Create a complex tree: parent -> child -> grandchild
+	thing := &types.Thing{
+		Kind: "t1",
+		Data: json.RawMessage(`{
+			"id": "parent",
+			"author": "user1",
+			"body": "Parent comment",
+			"replies": {
+				"kind": "Listing",
+				"data": {
+					"children": [
+						{
+							"kind": "t1",
+							"id": "child",
+							"name": "t1_child",
+							"data": {
+								"author": "user2",
+								"body": "Child comment",
+								"replies": {
+									"kind": "Listing",
+									"data": {
+										"children": [
+											{
+												"kind": "t1",
+												"id": "grandchild",
+												"name": "t1_grandchild",
+												"data": {
+													"author": "user3",
+													"body": "Grandchild comment",
+													"replies": ""
+												}
+											}
+										]
+									}
+								}
+							}
+						},
+						{
+							"kind": "t1",
+							"id": "child2",
+							"name": "t1_child2",
+							"data": {
+								"author": "user4",
+								"body": "Second child",
+								"replies": ""
+							}
+						}
+					]
+				}
+			}
+		}`),
+	}
+
+	parent, err := parser.ParseComment(thing)
+	if err != nil {
+		t.Fatalf("ParseComment failed: %v", err)
+	}
+
+	// Verify parent has exactly 2 direct children (not 3 with grandchild)
+	if len(parent.Replies) != 2 {
+		t.Errorf("Parent should have 2 direct children, got %d", len(parent.Replies))
+	}
+
+	// Verify first child exists
+	if parent.Replies[0].Author != "user2" {
+		t.Errorf("First child author = %q, want %q", parent.Replies[0].Author, "user2")
+	}
+
+	// Verify first child has exactly 1 child (grandchild)
+	if len(parent.Replies[0].Replies) != 1 {
+		t.Errorf("First child should have 1 reply, got %d", len(parent.Replies[0].Replies))
+	}
+
+	// Verify grandchild exists at correct level
+	if parent.Replies[0].Replies[0].Author != "user3" {
+		t.Errorf("Grandchild author = %q, want %q", parent.Replies[0].Replies[0].Author, "user3")
+	}
+
+	// Verify grandchild has no replies
+	if len(parent.Replies[0].Replies[0].Replies) != 0 {
+		t.Errorf("Grandchild should have 0 replies, got %d", len(parent.Replies[0].Replies[0].Replies))
+	}
+
+	// Verify second child exists and has no replies
+	if parent.Replies[1].Author != "user4" {
+		t.Errorf("Second child author = %q, want %q", parent.Replies[1].Author, "user4")
+	}
+	if len(parent.Replies[1].Replies) != 0 {
+		t.Errorf("Second child should have 0 replies, got %d", len(parent.Replies[1].Replies))
+	}
+}
+
+// TestCommentTreeWithMoreIDs verifies that MoreChildrenIDs are properly collected
+// at each level of the tree.
+func TestCommentTreeWithMoreIDs(t *testing.T) {
+	parser := NewParser()
+
+	thing := &types.Thing{
+		Kind: "t1",
+		Data: json.RawMessage(`{
+			"id": "parent",
+			"author": "user1",
+			"body": "Parent comment",
+			"replies": {
+				"kind": "Listing",
+				"data": {
+					"children": [
+						{
+							"kind": "t1",
+							"id": "child",
+							"name": "t1_child",
+							"data": {
+								"author": "user2",
+								"body": "Child comment",
+								"replies": ""
+							}
+						},
+						{
+							"kind": "more",
+							"id": "more1",
+							"data": {
+								"children": ["id1", "id2", "id3"]
+							}
+						}
+					]
+				}
+			}
+		}`),
+	}
+
+	parent, err := parser.ParseComment(thing)
+	if err != nil {
+		t.Fatalf("ParseComment failed: %v", err)
+	}
+
+	// Verify parent has 1 child and 3 more IDs
+	if len(parent.Replies) != 1 {
+		t.Errorf("Parent should have 1 child, got %d", len(parent.Replies))
+	}
+	if len(parent.MoreChildrenIDs) != 3 {
+		t.Errorf("Parent should have 3 more IDs, got %d", len(parent.MoreChildrenIDs))
+	}
+
+	// Verify more IDs are correct
+	expectedIDs := []string{"id1", "id2", "id3"}
+	for i, id := range expectedIDs {
+		if i >= len(parent.MoreChildrenIDs) || parent.MoreChildrenIDs[i] != id {
+			t.Errorf("MoreChildrenIDs[%d] = %q, want %q", i, parent.MoreChildrenIDs[i], id)
+		}
 	}
 }

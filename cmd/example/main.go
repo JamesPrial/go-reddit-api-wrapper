@@ -181,10 +181,10 @@ func main() {
 			}
 
 			moreComments, err := client.GetMoreComments(ctx, &types.MoreCommentsRequest{
-				LinkID:     firstPost.ID,
-				CommentIDs: moreToLoad,
-				Sort:       "best",
-				Limit:      10,
+				LinkID:        firstPost.ID,
+				CommentIDs:    moreToLoad,
+				Sort:          "best",
+				LimitChildren: true,
 			})
 			if err != nil {
 				log.Printf("Failed to load more comments: %v", err)

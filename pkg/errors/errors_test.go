@@ -192,6 +192,15 @@ func TestRequestError_Error(t *testing.T) {
 			err:      RequestError{},
 			contains: []string{"request error"},
 		},
+		{
+			name: "with underlying error but no message",
+			err: RequestError{
+				Operation: "GetPosts",
+				URL:       "https://oauth.reddit.com/r/golang/hot",
+				Err:       errors.New("connection timeout"),
+			},
+			contains: []string{"request error", "GetPosts", "connection timeout"},
+		},
 	}
 
 	for _, tt := range tests {

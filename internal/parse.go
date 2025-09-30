@@ -84,7 +84,8 @@ func (p *Parser) ParsePost(thing *types.Thing) (*types.Post, error) {
 	return &result, nil
 }
 
-// ParseComment extracts a Comment from a Thing of kind "t1".
+// ParseComment extracts a Comment from a Thing of kind "t1" and builds a proper tree structure.
+// The Replies field will contain only direct children, and each child will have its own Replies.
 func (p *Parser) ParseComment(thing *types.Thing) (*types.Comment, error) {
 	if thing == nil {
 		return nil, fmt.Errorf("thing is nil")
@@ -105,14 +106,30 @@ func (p *Parser) ParseComment(thing *types.Thing) (*types.Comment, error) {
 	if err := json.Unmarshal(thing.Data, &rawData); err == nil && len(rawData.Replies) > 0 {
 		// Check if it's an empty string (Reddit sends "" when there are no replies)
 		if string(rawData.Replies) != `""` {
-			// Parse the replies Thing - already have the raw JSON, no new buffer needed
+			// Parse the replies Thing
 			var repliesThing types.Thing
 			if err := json.Unmarshal(rawData.Replies, &repliesThing); err == nil {
-				replies, moreIDs, err := p.ExtractComments(&repliesThing)
-				if err == nil {
-					result.Replies = replies
-					if len(moreIDs) > 0 {
-						result.MoreChildrenIDs = append(result.MoreChildrenIDs, moreIDs...)
+				// Parse only direct children to maintain tree structure
+				if repliesThing.Kind == "Listing" {
+					listingData, err := p.ParseListing(&repliesThing)
+					if err == nil {
+						// Process each direct child
+						for _, child := range listingData.Children {
+							switch child.Kind {
+							case "t1":
+								// Recursively parse child comment (which will parse its own replies)
+								childComment, err := p.ParseComment(child)
+								if err == nil {
+									result.Replies = append(result.Replies, childComment)
+								}
+							case "more":
+								// Collect "more" IDs for deferred loading
+								more, err := p.ParseMore(child)
+								if err == nil {
+									result.MoreChildrenIDs = append(result.MoreChildrenIDs, more.Children...)
+								}
+							}
+						}
 					}
 				}
 			}
@@ -224,7 +241,9 @@ func (p *Parser) ExtractPosts(thing *types.Thing) ([]*types.Post, error) {
 	return posts, nil
 }
 
-// ExtractComments recursively extracts all comments from a comment tree.
+// ExtractComments extracts top-level comments from a Listing or single comment Thing.
+// Returns comments with proper tree structure (each comment has its Replies populated).
+// Also returns all "more" IDs found at any level in the tree for deferred loading.
 func (p *Parser) ExtractComments(thing *types.Thing) ([]*types.Comment, []string, error) {
 	comments := make([]*types.Comment, 0)
 	moreIDs := make([]string, 0)
@@ -236,14 +255,8 @@ func (p *Parser) ExtractComments(thing *types.Thing) ([]*types.Comment, []string
 			return nil, nil, err
 		}
 		comments = append(comments, comment)
-
-		// Replies are already parsed in ParseComment, just add them
-		if comment.Replies != nil {
-			comments = append(comments, comment.Replies...)
-		}
-		if len(comment.MoreChildrenIDs) > 0 {
-			moreIDs = append(moreIDs, comment.MoreChildrenIDs...)
-		}
+		// Collect more IDs from the entire tree
+		moreIDs = append(moreIDs, p.collectMoreIDs(comment)...)
 		return comments, moreIDs, nil
 	}
 
@@ -272,14 +285,8 @@ func (p *Parser) ExtractComments(thing *types.Thing) ([]*types.Comment, []string
 			}
 
 			comments = append(comments, comment)
-
-			// Replies are already parsed in ParseComment, just add them
-			if comment.Replies != nil {
-				comments = append(comments, comment.Replies...)
-			}
-			if len(comment.MoreChildrenIDs) > 0 {
-				moreIDs = append(moreIDs, comment.MoreChildrenIDs...)
-			}
+			// Collect more IDs from the entire tree
+			moreIDs = append(moreIDs, p.collectMoreIDs(comment)...)
 		case "more":
 			more, err := p.ParseMore(child)
 			if err != nil {
@@ -290,6 +297,18 @@ func (p *Parser) ExtractComments(thing *types.Thing) ([]*types.Comment, []string
 	}
 
 	return comments, moreIDs, nil
+}
+
+// collectMoreIDs recursively collects all MoreChildrenIDs from a comment tree.
+func (p *Parser) collectMoreIDs(comment *types.Comment) []string {
+	moreIDs := make([]string, 0)
+	if len(comment.MoreChildrenIDs) > 0 {
+		moreIDs = append(moreIDs, comment.MoreChildrenIDs...)
+	}
+	for _, reply := range comment.Replies {
+		moreIDs = append(moreIDs, p.collectMoreIDs(reply)...)
+	}
+	return moreIDs
 }
 
 // ExtractPostAndComments parses the typical response from GetComments which contains

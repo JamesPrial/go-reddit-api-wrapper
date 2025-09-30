@@ -104,12 +104,18 @@ type RequestError struct {
 }
 
 func (e *RequestError) Error() string {
-	if e.Operation != "" && e.URL != "" {
-		return fmt.Sprintf("request error during %s to %s: %s", e.Operation, e.URL, e.Message)
-	} else if e.Operation != "" {
-		return fmt.Sprintf("request error during %s: %s", e.Operation, e.Message)
+	// Use Message if available, otherwise use Err.Error()
+	msg := e.Message
+	if msg == "" && e.Err != nil {
+		msg = e.Err.Error()
 	}
-	return fmt.Sprintf("request error: %s", e.Message)
+
+	if e.Operation != "" && e.URL != "" {
+		return fmt.Sprintf("request error during %s to %s: %s", e.Operation, e.URL, msg)
+	} else if e.Operation != "" {
+		return fmt.Sprintf("request error during %s: %s", e.Operation, msg)
+	}
+	return fmt.Sprintf("request error: %s", msg)
 }
 
 func (e *RequestError) Unwrap() error {

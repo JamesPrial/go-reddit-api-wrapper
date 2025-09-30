@@ -878,6 +878,68 @@ func TestClient_GetMoreComments(t *testing.T) {
 			wantError:    false,
 			wantComments: 0,
 		},
+		{
+			name: "with LimitChildren true",
+			request: &types.MoreCommentsRequest{
+				LinkID:        "abc123",
+				CommentIDs:    []string{"comment1"},
+				LimitChildren: true,
+			},
+			setupMock: func() HTTPClient {
+				return &mockHTTPClient{
+					newRequestFunc: func(ctx context.Context, method, path string, body io.Reader, params ...url.Values) (*http.Request, error) {
+						// Verify the body contains limit_children=true
+						if body != nil {
+							bodyBytes, _ := io.ReadAll(body)
+							bodyStr := string(bodyBytes)
+							if !strings.Contains(bodyStr, "limit_children=true") {
+								t.Errorf("expected body to contain 'limit_children=true', got: %s", bodyStr)
+							}
+							// Verify it doesn't contain a numeric value
+							if strings.Contains(bodyStr, "limit_children=1") || strings.Contains(bodyStr, "limit_children=10") {
+								t.Errorf("limit_children should be boolean 'true', not a number, got: %s", bodyStr)
+							}
+						}
+						req, _ := http.NewRequestWithContext(ctx, method, "https://oauth.reddit.com/"+path, body)
+						return req, nil
+					},
+					doMoreChildrenFunc: func(req *http.Request) ([]*types.Thing, error) {
+						return []*types.Thing{}, nil
+					},
+				}
+			},
+			wantError:    false,
+			wantComments: 0,
+		},
+		{
+			name: "with LimitChildren false",
+			request: &types.MoreCommentsRequest{
+				LinkID:        "abc123",
+				CommentIDs:    []string{"comment1"},
+				LimitChildren: false,
+			},
+			setupMock: func() HTTPClient {
+				return &mockHTTPClient{
+					newRequestFunc: func(ctx context.Context, method, path string, body io.Reader, params ...url.Values) (*http.Request, error) {
+						// Verify the body does NOT contain limit_children when false
+						if body != nil {
+							bodyBytes, _ := io.ReadAll(body)
+							bodyStr := string(bodyBytes)
+							if strings.Contains(bodyStr, "limit_children") {
+								t.Errorf("expected body to NOT contain 'limit_children' when false, got: %s", bodyStr)
+							}
+						}
+						req, _ := http.NewRequestWithContext(ctx, method, "https://oauth.reddit.com/"+path, body)
+						return req, nil
+					},
+					doMoreChildrenFunc: func(req *http.Request) ([]*types.Thing, error) {
+						return []*types.Thing{}, nil
+					},
+				}
+			},
+			wantError:    false,
+			wantComments: 0,
+		},
 	}
 
 	for _, tt := range tests {

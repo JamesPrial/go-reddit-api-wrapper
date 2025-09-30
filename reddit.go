@@ -719,8 +719,8 @@ func (c *Client) GetMoreComments(ctx context.Context, request *types.MoreComment
 	if request.Depth > 0 {
 		formData.Set("depth", fmt.Sprintf("%d", request.Depth))
 	}
-	if request.Limit > 0 {
-		formData.Set("limit_children", fmt.Sprintf("%d", request.Limit))
+	if request.LimitChildren {
+		formData.Set("limit_children", "true")
 	}
 
 	// Create POST request with form data

@@ -169,9 +169,10 @@ type MoreCommentsRequest struct {
 	// 0 means no limit, 1 means only top-level comments, 2 means one level of replies, etc.
 	Depth int
 
-	// Limit specifies the maximum number of comments to retrieve.
-	// Reddit's default is 100. Setting this too high may cause timeouts.
-	Limit int
+	// LimitChildren controls whether Reddit should limit the number of children returned.
+	// When true, Reddit will limit the response size (typically to 20 children).
+	// When false (default), Reddit will return all requested children.
+	LimitChildren bool
 }
 
 // SubredditData contains the data for a Subreddit.
