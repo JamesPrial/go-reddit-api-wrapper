@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	pkgerrs "github.com/jamesprial/go-reddit-api-wrapper/pkg/errors"
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 	"golang.org/x/time/rate"
 )
@@ -40,7 +41,7 @@ func TestNewClient_InvalidBaseURL(t *testing.T) {
 		t.Fatal("expected error for invalid base URL")
 	}
 
-	var clientErr *ClientError
+	var clientErr *pkgerrs.ClientError
 	if !errors.As(err, &clientErr) {
 		t.Fatalf("expected ClientError, got %T", err)
 	}
@@ -94,7 +95,7 @@ func TestClient_NewRequestInvalidPath(t *testing.T) {
 		t.Fatal("expected error constructing request with invalid path")
 	}
 
-	var clientErr *ClientError
+	var clientErr *pkgerrs.ClientError
 	if !errors.As(err, &clientErr) {
 		t.Fatalf("expected ClientError, got %T", err)
 	}
@@ -247,7 +248,7 @@ func TestClient_DoTransportErrorWrapped(t *testing.T) {
 		t.Fatal("expected transport error")
 	}
 
-	var clientErr *ClientError
+	var clientErr *pkgerrs.ClientError
 	if !errors.As(err, &clientErr) {
 		t.Fatalf("expected ClientError, got %T", err)
 	}
@@ -279,7 +280,7 @@ func TestClient_DoNonSuccessStatusReturnsAPIError(t *testing.T) {
 		t.Fatal("expected API error")
 	}
 
-	var apiErr *APIError
+	var apiErr *pkgerrs.APIError
 	if !errors.As(err, &apiErr) {
 		t.Fatalf("expected APIError, got %T", err)
 	}
@@ -312,7 +313,7 @@ func TestClient_DoJSONDecodeErrorWrapped(t *testing.T) {
 		t.Fatal("expected decode error")
 	}
 
-	var clientErr *ClientError
+	var clientErr *pkgerrs.ClientError
 	if !errors.As(err, &clientErr) {
 		t.Fatalf("expected ClientError, got %T", err)
 	}
@@ -357,7 +358,7 @@ func TestClient_DoBodyReadError(t *testing.T) {
 		t.Fatal("expected body read error")
 	}
 
-	var clientErr *ClientError
+	var clientErr *pkgerrs.ClientError
 	if !errors.As(err, &clientErr) {
 		t.Fatalf("expected ClientError, got %T", err)
 	}
@@ -608,7 +609,7 @@ func TestClient_ApplyRateHeadersDoesNotShortenDelay(t *testing.T) {
 }
 
 func TestClient_ApplyRateHeadersUsesRatelimitRemaining(t *testing.T) {
-	c := &Client{}
+	c := &Client{rateLimitThreshold: ProactiveRateLimitThreshold}
 	resp := &http.Response{Header: make(http.Header)}
 	resp.Header.Set("X-Ratelimit-Remaining", "1")
 	resp.Header.Set("X-Ratelimit-Reset", "0.05")
@@ -636,7 +637,7 @@ func TestClient_ProactiveRateLimiting(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			c := &Client{}
+			c := &Client{rateLimitThreshold: ProactiveRateLimitThreshold}
 			resp := &http.Response{Header: make(http.Header)}
 			resp.Header.Set("X-Ratelimit-Remaining", tt.remaining)
 			resp.Header.Set("X-Ratelimit-Reset", tt.resetSeconds)
@@ -658,7 +659,7 @@ func TestClient_ProactiveRateLimiting(t *testing.T) {
 }
 
 func TestAPIError_ErrorFormatting(t *testing.T) {
-	err := &APIError{StatusCode: http.StatusServiceUnavailable, Message: "temporary outage"}
+	err := &pkgerrs.APIError{StatusCode: http.StatusServiceUnavailable, Message: "temporary outage"}
 
 	if got := err.Error(); got != "API request failed with status 503: temporary outage" {
 		t.Fatalf("unexpected error string: %q", got)
@@ -667,7 +668,7 @@ func TestAPIError_ErrorFormatting(t *testing.T) {
 
 func TestClientError_Unwrap(t *testing.T) {
 	inner := errors.New("boom")
-	err := &ClientError{OriginalErr: inner}
+	err := &pkgerrs.ClientError{Err: inner}
 
 	if !errors.Is(err, inner) {
 		t.Fatalf("expected errors.Is to unwrap inner error")
@@ -770,7 +771,7 @@ func TestClient_DoThingArray_APIErrorResponse(t *testing.T) {
 
 	// Error objects without "kind" field unmarshal as Thing with empty kind,
 	// which triggers "unexpected response kind" error
-	var clientErr *ClientError
+	var clientErr *pkgerrs.ClientError
 	if !errors.As(err, &clientErr) {
 		t.Fatalf("expected ClientError, got %T", err)
 	}
@@ -805,7 +806,7 @@ func TestClient_DoThingArray_EmptyResponse(t *testing.T) {
 		t.Fatalf("expected nil Things on error, got %v", things)
 	}
 
-	var clientErr *ClientError
+	var clientErr *pkgerrs.ClientError
 	if !errors.As(err, &clientErr) {
 		t.Fatalf("expected ClientError, got %T", err)
 	}
@@ -837,7 +838,7 @@ func TestClient_DoThingArray_InvalidJSON(t *testing.T) {
 		t.Fatalf("expected nil Things on error, got %v", things)
 	}
 
-	var clientErr *ClientError
+	var clientErr *pkgerrs.ClientError
 	if !errors.As(err, &clientErr) {
 		t.Fatalf("expected ClientError, got %T", err)
 	}
@@ -869,7 +870,7 @@ func TestClient_DoThingArray_UnexpectedKind(t *testing.T) {
 		t.Fatalf("expected nil Things on error, got %v", things)
 	}
 
-	var clientErr *ClientError
+	var clientErr *pkgerrs.ClientError
 	if !errors.As(err, &clientErr) {
 		t.Fatalf("expected ClientError, got %T", err)
 	}
@@ -966,7 +967,7 @@ func TestClient_DoMoreChildren_APIError(t *testing.T) {
 		t.Fatalf("expected nil Things on error, got %v", things)
 	}
 
-	var apiErr *APIError
+	var apiErr *pkgerrs.APIError
 	if !errors.As(err, &apiErr) {
 		t.Fatalf("expected APIError, got %T", err)
 	}
@@ -1001,7 +1002,7 @@ func TestClient_DoMoreChildren_InvalidJSON(t *testing.T) {
 		t.Fatalf("expected nil Things on error, got %v", things)
 	}
 
-	var clientErr *ClientError
+	var clientErr *pkgerrs.ClientError
 	if !errors.As(err, &clientErr) {
 		t.Fatalf("expected ClientError, got %T", err)
 	}

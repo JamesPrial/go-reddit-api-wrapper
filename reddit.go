@@ -36,6 +36,7 @@ import (
 	"time"
 
 	"github.com/jamesprial/go-reddit-api-wrapper/internal"
+	pkgerrs "github.com/jamesprial/go-reddit-api-wrapper/pkg/errors"
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 )
 
@@ -189,12 +190,12 @@ func NewClient(config *Config) (*Client, error) {
 // This allows cancellation of the authentication process if needed.
 func NewClientWithContext(ctx context.Context, config *Config) (*Client, error) {
 	if config == nil {
-		return nil, &ConfigError{Message: "config cannot be nil"}
+		return nil, &pkgerrs.ConfigError{Message: "config cannot be nil"}
 	}
 
 	// Validate required fields
 	if config.ClientID == "" || config.ClientSecret == "" {
-		return nil, &ConfigError{Message: "ClientID and ClientSecret are required"}
+		return nil, &pkgerrs.ConfigError{Message: "ClientID and ClientSecret are required"}
 	}
 
 	// Set defaults
@@ -209,6 +210,25 @@ func NewClientWithContext(ctx context.Context, config *Config) (*Client, error) 
 	}
 	if config.HTTPClient == nil {
 		config.HTTPClient = &http.Client{Timeout: DefaultTimeout}
+	} else if config.HTTPClient.Timeout == 0 {
+		// Warn about missing timeout and set a default to prevent indefinite hangs
+		config.HTTPClient.Timeout = DefaultTimeout
+		if config.Logger != nil {
+			config.Logger.Warn("HTTPClient timeout was 0, setting to default",
+				slog.Duration("timeout", DefaultTimeout))
+		}
+	} else if config.HTTPClient.Timeout < time.Second {
+		// Validate that timeout is not unreasonably short
+		return nil, &pkgerrs.ConfigError{
+			Field:   "HTTPClient.Timeout",
+			Message: fmt.Sprintf("timeout too short: %v (minimum 1 second)", config.HTTPClient.Timeout),
+		}
+	} else if config.HTTPClient.Timeout > 5*time.Minute {
+		// Warn about very long timeouts
+		if config.Logger != nil {
+			config.Logger.Warn("HTTPClient timeout may be too long",
+				slog.Duration("timeout", config.HTTPClient.Timeout))
+		}
 	}
 
 	// Create authenticator
@@ -229,13 +249,13 @@ func NewClientWithContext(ctx context.Context, config *Config) (*Client, error) 
 		config.Logger,
 	)
 	if err != nil {
-		return nil, &AuthError{Message: "failed to create authenticator", Err: err}
+		return nil, &pkgerrs.AuthError{Message: "failed to create authenticator", Err: err}
 	}
 
 	// Validate that we can get a token before creating the client
 	_, err = auth.GetToken(ctx)
 	if err != nil {
-		return nil, &AuthError{Message: "failed to authenticate", Err: err}
+		return nil, &pkgerrs.AuthError{Message: "failed to authenticate", Err: err}
 	}
 
 	// Create internal HTTP client
@@ -246,7 +266,7 @@ func NewClientWithContext(ctx context.Context, config *Config) (*Client, error) 
 		config.Logger,
 	)
 	if err != nil {
-		return nil, &RequestError{Operation: "create HTTP client", Err: err}
+		return nil, &pkgerrs.RequestError{Operation: "create HTTP client", Err: err}
 	}
 
 	return &Client{
@@ -271,12 +291,12 @@ func NewClientWithContext(ctx context.Context, config *Config) (*Client, error) 
 func (c *Client) Me(ctx context.Context) (*types.AccountData, error) {
 	req, err := c.client.NewRequest(ctx, http.MethodGet, MeURL, nil)
 	if err != nil {
-		return nil, &RequestError{Operation: "create request", URL: MeURL, Err: err}
+		return nil, &pkgerrs.RequestError{Operation: "create request", URL: MeURL, Err: err}
 	}
 
 	// Add authentication headers
 	if err := c.addAuthHeaders(ctx, req); err != nil {
-		return nil, &AuthError{Message: "failed to add auth headers", Err: err}
+		return nil, &pkgerrs.AuthError{Message: "failed to add auth headers", Err: err}
 	}
 
 	var result types.Thing
@@ -285,18 +305,18 @@ func (c *Client) Me(ctx context.Context) (*types.AccountData, error) {
 		if apiErr, ok := mapAPIError(err); ok {
 			return nil, apiErr
 		}
-		return nil, &RequestError{Operation: "get user info", URL: MeURL, Err: err}
+		return nil, &pkgerrs.RequestError{Operation: "get user info", URL: MeURL, Err: err}
 	}
 
 	// Parse the account data
 	parsed, err := c.parser.ParseThing(&result)
 	if err != nil {
-		return nil, &ParseError{Operation: "parse user info", Err: err}
+		return nil, &pkgerrs.ParseError{Operation: "parse user info", Err: err}
 	}
 
 	account, ok := parsed.(*types.AccountData)
 	if !ok {
-		return nil, &ParseError{Operation: "user info response", Err: fmt.Errorf("unexpected response type")}
+		return nil, &pkgerrs.ParseError{Operation: "user info response", Err: fmt.Errorf("unexpected response type")}
 	}
 
 	return account, nil
@@ -324,12 +344,12 @@ func (c *Client) GetSubreddit(ctx context.Context, name string) (*types.Subreddi
 	path := SubPrefixURL + name + "/about"
 	req, err := c.client.NewRequest(ctx, http.MethodGet, path, nil)
 	if err != nil {
-		return nil, &RequestError{Operation: "create request", URL: path, Err: err}
+		return nil, &pkgerrs.RequestError{Operation: "create request", URL: path, Err: err}
 	}
 
 	// Add authentication headers
 	if err := c.addAuthHeaders(ctx, req); err != nil {
-		return nil, &AuthError{Message: "failed to add auth headers", Err: err}
+		return nil, &pkgerrs.AuthError{Message: "failed to add auth headers", Err: err}
 	}
 
 	var result types.Thing
@@ -338,18 +358,18 @@ func (c *Client) GetSubreddit(ctx context.Context, name string) (*types.Subreddi
 		if apiErr, ok := mapAPIError(err); ok {
 			return nil, apiErr
 		}
-		return nil, &RequestError{Operation: "get subreddit", URL: SubPrefixURL + name + "/about", Err: err}
+		return nil, &pkgerrs.RequestError{Operation: "get subreddit", URL: SubPrefixURL + name + "/about", Err: err}
 	}
 
 	// Parse the subreddit data
 	parsed, err := c.parser.ParseThing(&result)
 	if err != nil {
-		return nil, &ParseError{Operation: "parse subreddit", Err: err}
+		return nil, &pkgerrs.ParseError{Operation: "parse subreddit", Err: err}
 	}
 
 	subreddit, ok := parsed.(*types.SubredditData)
 	if !ok {
-		return nil, &ParseError{Operation: "subreddit response", Err: fmt.Errorf("unexpected response type")}
+		return nil, &pkgerrs.ParseError{Operation: "subreddit response", Err: fmt.Errorf("unexpected response type")}
 	}
 
 	return subreddit, nil
@@ -405,12 +425,12 @@ func (c *Client) getPosts(ctx context.Context, request *types.PostsRequest, sort
 
 	httpReq, err := c.client.NewRequest(ctx, http.MethodGet, path, nil, params)
 	if err != nil {
-		return nil, &RequestError{Operation: "create request", URL: path, Err: err}
+		return nil, &pkgerrs.RequestError{Operation: "create request", URL: path, Err: err}
 	}
 
 	// Add authentication headers
 	if err := c.addAuthHeaders(ctx, httpReq); err != nil {
-		return nil, &AuthError{Message: "failed to add auth headers", Err: err}
+		return nil, &pkgerrs.AuthError{Message: "failed to add auth headers", Err: err}
 	}
 
 	var result types.Thing
@@ -419,12 +439,12 @@ func (c *Client) getPosts(ctx context.Context, request *types.PostsRequest, sort
 		if apiErr, ok := mapAPIError(err); ok {
 			return nil, apiErr
 		}
-		return nil, &RequestError{Operation: "get " + sort + " posts", URL: path, Err: err}
+		return nil, &pkgerrs.RequestError{Operation: "get " + sort + " posts", URL: path, Err: err}
 	}
 
 	posts, err := c.parser.ExtractPosts(&result)
 	if err != nil {
-		return nil, &ParseError{Operation: "parse posts", Err: err}
+		return nil, &pkgerrs.ParseError{Operation: "parse posts", Err: err}
 	}
 
 	var after, before string
@@ -465,10 +485,10 @@ func (c *Client) getPosts(ctx context.Context, request *types.PostsRequest, sort
 //   - The API request fails
 func (c *Client) GetComments(ctx context.Context, request *types.CommentsRequest) (*types.CommentsResponse, error) {
 	if request == nil {
-		return nil, &ConfigError{Message: "comments request cannot be nil"}
+		return nil, &pkgerrs.ConfigError{Message: "comments request cannot be nil"}
 	}
 	if request.Subreddit == "" || request.PostID == "" {
-		return nil, &ConfigError{Message: "subreddit and postID are required"}
+		return nil, &pkgerrs.ConfigError{Message: "subreddit and postID are required"}
 	}
 
 	path := SubPrefixURL + request.Subreddit + "/comments/" + request.PostID
@@ -477,12 +497,12 @@ func (c *Client) GetComments(ctx context.Context, request *types.CommentsRequest
 	params := buildPaginationParams(&request.Pagination)
 	httpReq, err := c.client.NewRequest(ctx, http.MethodGet, path, nil, params)
 	if err != nil {
-		return nil, &RequestError{Operation: "create request", URL: path, Err: err}
+		return nil, &pkgerrs.RequestError{Operation: "create request", URL: path, Err: err}
 	}
 
 	// Add authentication headers
 	if err := c.addAuthHeaders(ctx, httpReq); err != nil {
-		return nil, &AuthError{Message: "failed to add auth headers", Err: err}
+		return nil, &pkgerrs.AuthError{Message: "failed to add auth headers", Err: err}
 	}
 
 	result, err := c.client.DoThingArray(httpReq)
@@ -490,13 +510,13 @@ func (c *Client) GetComments(ctx context.Context, request *types.CommentsRequest
 		if apiErr, ok := mapAPIError(err); ok {
 			return nil, apiErr
 		}
-		return nil, &RequestError{Operation: "get comments", URL: path, Err: err}
+		return nil, &pkgerrs.RequestError{Operation: "get comments", URL: path, Err: err}
 	}
 
 	// Parse the post and comments
 	post, comments, moreIDs, err := c.parser.ExtractPostAndComments(result)
 	if err != nil {
-		return nil, &ParseError{Operation: "parse comments", Err: err}
+		return nil, &pkgerrs.ParseError{Operation: "parse comments", Err: err}
 	}
 
 	// Note: post may be nil if Reddit only returned comments without the post
@@ -608,10 +628,10 @@ func (c *Client) GetCommentsMultiple(ctx context.Context, requests []*types.Comm
 //   - The API request fails
 func (c *Client) GetMoreComments(ctx context.Context, request *types.MoreCommentsRequest) ([]*types.Comment, error) {
 	if request == nil {
-		return nil, &ConfigError{Message: "more comments request cannot be nil"}
+		return nil, &pkgerrs.ConfigError{Message: "more comments request cannot be nil"}
 	}
 	if request.LinkID == "" {
-		return nil, &ConfigError{Message: "linkID is required"}
+		return nil, &pkgerrs.ConfigError{Message: "linkID is required"}
 	}
 	if len(request.CommentIDs) == 0 {
 		return []*types.Comment{}, nil
@@ -642,12 +662,12 @@ func (c *Client) GetMoreComments(ctx context.Context, request *types.MoreComment
 	// Create POST request with form data
 	req, err := c.client.NewRequest(ctx, http.MethodPost, MoreChildrenURL, strings.NewReader(formData.Encode()))
 	if err != nil {
-		return nil, &RequestError{Operation: "create request", URL: MoreChildrenURL, Err: err}
+		return nil, &pkgerrs.RequestError{Operation: "create request", URL: MoreChildrenURL, Err: err}
 	}
 
 	// Add authentication headers
 	if err := c.addAuthHeaders(ctx, req); err != nil {
-		return nil, &AuthError{Message: "failed to add auth headers", Err: err}
+		return nil, &pkgerrs.AuthError{Message: "failed to add auth headers", Err: err}
 	}
 
 	// Set Content-Type header for form data
@@ -659,7 +679,7 @@ func (c *Client) GetMoreComments(ctx context.Context, request *types.MoreComment
 		if apiErr, ok := mapAPIError(err); ok {
 			return nil, apiErr
 		}
-		return nil, &RequestError{Operation: "get more comments", URL: MoreChildrenURL, Err: err}
+		return nil, &pkgerrs.RequestError{Operation: "get more comments", URL: MoreChildrenURL, Err: err}
 	}
 
 	// Extract comments from the response
@@ -695,109 +715,6 @@ func buildPaginationParams(pagination *types.Pagination) url.Values {
 	return params
 }
 
-// ConfigError represents a configuration or validation error.
-// This error is returned when the client configuration is invalid or incomplete.
-type ConfigError struct {
-	// Message contains the detailed error message describing the configuration issue
-	Message string
-}
-
-// Error implements the error interface for ConfigError.
-func (e *ConfigError) Error() string {
-	return "reddit config error: " + e.Message
-}
-
-// AuthError represents an authentication or authorization error.
-// This error is returned when authentication fails or credentials are invalid.
-type AuthError struct {
-	// Message contains the detailed error message
-	Message string
-	// Err contains the underlying error if available
-	Err error
-}
-
-// Error implements the error interface for AuthError.
-func (e *AuthError) Error() string {
-	if e.Err != nil {
-		return "reddit auth error: " + e.Message + ": " + e.Err.Error()
-	}
-	return "reddit auth error: " + e.Message
-}
-
-// Unwrap returns the underlying error for AuthError.
-func (e *AuthError) Unwrap() error {
-	return e.Err
-}
-
-// StateError represents a client state error.
-// This error is returned when the client is not in the correct state for an operation.
-type StateError struct {
-	// Message contains the detailed error message
-	Message string
-}
-
-// Error implements the error interface for StateError.
-func (e *StateError) Error() string {
-	return "reddit client state error: " + e.Message
-}
-
-// RequestError represents an HTTP request error.
-// This error is returned when creating or executing an HTTP request fails.
-type RequestError struct {
-	// Operation describes the operation that failed (e.g., "create request", "execute request")
-	Operation string
-	// URL is the URL that was being accessed (if available)
-	URL string
-	// Err contains the underlying error
-	Err error
-}
-
-// Error implements the error interface for RequestError.
-func (e *RequestError) Error() string {
-	msg := "reddit request error"
-	if e.Operation != "" {
-		msg += " (" + e.Operation + ")"
-	}
-	if e.URL != "" {
-		msg += " for " + e.URL
-	}
-	if e.Err != nil {
-		msg += ": " + e.Err.Error()
-	}
-	return msg
-}
-
-// Unwrap returns the underlying error for RequestError.
-func (e *RequestError) Unwrap() error {
-	return e.Err
-}
-
-// ParseError represents a JSON parsing or response structure error.
-// This error is returned when the API response cannot be parsed or has an unexpected structure.
-type ParseError struct {
-	// Operation describes what was being parsed
-	Operation string
-	// Err contains the underlying error
-	Err error
-}
-
-// Error implements the error interface for ParseError.
-func (e *ParseError) Error() string {
-	msg := "reddit parse error"
-	if e.Operation != "" {
-		msg += " (" + e.Operation + ")"
-	}
-	if e.Err != nil {
-		msg += ": " + e.Err.Error()
-	}
-	return msg
-}
-
-// Unwrap returns the underlying error for ParseError.
-func (e *ParseError) Unwrap() error {
-	return e.Err
-}
-
 // addAuthHeaders adds authentication headers to a request.
 // This is called internally before each API request.
 func (c *Client) addAuthHeaders(ctx context.Context, req *http.Request) error {
@@ -809,37 +726,10 @@ func (c *Client) addAuthHeaders(ctx context.Context, req *http.Request) error {
 	return nil
 }
 
-// APIError represents an error returned by the Reddit API.
-// This error is returned when Reddit's API explicitly returns an error response.
-type APIError struct {
-	StatusCode int
-	// ErrorCode is the error code from Reddit (if available)
-	ErrorCode string
-	// Message is the error message from Reddit
-	Message string
-	// Details contains any additional error details from the API
-	Details interface{}
-}
-
-// Error implements the error interface for APIError.
-func (e *APIError) Error() string {
-	msg := "reddit API error"
-	if e.StatusCode != 0 {
-		msg += fmt.Sprintf(" (status %d)", e.StatusCode)
-	}
-	if e.ErrorCode != "" {
-		msg += " [" + e.ErrorCode + "]"
-	}
-	if e.Message != "" {
-		msg += ": " + e.Message
-	}
-	return msg
-}
-
-func mapAPIError(err error) (*APIError, bool) {
-	var apiErr *internal.APIError
+func mapAPIError(err error) (*pkgerrs.APIError, bool) {
+	var apiErr *pkgerrs.APIError
 	if errors.As(err, &apiErr) {
-		return &APIError{StatusCode: apiErr.StatusCode, Message: apiErr.Message}, true
+		return apiErr, true
 	}
 	return nil, false
 }

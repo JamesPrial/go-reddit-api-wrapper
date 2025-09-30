@@ -15,8 +15,15 @@ import (
 	"sync/atomic"
 	"time"
 
+	pkgerrs "github.com/jamesprial/go-reddit-api-wrapper/pkg/errors"
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 	"golang.org/x/time/rate"
+)
+
+const (
+	// maxBufferSize is the maximum size of buffers to keep in the pool.
+	// Buffers larger than this will be discarded to prevent excessive memory usage.
+	maxBufferSize = 10 * 1024 * 1024 // 10MB
 )
 
 var bodyBufferPool = sync.Pool{
@@ -30,6 +37,10 @@ func getBuffer() *bytes.Buffer {
 }
 
 func putBuffer(buf *bytes.Buffer) {
+	// Don't return oversized buffers to the pool
+	if buf.Cap() > maxBufferSize {
+		return
+	}
 	buf.Reset()
 	bodyBufferPool.Put(buf)
 }
@@ -51,8 +62,9 @@ type Client struct {
 	logger          *slog.Logger
 	maxLogBodyBytes int
 
-	limiter        *rate.Limiter
-	forceWaitUntil atomic.Int64 // Unix nanoseconds
+	limiter                  *rate.Limiter
+	forceWaitUntil          atomic.Int64 // Unix nanoseconds
+	rateLimitThreshold      float64      // When to start proactive throttling
 }
 
 // RateLimitConfig controls how requests are throttled before reaching Reddit.
@@ -61,32 +73,49 @@ type RateLimitConfig struct {
 	RequestsPerMinute float64
 	// Burst allows short spikes above the steady-state rate. Defaults to 10 if zero.
 	Burst int
+	// ProactiveThreshold is the number of remaining requests at which to start throttling.
+	// Defaults to ProactiveRateLimitThreshold if zero.
+	ProactiveThreshold float64
 }
 
 // NewClient returns a new Reddit API client.
 // If a nil httpClient is provided, http.DefaultClient will be used.
 func NewClient(httpClient *http.Client, baseURL string, userAgent string, logger *slog.Logger) (*Client, error) {
+	return NewClientWithRateLimit(httpClient, baseURL, userAgent, logger, RateLimitConfig{})
+}
+
+// NewClientWithRateLimit returns a new Reddit API client with custom rate limiting.
+// If a nil httpClient is provided, http.DefaultClient will be used.
+func NewClientWithRateLimit(httpClient *http.Client, baseURL string, userAgent string, logger *slog.Logger, cfg RateLimitConfig) (*Client, error) {
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}
 
 	parsedURL, err := url.Parse(baseURL)
 	if err != nil {
-		return nil, &ClientError{OriginalErr: err}
+		return nil, &pkgerrs.ClientError{Err: err}
 	}
 	if !strings.HasSuffix(parsedURL.Path, "/") {
 		parsedURL.Path += "/"
 	}
 
-	limiter := buildLimiter(RateLimitConfig{})
+	// Build rate limiter with config
+	limiter := buildLimiter(cfg)
+
+	// Set proactive threshold
+	threshold := cfg.ProactiveThreshold
+	if threshold <= 0 {
+		threshold = ProactiveRateLimitThreshold
+	}
 
 	c := &Client{
-		client:          httpClient,
-		BaseURL:         parsedURL,
-		UserAgent:       userAgent,
-		limiter:         limiter,
-		logger:          logger,
-		maxLogBodyBytes: defaultLogBodyBytes,
+		client:             httpClient,
+		BaseURL:            parsedURL,
+		UserAgent:          userAgent,
+		limiter:            limiter,
+		logger:             logger,
+		maxLogBodyBytes:    defaultLogBodyBytes,
+		rateLimitThreshold: threshold,
 	}
 
 	return c, nil
@@ -109,7 +138,7 @@ func (c *Client) SetLogBodyLimit(limit int) {
 func (c *Client) NewRequest(ctx context.Context, method, path string, body io.Reader, params ...url.Values) (*http.Request, error) {
 	u, err := c.BaseURL.Parse(path)
 	if err != nil {
-		return nil, &ClientError{OriginalErr: err}
+		return nil, &pkgerrs.ClientError{Err: err}
 	}
 
 	// Add query parameters if provided
@@ -125,7 +154,7 @@ func (c *Client) NewRequest(ctx context.Context, method, path string, body io.Re
 
 	req, err := http.NewRequestWithContext(ctx, method, u.String(), body)
 	if err != nil {
-		return nil, &ClientError{OriginalErr: err}
+		return nil, &pkgerrs.ClientError{Err: err}
 	}
 
 	req.Header.Set("User-Agent", c.UserAgent)
@@ -142,14 +171,14 @@ func (c *Client) doRequest(req *http.Request) ([]byte, *http.Response, error) {
 	// Rate limiting
 	if err := c.waitForRateLimit(ctx); err != nil {
 		c.logWaitFailure(ctx, req, err)
-		return nil, nil, &ClientError{OriginalErr: err}
+		return nil, nil, &pkgerrs.ClientError{Err: err}
 	}
 
 	// Execute request
 	resp, err := c.client.Do(req)
 	if err != nil {
 		c.logTransportError(ctx, req, time.Since(start), err)
-		return nil, nil, &ClientError{OriginalErr: err}
+		return nil, nil, &pkgerrs.ClientError{Err: err}
 	}
 	defer resp.Body.Close()
 
@@ -162,7 +191,7 @@ func (c *Client) doRequest(req *http.Request) ([]byte, *http.Response, error) {
 
 	if _, err := io.Copy(buf, resp.Body); err != nil {
 		c.logBodyReadError(ctx, req, resp, time.Since(start), err)
-		return nil, resp, &ClientError{OriginalErr: err}
+		return nil, resp, &pkgerrs.ClientError{Err: err}
 	}
 
 	// Copy buffer contents to returned byte slice
@@ -173,7 +202,7 @@ func (c *Client) doRequest(req *http.Request) ([]byte, *http.Response, error) {
 
 	// Check HTTP status
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return bodyBytes, resp, &APIError{StatusCode: resp.StatusCode, Message: "request failed"}
+		return bodyBytes, resp, &pkgerrs.APIError{StatusCode: resp.StatusCode, Message: "request failed"}
 	}
 
 	return bodyBytes, resp, nil
@@ -191,7 +220,7 @@ func (c *Client) Do(req *http.Request, v *types.Thing) error {
 	if v != nil && len(bodyBytes) > 0 {
 		if err := json.Unmarshal(bodyBytes, v); err != nil {
 			c.logDecodeError(req.Context(), req, resp, err)
-			return &ClientError{OriginalErr: err}
+			return &pkgerrs.ClientError{Err: err}
 		}
 	}
 
@@ -212,7 +241,7 @@ func (c *Client) DoThingArray(req *http.Request) ([]*types.Thing, error) {
 	if len(bodyBytes) > 0 && bodyBytes[0] == '[' {
 		// It's an array response
 		if err := json.Unmarshal(bodyBytes, &result); err != nil {
-			return nil, &ClientError{OriginalErr: fmt.Errorf("failed to parse array response: %w", err)}
+			return nil, &pkgerrs.ClientError{Err: fmt.Errorf("failed to parse array response: %w", err)}
 		}
 	} else if len(bodyBytes) > 0 && bodyBytes[0] == '{' {
 		// It's a single object - could be a Listing or an error
@@ -224,19 +253,19 @@ func (c *Client) DoThingArray(req *http.Request) ([]*types.Thing, error) {
 				Message string `json:"message"`
 			}
 			if err := json.Unmarshal(bodyBytes, &errObj); err == nil && errObj.Error != "" {
-				return nil, &APIError{StatusCode: resp.StatusCode, Message: fmt.Sprintf("API error [%s]: %s", errObj.Error, errObj.Message)}
+				return nil, &pkgerrs.APIError{StatusCode: resp.StatusCode, Message: fmt.Sprintf("API error [%s]: %s", errObj.Error, errObj.Message)}
 			}
-			return nil, &ClientError{OriginalErr: fmt.Errorf("failed to parse response: %w", err)}
+			return nil, &pkgerrs.ClientError{Err: fmt.Errorf("failed to parse response: %w", err)}
 		}
 
 		// If it's a Listing with comments, wrap it in an array
 		if singleThing.Kind == "Listing" {
 			result = []*types.Thing{&singleThing}
 		} else {
-			return nil, &ClientError{OriginalErr: fmt.Errorf("unexpected response kind: %s", singleThing.Kind)}
+			return nil, &pkgerrs.ClientError{Err: fmt.Errorf("unexpected response kind: %s", singleThing.Kind)}
 		}
 	} else {
-		return nil, &ClientError{OriginalErr: fmt.Errorf("empty or invalid response from Reddit")}
+		return nil, &pkgerrs.ClientError{Err: fmt.Errorf("empty or invalid response from Reddit")}
 	}
 
 	return result, nil
@@ -260,12 +289,12 @@ func (c *Client) DoMoreChildren(req *http.Request) ([]*types.Thing, error) {
 	}
 
 	if err := json.Unmarshal(bodyBytes, &response); err != nil {
-		return nil, &ClientError{OriginalErr: fmt.Errorf("failed to parse morechildren response: %w", err)}
+		return nil, &pkgerrs.ClientError{Err: fmt.Errorf("failed to parse morechildren response: %w", err)}
 	}
 
 	// Check for API errors
 	if len(response.JSON.Errors) > 0 {
-		return nil, &APIError{StatusCode: resp.StatusCode, Message: fmt.Sprintf("API error: %v", response.JSON.Errors[0])}
+		return nil, &pkgerrs.APIError{StatusCode: resp.StatusCode, Message: fmt.Sprintf("API error: %v", response.JSON.Errors[0])}
 	}
 
 	return response.JSON.Data.Things, nil
@@ -355,7 +384,7 @@ func (c *Client) applyRateHeaders(resp *http.Response) {
 	}
 
 	// Proactive throttling: start slowing down when approaching the rate limit
-	if remaining < ProactiveRateLimitThreshold {
+	if remaining < c.rateLimitThreshold {
 		// Calculate delay to spread remaining requests over the reset period
 		// Add 10% buffer to be conservative
 		if remaining > 0 {
@@ -540,26 +569,3 @@ func contextOrBackground(ctx context.Context) context.Context {
 	return context.Background()
 }
 
-// APIError represents an error returned by the Reddit API.
-type APIError struct {
-	StatusCode int
-	Message    string
-}
-
-// Error returns the error message for the APIError.
-func (e *APIError) Error() string {
-	return fmt.Sprintf("API request failed with status %d: %s", e.StatusCode, e.Message)
-}
-
-// ClientError represents an error that occurred within the client.
-type ClientError struct {
-	OriginalErr error
-}
-
-func (e *ClientError) Error() string {
-	return e.OriginalErr.Error()
-}
-
-func (e *ClientError) Unwrap() error {
-	return e.OriginalErr
-}

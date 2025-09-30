@@ -10,6 +10,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	pkgerrs "github.com/jamesprial/go-reddit-api-wrapper/pkg/errors"
 )
 
 // mockResponse defines the response from the mock server.
@@ -139,7 +141,7 @@ func TestNewAuthenticator(t *testing.T) {
 			grantType: "password",
 			wantErr:   true,
 			checkFunc: func(t *testing.T, a *Authenticator, err error) {
-				var authErr *AuthError
+				var authErr *pkgerrs.AuthError
 				if !errors.As(err, &authErr) {
 					t.Errorf("expected AuthError, got %T", err)
 				}
@@ -261,7 +263,7 @@ func TestAuthenticator_GetToken(t *testing.T) {
 			grantType:            "password",
 			wantErr:              true,
 			checkErr: func(t *testing.T, err error) {
-				var authErr *AuthError
+				var authErr *pkgerrs.AuthError
 				if !errors.As(err, &authErr) {
 					t.Fatalf("expected AuthError, got %T", err)
 				}
@@ -285,7 +287,7 @@ func TestAuthenticator_GetToken(t *testing.T) {
 			},
 			wantErr: true,
 			checkErr: func(t *testing.T, err error) {
-				var authErr *AuthError
+				var authErr *pkgerrs.AuthError
 				if !errors.As(err, &authErr) {
 					t.Fatalf("expected AuthError, got %T", err)
 				}
@@ -306,7 +308,7 @@ func TestAuthenticator_GetToken(t *testing.T) {
 			serverDown:           true,
 			wantErr:              true,
 			checkErr: func(t *testing.T, err error) {
-				var authErr *AuthError
+				var authErr *pkgerrs.AuthError
 				if !errors.As(err, &authErr) {
 					t.Fatalf("expected AuthError, got %T", err)
 				}
@@ -327,7 +329,7 @@ func TestAuthenticator_GetToken(t *testing.T) {
 			},
 			wantErr: true,
 			checkErr: func(t *testing.T, err error) {
-				var authErr *AuthError
+				var authErr *pkgerrs.AuthError
 				if !errors.As(err, &authErr) {
 					t.Fatalf("expected AuthError, got %T", err)
 				}
@@ -349,7 +351,7 @@ func TestAuthenticator_GetToken(t *testing.T) {
 			},
 			wantErr: true,
 			checkErr: func(t *testing.T, err error) {
-				var authErr *AuthError
+				var authErr *pkgerrs.AuthError
 				if !errors.As(err, &authErr) {
 					t.Fatalf("expected AuthError, got %T", err)
 				}
@@ -439,42 +441,42 @@ func TestAuthError_Error(t *testing.T) {
 
 	testCases := []struct {
 		name     string
-		err      AuthError
+		err      pkgerrs.AuthError
 		expected string
 	}{
 		{
 			name:     "full error",
-			err:      AuthError{StatusCode: 401, Body: `{"error":"invalid"}`, Err: testErr},
+			err:      pkgerrs.AuthError{StatusCode: 401, Body: `{"error":"invalid"}`, Err: testErr},
 			expected: `auth error: status code 401, body: "{\"error\":\"invalid\"}", err: underlying error`,
 		},
 		{
 			name:     "status and body",
-			err:      AuthError{StatusCode: 400, Body: "bad request"},
+			err:      pkgerrs.AuthError{StatusCode: 400, Body: "bad request"},
 			expected: `auth error: status code 400, body: "bad request"`,
 		},
 		{
 			name:     "status and err",
-			err:      AuthError{StatusCode: 500, Err: testErr},
+			err:      pkgerrs.AuthError{StatusCode: 500, Err: testErr},
 			expected: `auth error: status code 500, err: underlying error`,
 		},
 		{
 			name:     "only status",
-			err:      AuthError{StatusCode: 404},
+			err:      pkgerrs.AuthError{StatusCode: 404},
 			expected: "auth error: status code 404",
 		},
 		{
 			name:     "only body",
-			err:      AuthError{Body: "some body"},
+			err:      pkgerrs.AuthError{Body: "some body"},
 			expected: `auth error, body: "some body"`,
 		},
 		{
 			name:     "only err",
-			err:      AuthError{Err: testErr},
+			err:      pkgerrs.AuthError{Err: testErr},
 			expected: "auth error, err: underlying error",
 		},
 		{
 			name:     "empty error",
-			err:      AuthError{},
+			err:      pkgerrs.AuthError{},
 			expected: "auth error",
 		},
 	}
@@ -493,7 +495,7 @@ func TestAuthError_Unwrap(t *testing.T) {
 	t.Parallel()
 
 	baseErr := io.EOF
-	authErr := &AuthError{Err: fmt.Errorf("wrapped: %w", baseErr)}
+	authErr := &pkgerrs.AuthError{Err: fmt.Errorf("wrapped: %w", baseErr)}
 
 	if !errors.Is(authErr, baseErr) {
 		t.Errorf("errors.Is failed, expected to find %v in %v", baseErr, authErr)
@@ -508,7 +510,7 @@ func TestAuthError_Unwrap(t *testing.T) {
 		t.Errorf("unwrapped error is not the base error")
 	}
 
-	emptyErr := &AuthError{}
+	emptyErr := &pkgerrs.AuthError{}
 	if errors.Unwrap(emptyErr) != nil {
 		t.Error("Unwrap should return nil for an error with no inner Err")
 	}

@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/jamesprial/go-reddit-api-wrapper/internal"
+	pkgerrs "github.com/jamesprial/go-reddit-api-wrapper/pkg/errors"
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 )
 
@@ -131,7 +132,7 @@ func TestNewClient(t *testing.T) {
 					t.Error("expected error but got none")
 				}
 				if tt.errorType == "ConfigError" {
-					if _, ok := err.(*ConfigError); !ok {
+					if _, ok := err.(*pkgerrs.ConfigError); !ok {
 						t.Errorf("expected ConfigError, got %T", err)
 					}
 				}
@@ -204,7 +205,7 @@ func TestClient_Me(t *testing.T) {
 			setupMock: func() HTTPClient {
 				return &mockHTTPClient{
 					doFunc: func(req *http.Request, v *types.Thing) error {
-						return &internal.APIError{StatusCode: http.StatusForbidden, Message: "API error"}
+						return &pkgerrs.APIError{StatusCode: http.StatusForbidden, Message: "API error"}
 					},
 				}
 			},
@@ -230,15 +231,15 @@ func TestClient_Me(t *testing.T) {
 				if tt.errorType != "" {
 					switch tt.errorType {
 					case "AuthError":
-						if _, ok := err.(*AuthError); !ok {
+						if _, ok := err.(*pkgerrs.AuthError); !ok {
 							t.Errorf("expected AuthError, got %T: %v", err, err)
 						}
 					case "RequestError":
-						if _, ok := err.(*RequestError); !ok {
+						if _, ok := err.(*pkgerrs.RequestError); !ok {
 							t.Errorf("expected RequestError, got %T: %v", err, err)
 						}
 					case "APIError":
-						if _, ok := err.(*APIError); !ok {
+						if _, ok := err.(*pkgerrs.APIError); !ok {
 							t.Errorf("expected APIError, got %T: %v", err, err)
 						}
 					}
@@ -638,7 +639,7 @@ func TestClient_GetComments(t *testing.T) {
 			setupMock: func() HTTPClient {
 				return &mockHTTPClient{
 					doThingArrayFunc: func(req *http.Request) ([]*types.Thing, error) {
-						return nil, &internal.APIError{StatusCode: http.StatusNotFound, Message: "post not found"}
+						return nil, &pkgerrs.APIError{StatusCode: http.StatusNotFound, Message: "post not found"}
 					},
 				}
 			},
@@ -659,15 +660,15 @@ func TestClient_GetComments(t *testing.T) {
 				if tt.errorType != "" {
 					switch tt.errorType {
 					case "ConfigError":
-						if _, ok := err.(*ConfigError); !ok {
+						if _, ok := err.(*pkgerrs.ConfigError); !ok {
 							t.Errorf("expected ConfigError, got %T: %v", err, err)
 						}
 					case "RequestError":
-						if _, ok := err.(*RequestError); !ok {
+						if _, ok := err.(*pkgerrs.RequestError); !ok {
 							t.Errorf("expected RequestError, got %T: %v", err, err)
 						}
 					case "APIError":
-						if _, ok := err.(*APIError); !ok {
+						if _, ok := err.(*pkgerrs.APIError); !ok {
 							t.Errorf("expected APIError, got %T: %v", err, err)
 						}
 					}
@@ -891,7 +892,7 @@ func TestClient_GetMoreComments(t *testing.T) {
 				if tt.errorType != "" {
 					switch tt.errorType {
 					case "ConfigError":
-						if _, ok := err.(*ConfigError); !ok {
+						if _, ok := err.(*pkgerrs.ConfigError); !ok {
 							t.Errorf("expected ConfigError, got %T: %v", err, err)
 						}
 					}
@@ -989,35 +990,36 @@ func TestBuildPaginationParams(t *testing.T) {
 
 func TestErrorTypes(t *testing.T) {
 	t.Run("ConfigError", func(t *testing.T) {
-		err := &ConfigError{Message: "test error"}
+		err := &pkgerrs.ConfigError{Message: "test error"}
 		if !strings.Contains(err.Error(), "test error") {
 			t.Errorf("expected error message to contain 'test error', got %s", err.Error())
 		}
 	})
 
 	t.Run("AuthError", func(t *testing.T) {
-		err := &AuthError{Message: "auth failed", Err: errors.New("underlying")}
+		err := &pkgerrs.AuthError{Message: "auth failed", Err: errors.New("underlying")}
 		errStr := err.Error()
 		if !strings.Contains(errStr, "auth failed") {
 			t.Errorf("expected error message to contain 'auth failed', got %s", errStr)
 		}
-		if !strings.Contains(errStr, "underlying") {
-			t.Errorf("expected error message to contain 'underlying', got %s", errStr)
-		}
+		// Check that underlying error is accessible via Unwrap
 		if err.Unwrap() == nil {
 			t.Error("expected Unwrap to return underlying error")
+		}
+		if err.Unwrap().Error() != "underlying" {
+			t.Errorf("expected underlying error to be 'underlying', got %s", err.Unwrap().Error())
 		}
 	})
 
 	t.Run("StateError", func(t *testing.T) {
-		err := &StateError{Message: "not connected"}
+		err := &pkgerrs.StateError{Message: "not connected"}
 		if !strings.Contains(err.Error(), "not connected") {
 			t.Errorf("expected error message to contain 'not connected', got %s", err.Error())
 		}
 	})
 
 	t.Run("RequestError", func(t *testing.T) {
-		err := &RequestError{
+		err := &pkgerrs.RequestError{
 			Operation: "get posts",
 			URL:       "https://oauth.reddit.com/hot",
 			Err:       errors.New("network error"),
@@ -1035,7 +1037,7 @@ func TestErrorTypes(t *testing.T) {
 	})
 
 	t.Run("ParseError", func(t *testing.T) {
-		err := &ParseError{
+		err := &pkgerrs.ParseError{
 			Operation: "parse posts",
 			Err:       errors.New("invalid JSON"),
 		}
@@ -1049,7 +1051,7 @@ func TestErrorTypes(t *testing.T) {
 	})
 
 	t.Run("APIError", func(t *testing.T) {
-		err := &APIError{
+		err := &pkgerrs.APIError{
 			ErrorCode: "403",
 			Message:   "Forbidden",
 			Details:   "private subreddit",

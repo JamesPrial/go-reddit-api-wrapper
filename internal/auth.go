@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	pkgerrs "github.com/jamesprial/go-reddit-api-wrapper/pkg/errors"
 )
 
 const (
@@ -46,7 +48,7 @@ func NewAuthenticator(httpClient *http.Client, username, password, clientID, cli
 
 	parsedURL, err := url.Parse(baseURL)
 	if err != nil {
-		return nil, &AuthError{Err: fmt.Errorf("failed to parse base URL: %w", err)}
+		return nil, &pkgerrs.AuthError{Err: fmt.Errorf("failed to parse base URL: %w", err)}
 	}
 	if !strings.HasSuffix(parsedURL.Path, "/") {
 		parsedURL.Path += "/"
@@ -55,7 +57,7 @@ func NewAuthenticator(httpClient *http.Client, username, password, clientID, cli
 
 	resolvedTokenURL, err := parsedURL.Parse(tokenPath)
 	if err != nil {
-		return nil, &AuthError{Err: fmt.Errorf("failed to parse token endpoint path: %w", err)}
+		return nil, &pkgerrs.AuthError{Err: fmt.Errorf("failed to parse token endpoint path: %w", err)}
 	}
 
 	// Prepare form data upfront
@@ -105,7 +107,7 @@ func (a *Authenticator) GetToken(ctx context.Context) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.tokenURL.String(), strings.NewReader(data))
 	if err != nil {
 		a.logAuthError(ctx, "failed to create token request", err)
-		return "", &AuthError{Err: fmt.Errorf("failed to create token request: %w", err)}
+		return "", &pkgerrs.AuthError{Err: fmt.Errorf("failed to create token request: %w", err)}
 	}
 
 	req.SetBasicAuth(a.clientID, a.clientSecret)
@@ -117,7 +119,7 @@ func (a *Authenticator) GetToken(ctx context.Context) (string, error) {
 	resp, err := a.client.Do(req)
 	if err != nil {
 		a.logAuthError(ctx, "failed to execute token request", err)
-		return "", &AuthError{Err: fmt.Errorf("failed to execute token request: %w", err)}
+		return "", &pkgerrs.AuthError{Err: fmt.Errorf("failed to execute token request: %w", err)}
 	}
 	defer resp.Body.Close()
 
@@ -125,7 +127,7 @@ func (a *Authenticator) GetToken(ctx context.Context) (string, error) {
 	if err != nil {
 		a.logAuthError(ctx, "failed to read token response", err)
 		// Error reading the response body.
-		return "", &AuthError{
+		return "", &pkgerrs.AuthError{
 			StatusCode: resp.StatusCode,
 			Err:        fmt.Errorf("failed to read response body: %w", err),
 		}
@@ -135,7 +137,7 @@ func (a *Authenticator) GetToken(ctx context.Context) (string, error) {
 	a.logAuthHTTPResult(ctx, resp.StatusCode, duration, bodyBytes)
 
 	if resp.StatusCode != http.StatusOK {
-		return "", &AuthError{
+		return "", &pkgerrs.AuthError{
 			StatusCode: resp.StatusCode,
 			Body:       string(bodyBytes),
 		}
@@ -144,7 +146,7 @@ func (a *Authenticator) GetToken(ctx context.Context) (string, error) {
 	var tokenResp tokenResponse
 	if err := json.Unmarshal(bodyBytes, &tokenResp); err != nil {
 		a.logAuthError(ctx, "failed to decode token response", err)
-		return "", &AuthError{
+		return "", &pkgerrs.AuthError{
 			StatusCode: resp.StatusCode,
 			Body:       string(bodyBytes),
 			Err:        fmt.Errorf("failed to unmarshal token response: %w", err),
@@ -154,7 +156,7 @@ func (a *Authenticator) GetToken(ctx context.Context) (string, error) {
 	if tokenResp.AccessToken == "" {
 		emptyErr := fmt.Errorf("access token was empty in response")
 		a.logAuthError(ctx, "received empty access token", emptyErr)
-		return "", &AuthError{
+		return "", &pkgerrs.AuthError{
 			StatusCode: resp.StatusCode,
 			Body:       string(bodyBytes),
 			Err:        emptyErr,
@@ -250,35 +252,3 @@ func (a *Authenticator) logAuthSuccess(ctx context.Context, duration time.Durati
 	a.logger.LogAttrs(ctx, slog.LevelInfo, "reddit token acquired", attrs...)
 }
 
-// AuthError represents an error that occurred during authentication.
-type AuthError struct {
-	StatusCode int
-	// Body contains the raw response body from the server, which may hold more details.
-	Body string
-	// Err is the underlying error that occurred, e.g., a network or JSON parsing error.
-	Err error
-}
-
-// Error implements the error interface, providing a detailed error message.
-func (e *AuthError) Error() string {
-	var sb strings.Builder
-	sb.WriteString("auth error")
-
-	if e.StatusCode != 0 {
-		fmt.Fprintf(&sb, ": status code %d", e.StatusCode)
-	}
-
-	if e.Body != "" {
-		// Use Fprintf to correctly handle quoting the body string.
-		fmt.Fprintf(&sb, ", body: %q", e.Body)
-	}
-
-	if e.Err != nil {
-		fmt.Fprintf(&sb, ", err: %v", e.Err)
-	}
-
-	return sb.String()
-}
-
-// Unwrap allows for error chaining with errors.Is and errors.As.
-func (e *AuthError) Unwrap() error { return e.Err }
