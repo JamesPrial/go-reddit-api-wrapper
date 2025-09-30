@@ -53,14 +53,24 @@ const (
 	MeURL = "api/v1/me"
 
 	SubPrefixURL = "r/"
+
+	// HTTP timeout constants
 	// DefaultTimeout is the default HTTP client timeout
 	DefaultTimeout = 30 * time.Second
+	// MinimumTimeout is the minimum acceptable timeout value
+	MinimumTimeout = 1 * time.Second
+	// MaximumTimeoutWarningThreshold is the threshold above which we warn about long timeouts
+	MaximumTimeoutWarningThreshold = 5 * time.Minute
 
 	// Reddit API limits
 	maxPaginationLimit = 100
 	maxCommentIDs      = 100
 	minSubredditLength = 3
 	maxSubredditLength = 21
+
+	// Concurrency limits
+	// MaxConcurrentCommentRequests limits parallel goroutines in GetCommentsMultiple
+	MaxConcurrentCommentRequests = 10
 )
 
 // Config holds the configuration for the Reddit client.
@@ -113,6 +123,13 @@ type Config struct {
 	// HTTPClient to use for requests.
 	// Defaults to a client with DefaultTimeout if not specified.
 	// Customize this to set custom timeouts, proxies, or other HTTP behavior.
+	//
+	// SECURITY WARNING: When providing a custom HTTPClient, ensure:
+	//   - TLS verification is enabled (InsecureSkipVerify must be false)
+	//   - Timeout is set to prevent indefinite hangs (minimum 1 second required)
+	//   - TLS version is 1.2 or higher for secure connections
+	//   - Certificate verification is properly configured for any proxies
+	// See package documentation for secure HTTP client configuration examples.
 	HTTPClient *http.Client
 
 	// Logger for structured diagnostics.
@@ -223,13 +240,13 @@ func NewClientWithContext(ctx context.Context, config *Config) (*Client, error) 
 			config.Logger.Warn("HTTPClient timeout was 0, setting to default",
 				slog.Duration("timeout", DefaultTimeout))
 		}
-	} else if config.HTTPClient.Timeout < time.Second {
+	} else if config.HTTPClient.Timeout < MinimumTimeout {
 		// Validate that timeout is not unreasonably short
 		return nil, &pkgerrs.ConfigError{
 			Field:   "HTTPClient.Timeout",
-			Message: fmt.Sprintf("timeout too short: %v (minimum 1 second)", config.HTTPClient.Timeout),
+			Message: fmt.Sprintf("timeout too short: %v (minimum %v)", config.HTTPClient.Timeout, MinimumTimeout),
 		}
-	} else if config.HTTPClient.Timeout > 5*time.Minute {
+	} else if config.HTTPClient.Timeout > MaximumTimeoutWarningThreshold {
 		// Warn about very long timeouts
 		if config.Logger != nil {
 			config.Logger.Warn("HTTPClient timeout may be too long",
@@ -565,9 +582,9 @@ func (c *Client) GetComments(ctx context.Context, request *types.CommentsRequest
 //   - Slice of CommentsResponse in the same order as the input requests
 //   - Error if any of the requests fail (the first error encountered)
 //
-// The function launches goroutines to fetch all comments in parallel, then
-// collects the results in the original order. If any request fails, the error
-// is returned but successful responses are still included in the result slice.
+// The function uses a worker pool to limit concurrent goroutines (max MaxConcurrentCommentRequests),
+// preventing resource exhaustion when processing many requests. Results are collected in the original order.
+// If any request fails, the error is returned but successful responses are still included in the result slice.
 //
 // Returns an error if any individual request fails.
 func (c *Client) GetCommentsMultiple(ctx context.Context, requests []*types.CommentsRequest) ([]*types.CommentsResponse, error) {
@@ -583,9 +600,21 @@ func (c *Client) GetCommentsMultiple(ctx context.Context, requests []*types.Comm
 	}
 	resultChan := make(chan result, len(requests))
 
-	// Launch goroutines for parallel fetching
+	// Create semaphore channel to limit concurrent goroutines
+	semaphore := make(chan struct{}, MaxConcurrentCommentRequests)
+
+	// Launch goroutines for parallel fetching with worker pool
 	for i, req := range requests {
 		go func(index int, r *types.CommentsRequest) {
+			// Acquire semaphore slot (blocks if pool is full)
+			select {
+			case semaphore <- struct{}{}:
+				defer func() { <-semaphore }() // Release slot when done
+			case <-ctx.Done():
+				resultChan <- result{index: index, response: nil, err: ctx.Err()}
+				return
+			}
+
 			// Check if context is already cancelled before starting
 			select {
 			case <-ctx.Done():

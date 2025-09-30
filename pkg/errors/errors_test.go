@@ -28,8 +28,8 @@ func TestConfigError_Error(t *testing.T) {
 			contains: []string{"config error", "invalid configuration"},
 		},
 		{
-			name: "empty error",
-			err:  ConfigError{},
+			name:     "empty error",
+			err:      ConfigError{},
 			contains: []string{"config error"},
 		},
 	}
@@ -85,8 +85,8 @@ func TestAuthError_Error(t *testing.T) {
 			contains: []string{"auth error", "body", "invalid_token"},
 		},
 		{
-			name: "empty error",
-			err:  AuthError{},
+			name:     "empty error",
+			err:      AuthError{},
 			contains: []string{"auth error"},
 		},
 	}
@@ -139,8 +139,8 @@ func TestStateError_Error(t *testing.T) {
 			contains: []string{"state error", "invalid state"},
 		},
 		{
-			name: "empty error",
-			err:  StateError{},
+			name:     "empty error",
+			err:      StateError{},
 			contains: []string{"state error"},
 		},
 	}
@@ -188,8 +188,8 @@ func TestRequestError_Error(t *testing.T) {
 			contains: []string{"request error", "request failed"},
 		},
 		{
-			name: "empty error",
-			err:  RequestError{},
+			name:     "empty error",
+			err:      RequestError{},
 			contains: []string{"request error"},
 		},
 	}
@@ -242,8 +242,8 @@ func TestParseError_Error(t *testing.T) {
 			contains: []string{"parse error", "invalid JSON"},
 		},
 		{
-			name: "empty error",
-			err:  ParseError{},
+			name:     "empty error",
+			err:      ParseError{},
 			contains: []string{"parse error"},
 		},
 	}
@@ -363,8 +363,8 @@ func TestClientError_Error(t *testing.T) {
 			contains: []string{"client error", "timeout"},
 		},
 		{
-			name: "empty error",
-			err:  ClientError{},
+			name:     "empty error",
+			err:      ClientError{},
 			contains: []string{"client error"},
 		},
 	}

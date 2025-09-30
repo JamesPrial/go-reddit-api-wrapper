@@ -107,6 +107,21 @@ type ListingData struct {
 // Pagination captures the shared pagination behaviour for Reddit listing endpoints.
 // Reddit uses "fullnames" for pagination, which are strings like "t3_abc123" where
 // "t3" indicates the type (link/post) and "abc123" is the item ID.
+//
+// To paginate through results:
+//  1. Make initial request with desired Limit
+//  2. Response includes AfterFullname and BeforeFullname
+//  3. Set After = AfterFullname for next page (forward pagination)
+//  4. Or set Before = BeforeFullname for previous page (backward pagination)
+//
+// Example forward pagination:
+//
+//	req := &PostsRequest{Subreddit: "golang", Pagination: Pagination{Limit: 25}}
+//	for {
+//	    resp, err := client.GetHot(ctx, req)
+//	    if err != nil || resp.AfterFullname == "" { break }
+//	    req.After = resp.AfterFullname  // Move to next page
+//	}
 type Pagination struct {
 	// Limit specifies the number of items to retrieve.
 	// Reddit enforces a maximum of 100 items per request.
@@ -116,11 +131,13 @@ type Pagination struct {
 	// After specifies the Reddit fullname after which to get items.
 	// Used for forward pagination. Format: "t3_abc123" for posts, "t1_def456" for comments.
 	// Cannot be used together with Before.
+	// Get this value from the AfterFullname field in the previous response.
 	After string
 
 	// Before specifies the Reddit fullname before which to get items.
 	// Used for backward pagination. Format: "t3_abc123" for posts, "t1_def456" for comments.
 	// Cannot be used together with After.
+	// Get this value from the BeforeFullname field in the previous response.
 	Before string
 }
 

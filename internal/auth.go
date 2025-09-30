@@ -300,4 +300,3 @@ func (a *Authenticator) logAuthSuccess(ctx context.Context, duration time.Durati
 
 	a.logger.LogAttrs(ctx, slog.LevelInfo, "reddit token acquired", attrs...)
 }
-

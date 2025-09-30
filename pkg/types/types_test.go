@@ -88,7 +88,6 @@ func TestThingData(t *testing.T) {
 	}
 }
 
-
 func TestPagination(t *testing.T) {
 	// Test that Pagination fields work correctly
 	p := Pagination{

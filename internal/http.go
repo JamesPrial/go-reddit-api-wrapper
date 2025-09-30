@@ -71,6 +71,10 @@ const (
 	ParseFloatBitSize           = 64
 	defaultLogBodyBytes         = 4 * 1024
 	ProactiveRateLimitThreshold = 5 // Start throttling when remaining requests drop below this
+	// RateLimitBufferMultiplier adds conservative buffer to rate limit calculations (10% safety margin)
+	RateLimitBufferMultiplier = 1.1
+	// MinRateLimitPerSecond is the minimum rate limit to prevent division by zero
+	MinRateLimitPerSecond = 1.0
 )
 
 // Client manages communication with the Reddit API.
@@ -81,9 +85,9 @@ type Client struct {
 	logger          *slog.Logger
 	maxLogBodyBytes int
 
-	limiter                  *rate.Limiter
-	forceWaitUntil          atomic.Int64 // Unix nanoseconds
-	rateLimitThreshold      float64      // When to start proactive throttling
+	limiter            *rate.Limiter
+	forceWaitUntil     atomic.Int64 // Unix nanoseconds
+	rateLimitThreshold float64      // When to start proactive throttling
 }
 
 // RateLimitConfig controls how requests are throttled before reaching Reddit.
@@ -346,7 +350,7 @@ func buildLimiter(cfg RateLimitConfig) *rate.Limiter {
 
 	limitPerSecond := rate.Limit(requestsPerMinute / SecondsPerMinute)
 	if limitPerSecond <= 0 {
-		limitPerSecond = rate.Limit(1)
+		limitPerSecond = rate.Limit(MinRateLimitPerSecond)
 	}
 
 	return rate.NewLimiter(limitPerSecond, burst)
@@ -419,9 +423,9 @@ func (c *Client) applyRateHeaders(resp *http.Response) {
 	// Proactive throttling: start slowing down when approaching the rate limit
 	if remaining < c.rateLimitThreshold {
 		// Calculate delay to spread remaining requests over the reset period
-		// Add 10% buffer to be conservative
+		// Add conservative buffer to be safe
 		if remaining > 0 {
-			delayPerRequest := (resetSeconds * 1.1) / remaining
+			delayPerRequest := (resetSeconds * RateLimitBufferMultiplier) / remaining
 			c.deferRequests(ctx, time.Duration(delayPerRequest*float64(time.Second)), "proactive_ratelimit")
 		} else {
 			// No requests remaining, must wait full reset period
@@ -435,6 +439,7 @@ func (c *Client) deferRequests(ctx context.Context, d time.Duration, reason stri
 		return
 	}
 
+	// Use background context as fallback if nil (only for logging, not request flow)
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -444,6 +449,14 @@ func (c *Client) deferRequests(ctx context.Context, d time.Duration, reason stri
 
 	// Use a CAS loop to ensure we only update if the new value is later
 	for {
+		// Check if context is cancelled before retrying CAS
+		select {
+		case <-ctx.Done():
+			// Context cancelled, stop trying to update rate limit
+			return
+		default:
+		}
+
 		current := c.forceWaitUntil.Load()
 		if current >= untilNanos {
 			// Current value is already later, nothing to do
@@ -464,6 +477,8 @@ func (c *Client) deferRequests(ctx context.Context, d time.Duration, reason stri
 	}
 }
 
+// rateLimitContext extracts context from response for rate limit logging.
+// Returns Background context as fallback when response/request is nil.
 func rateLimitContext(resp *http.Response) context.Context {
 	if resp != nil && resp.Request != nil {
 		return resp.Request.Context()
@@ -571,8 +586,24 @@ func (c *Client) logHTTPResult(ctx context.Context, req *http.Request, resp *htt
 
 	c.logger.LogAttrs(ctx, level, msg, attrs...)
 
+	// Only process body if debug logging is enabled (avoid unnecessary allocations)
 	if len(body) > 0 && c.logger.Enabled(ctx, slog.LevelDebug) {
-		snippet, truncated := c.truncateBody(body)
+		// Truncate body inside debug check to avoid work when debug is disabled
+		limit := c.maxLogBodyBytes
+		if limit <= 0 {
+			limit = defaultLogBodyBytes
+		}
+
+		var snippet string
+		var truncated bool
+		if len(body) <= limit {
+			snippet = string(body)
+			truncated = false
+		} else {
+			snippet = string(body[:limit])
+			truncated = true
+		}
+
 		bodyAttrs := []slog.Attr{
 			slog.Int("bytes", len(body)),
 			slog.String("body", snippet),
@@ -584,21 +615,11 @@ func (c *Client) logHTTPResult(ctx context.Context, req *http.Request, resp *htt
 	}
 }
 
-func (c *Client) truncateBody(body []byte) (string, bool) {
-	limit := c.maxLogBodyBytes
-	if limit <= 0 {
-		limit = defaultLogBodyBytes
-	}
-	if len(body) <= limit {
-		return string(body), false
-	}
-	return string(body[:limit]), true
-}
-
+// contextOrBackground returns the provided context or Background as fallback.
+// Used to ensure logging functions always have a valid context.
 func contextOrBackground(ctx context.Context) context.Context {
 	if ctx != nil {
 		return ctx
 	}
 	return context.Background()
 }
-
