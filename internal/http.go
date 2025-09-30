@@ -24,23 +24,40 @@ const (
 	// maxBufferSize is the maximum size of buffers to keep in the pool.
 	// Buffers larger than this will be discarded to prevent excessive memory usage.
 	maxBufferSize = 10 * 1024 * 1024 // 10MB
+	// initialBufferSize is the initial allocation size for new buffers
+	initialBufferSize = 4 * 1024 // 4KB for most API responses
 )
 
 var bodyBufferPool = sync.Pool{
 	New: func() interface{} {
-		return new(bytes.Buffer)
+		// Pre-allocate buffers with a reasonable initial size
+		buf := new(bytes.Buffer)
+		buf.Grow(initialBufferSize)
+		return buf
 	},
 }
 
 func getBuffer() *bytes.Buffer {
-	return bodyBufferPool.Get().(*bytes.Buffer)
+	buf := bodyBufferPool.Get().(*bytes.Buffer)
+	buf.Reset() // Ensure buffer is clean before use
+	return buf
 }
 
 func putBuffer(buf *bytes.Buffer) {
-	// Don't return oversized buffers to the pool
-	if buf.Cap() > maxBufferSize {
+	// Safety check - nil buffers shouldn't be returned
+	if buf == nil {
 		return
 	}
+
+	// Don't return oversized buffers to the pool to prevent memory bloat
+	// These will be garbage collected instead
+	if buf.Cap() > maxBufferSize {
+		// Explicitly nil out to help GC (though this local variable will go out of scope anyway)
+		// The important thing is we don't keep a reference in the pool
+		return
+	}
+
+	// Reset the buffer before returning to pool
 	buf.Reset()
 	bodyBufferPool.Put(buf)
 }

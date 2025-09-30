@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -36,8 +37,10 @@ type Authenticator struct {
 	formData     *url.Values
 	logger       *slog.Logger
 
-	// Token cache using atomic pointer for lock-free access
+	// Token cache using atomic pointer for lock-free reads
 	cachedToken atomic.Pointer[tokenCache]
+	// Mutex to prevent concurrent token refreshes
+	tokenMu sync.Mutex
 }
 
 // NewAuthenticator creates a new authenticator.
@@ -91,7 +94,9 @@ type tokenResponse struct {
 func (a *Authenticator) GetToken(ctx context.Context) (string, error) {
 	// Check cache first - lock-free read
 	if cached := a.cachedToken.Load(); cached != nil {
-		if time.Now().Before(cached.expiry) {
+		// Capture the current time once for consistent comparison
+		now := time.Now()
+		if now.Before(cached.expiry) {
 			if a.logger != nil {
 				a.logger.LogAttrs(ctx, slog.LevelDebug, "using cached reddit token",
 					slog.Time("expires_at", cached.expiry))
@@ -100,7 +105,24 @@ func (a *Authenticator) GetToken(ctx context.Context) (string, error) {
 		}
 	}
 
-	// Cache miss or expired, fetch new token
+	// Cache miss or expired, need to refresh
+	// Use mutex to prevent concurrent refreshes
+	a.tokenMu.Lock()
+	defer a.tokenMu.Unlock()
+
+	// Double-check cache after acquiring lock - another goroutine might have refreshed
+	if cached := a.cachedToken.Load(); cached != nil {
+		now := time.Now()
+		if now.Before(cached.expiry) {
+			if a.logger != nil {
+				a.logger.LogAttrs(ctx, slog.LevelDebug, "using cached reddit token (after lock)",
+					slog.Time("expires_at", cached.expiry))
+			}
+			return cached.token, nil
+		}
+	}
+
+	// Definitely need to fetch new token
 	data := a.formData.Encode()
 	start := time.Now()
 

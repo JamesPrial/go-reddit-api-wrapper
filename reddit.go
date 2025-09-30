@@ -579,20 +579,23 @@ func (c *Client) GetCommentsMultiple(ctx context.Context, requests []*types.Comm
 	// Collect results
 	results := make([]*types.CommentsResponse, len(requests))
 	var firstError error
-	for i := range len(requests) {
+	collected := 0
+	for collected < len(requests) {
 		select {
 		case res := <-resultChan:
 			if res.err != nil && firstError == nil {
 				firstError = res.err
 			}
 			results[res.index] = res.response
+			collected++
 		case <-ctx.Done():
 			// Context cancelled, collect remaining results but set error
 			if firstError == nil {
 				firstError = ctx.Err()
 			}
 			// Drain remaining results to prevent goroutine leaks
-			for range len(requests) - i {
+			remaining := len(requests) - collected
+			for j := 0; j < remaining; j++ {
 				<-resultChan
 			}
 			return results, firstError
