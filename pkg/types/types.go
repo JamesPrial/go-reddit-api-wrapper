@@ -288,6 +288,7 @@ type Comment struct {
 	Subreddit           string     `json:"subreddit"`
 	SubredditID         string     `json:"subreddit_id"`
 	Distinguished       *string    `json:"distinguished"`
+	MoreChildrenIDs     []string   `json:"-"` // Aggregated IDs for deferred comment loading
 }
 
 // PostsResponse represents a collection of posts from a subreddit with pagination info.

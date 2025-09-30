@@ -99,8 +99,13 @@ func (p *Parser) ParseComment(thing *types.Thing) (*types.Comment, error) {
 			// Parse the replies Thing - already have the raw JSON, no new buffer needed
 			var repliesThing types.Thing
 			if err := json.Unmarshal(rawData.Replies, &repliesThing); err == nil {
-				replies, _, _ := p.ExtractComments(&repliesThing)
-				result.Replies = replies
+				replies, moreIDs, err := p.ExtractComments(&repliesThing)
+				if err == nil {
+					result.Replies = replies
+					if len(moreIDs) > 0 {
+						result.MoreChildrenIDs = append(result.MoreChildrenIDs, moreIDs...)
+					}
+				}
 			}
 		}
 	}
@@ -221,6 +226,9 @@ func (p *Parser) ExtractComments(thing *types.Thing) ([]*types.Comment, []string
 		if comment.Replies != nil {
 			comments = append(comments, comment.Replies...)
 		}
+		if len(comment.MoreChildrenIDs) > 0 {
+			moreIDs = append(moreIDs, comment.MoreChildrenIDs...)
+		}
 		return comments, moreIDs, nil
 	}
 
@@ -247,6 +255,9 @@ func (p *Parser) ExtractComments(thing *types.Thing) ([]*types.Comment, []string
 			// Replies are already parsed in ParseComment, just add them
 			if comment.Replies != nil {
 				comments = append(comments, comment.Replies...)
+			}
+			if len(comment.MoreChildrenIDs) > 0 {
+				moreIDs = append(moreIDs, comment.MoreChildrenIDs...)
 			}
 		case "more":
 			more, err := p.ParseMore(child)

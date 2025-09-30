@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -203,13 +204,13 @@ func TestClient_Me(t *testing.T) {
 			setupMock: func() HTTPClient {
 				return &mockHTTPClient{
 					doFunc: func(req *http.Request, v *types.Thing) error {
-						return errors.New("API error")
+						return &internal.APIError{StatusCode: http.StatusForbidden, Message: "API error"}
 					},
 				}
 			},
 			setupAuth: nil,
 			wantError: true,
-			errorType: "RequestError",
+			errorType: "APIError",
 		},
 	}
 
@@ -235,6 +236,10 @@ func TestClient_Me(t *testing.T) {
 					case "RequestError":
 						if _, ok := err.(*RequestError); !ok {
 							t.Errorf("expected RequestError, got %T: %v", err, err)
+						}
+					case "APIError":
+						if _, ok := err.(*APIError); !ok {
+							t.Errorf("expected APIError, got %T: %v", err, err)
 						}
 					}
 				}
@@ -486,6 +491,7 @@ func TestClient_GetComments(t *testing.T) {
 		wantError    bool
 		errorType    string
 		wantComments int
+		wantMoreIDs  []string
 	}{
 		{
 			name: "successful request",
@@ -532,6 +538,67 @@ func TestClient_GetComments(t *testing.T) {
 			wantComments: 1,
 		},
 		{
+			name: "captures nested more IDs",
+			request: &types.CommentsRequest{
+				Subreddit: "golang",
+				PostID:    "abc123",
+			},
+			setupMock: func() HTTPClient {
+				return &mockHTTPClient{
+					doThingArrayFunc: func(req *http.Request) ([]*types.Thing, error) {
+						postListingData, _ := json.Marshal(map[string]interface{}{
+							"children": []interface{}{
+								map[string]interface{}{
+									"kind": "t3",
+									"data": map[string]interface{}{
+										"id":    "abc123",
+										"title": "Test Post",
+										"score": 100,
+									},
+								},
+							},
+						})
+
+						commentListingData, _ := json.Marshal(map[string]interface{}{
+							"children": []interface{}{
+								map[string]interface{}{
+									"kind": "t1",
+									"data": map[string]interface{}{
+										"id":        "c_nested",
+										"body":      "Test comment",
+										"author":    "user1",
+										"link_id":   "t3_abc123",
+										"parent_id": "t3_abc123",
+										"replies": map[string]interface{}{
+											"kind": "Listing",
+											"data": map[string]interface{}{
+												"children": []interface{}{
+													map[string]interface{}{
+														"kind": "more",
+														"data": map[string]interface{}{
+															"children": []string{"more1", "more2"},
+														},
+													},
+												},
+											},
+										},
+									},
+								},
+							},
+						})
+
+						return []*types.Thing{
+							{Kind: "Listing", Data: postListingData},
+							{Kind: "Listing", Data: commentListingData},
+						}, nil
+					},
+				}
+			},
+			wantError:    false,
+			wantComments: 1,
+			wantMoreIDs:  []string{"more1", "more2"},
+		},
+		{
 			name:    "nil request",
 			request: nil,
 			setupMock: func() HTTPClient {
@@ -571,12 +638,12 @@ func TestClient_GetComments(t *testing.T) {
 			setupMock: func() HTTPClient {
 				return &mockHTTPClient{
 					doThingArrayFunc: func(req *http.Request) ([]*types.Thing, error) {
-						return nil, errors.New("post not found")
+						return nil, &internal.APIError{StatusCode: http.StatusNotFound, Message: "post not found"}
 					},
 				}
 			},
 			wantError: true,
-			errorType: "RequestError",
+			errorType: "APIError",
 		},
 	}
 
@@ -599,6 +666,10 @@ func TestClient_GetComments(t *testing.T) {
 						if _, ok := err.(*RequestError); !ok {
 							t.Errorf("expected RequestError, got %T: %v", err, err)
 						}
+					case "APIError":
+						if _, ok := err.(*APIError); !ok {
+							t.Errorf("expected APIError, got %T: %v", err, err)
+						}
 					}
 				}
 			} else {
@@ -609,6 +680,11 @@ func TestClient_GetComments(t *testing.T) {
 					t.Error("expected comments response but got nil")
 				} else if len(comments.Comments) != tt.wantComments {
 					t.Errorf("expected %d comments, got %d", tt.wantComments, len(comments.Comments))
+				}
+				if tt.wantMoreIDs != nil {
+					if !reflect.DeepEqual(comments.MoreIDs, tt.wantMoreIDs) {
+						t.Errorf("expected more IDs %v, got %v", tt.wantMoreIDs, comments.MoreIDs)
+					}
 				}
 			}
 		})

@@ -26,6 +26,7 @@ package graw
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -281,6 +282,9 @@ func (c *Client) Me(ctx context.Context) (*types.AccountData, error) {
 	var result types.Thing
 	err = c.client.Do(req, &result)
 	if err != nil {
+		if apiErr, ok := mapAPIError(err); ok {
+			return nil, apiErr
+		}
 		return nil, &RequestError{Operation: "get user info", URL: MeURL, Err: err}
 	}
 
@@ -331,6 +335,9 @@ func (c *Client) GetSubreddit(ctx context.Context, name string) (*types.Subreddi
 	var result types.Thing
 	err = c.client.Do(req, &result)
 	if err != nil {
+		if apiErr, ok := mapAPIError(err); ok {
+			return nil, apiErr
+		}
 		return nil, &RequestError{Operation: "get subreddit", URL: SubPrefixURL + name + "/about", Err: err}
 	}
 
@@ -409,6 +416,9 @@ func (c *Client) getPosts(ctx context.Context, request *types.PostsRequest, sort
 	var result types.Thing
 	err = c.client.Do(httpReq, &result)
 	if err != nil {
+		if apiErr, ok := mapAPIError(err); ok {
+			return nil, apiErr
+		}
 		return nil, &RequestError{Operation: "get " + sort + " posts", URL: path, Err: err}
 	}
 
@@ -477,6 +487,9 @@ func (c *Client) GetComments(ctx context.Context, request *types.CommentsRequest
 
 	result, err := c.client.DoThingArray(httpReq)
 	if err != nil {
+		if apiErr, ok := mapAPIError(err); ok {
+			return nil, apiErr
+		}
 		return nil, &RequestError{Operation: "get comments", URL: path, Err: err}
 	}
 
@@ -623,6 +636,9 @@ func (c *Client) GetMoreComments(ctx context.Context, request *types.MoreComment
 	// Make authenticated request to morechildren endpoint
 	things, err := c.client.DoMoreChildren(req)
 	if err != nil {
+		if apiErr, ok := mapAPIError(err); ok {
+			return nil, apiErr
+		}
 		return nil, &RequestError{Operation: "get more comments", URL: MoreChildrenURL, Err: err}
 	}
 
@@ -776,6 +792,7 @@ func (c *Client) addAuthHeaders(ctx context.Context, req *http.Request) error {
 // APIError represents an error returned by the Reddit API.
 // This error is returned when Reddit's API explicitly returns an error response.
 type APIError struct {
+	StatusCode int
 	// ErrorCode is the error code from Reddit (if available)
 	ErrorCode string
 	// Message is the error message from Reddit
@@ -787,6 +804,9 @@ type APIError struct {
 // Error implements the error interface for APIError.
 func (e *APIError) Error() string {
 	msg := "reddit API error"
+	if e.StatusCode != 0 {
+		msg += fmt.Sprintf(" (status %d)", e.StatusCode)
+	}
 	if e.ErrorCode != "" {
 		msg += " [" + e.ErrorCode + "]"
 	}
@@ -794,4 +814,12 @@ func (e *APIError) Error() string {
 		msg += ": " + e.Message
 	}
 	return msg
+}
+
+func mapAPIError(err error) (*APIError, bool) {
+	var apiErr *internal.APIError
+	if errors.As(err, &apiErr) {
+		return &APIError{StatusCode: apiErr.StatusCode, Message: apiErr.Message}, true
+	}
+	return nil, false
 }
