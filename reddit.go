@@ -312,10 +312,7 @@ func (c *Client) Me(ctx context.Context) (*types.AccountData, error) {
 	var result types.Thing
 	err = c.client.Do(req, &result)
 	if err != nil {
-		if apiErr, ok := mapAPIError(err); ok {
-			return nil, apiErr
-		}
-		return nil, &pkgerrs.RequestError{Operation: "get user info", URL: MeURL, Err: err}
+		return nil, wrapDoError(err, "get user info", MeURL)
 	}
 
 	// Parse the account data
@@ -370,10 +367,7 @@ func (c *Client) GetSubreddit(ctx context.Context, name string) (*types.Subreddi
 	var result types.Thing
 	err = c.client.Do(req, &result)
 	if err != nil {
-		if apiErr, ok := mapAPIError(err); ok {
-			return nil, apiErr
-		}
-		return nil, &pkgerrs.RequestError{Operation: "get subreddit", URL: SubPrefixURL + name + "/about", Err: err}
+		return nil, wrapDoError(err, "get subreddit", SubPrefixURL+name+"/about")
 	}
 
 	// Parse the subreddit data
@@ -463,10 +457,7 @@ func (c *Client) getPosts(ctx context.Context, request *types.PostsRequest, sort
 	var result types.Thing
 	err = c.client.Do(httpReq, &result)
 	if err != nil {
-		if apiErr, ok := mapAPIError(err); ok {
-			return nil, apiErr
-		}
-		return nil, &pkgerrs.RequestError{Operation: "get " + sort + " posts", URL: path, Err: err}
+		return nil, wrapDoError(err, "get "+sort+" posts", path)
 	}
 
 	posts, err := c.parser.ExtractPosts(&result)
@@ -544,10 +535,7 @@ func (c *Client) GetComments(ctx context.Context, request *types.CommentsRequest
 
 	result, err := c.client.DoThingArray(httpReq)
 	if err != nil {
-		if apiErr, ok := mapAPIError(err); ok {
-			return nil, apiErr
-		}
-		return nil, &pkgerrs.RequestError{Operation: "get comments", URL: path, Err: err}
+		return nil, wrapDoError(err, "get comments", path)
 	}
 
 	// Parse the post and comments
@@ -723,10 +711,7 @@ func (c *Client) GetMoreComments(ctx context.Context, request *types.MoreComment
 	// Make authenticated request to morechildren endpoint
 	things, err := c.client.DoMoreChildren(req)
 	if err != nil {
-		if apiErr, ok := mapAPIError(err); ok {
-			return nil, apiErr
-		}
-		return nil, &pkgerrs.RequestError{Operation: "get more comments", URL: MoreChildrenURL, Err: err}
+		return nil, wrapDoError(err, "get more comments", MoreChildrenURL)
 	}
 
 	// Extract comments from the response
@@ -785,6 +770,18 @@ func mapAPIError(err error) (*pkgerrs.APIError, bool) {
 		return apiErr, true
 	}
 	return nil, false
+}
+
+// wrapDoError wraps errors from HTTP client Do operations, preserving APIErrors
+// and wrapping other errors as RequestErrors with context.
+func wrapDoError(err error, operation, url string) error {
+	if err == nil {
+		return nil
+	}
+	if apiErr, ok := mapAPIError(err); ok {
+		return apiErr
+	}
+	return &pkgerrs.RequestError{Operation: operation, URL: url, Err: err}
 }
 
 // validateSubredditName checks if a subreddit name is valid according to Reddit's naming rules.
