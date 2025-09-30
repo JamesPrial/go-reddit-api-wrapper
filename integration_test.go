@@ -41,7 +41,7 @@ func getTestClient(t *testing.T) *Client {
 		UserAgent:    "go-reddit-api-wrapper:integration-tests:v1.0.0",
 	}
 
-	client, err := NewClient(context.Background(), config)
+	client, err := NewClient(config)
 	if err != nil {
 		t.Fatalf("Failed to create client: %v", err)
 	}
@@ -54,7 +54,7 @@ func TestIntegration_GetHot(t *testing.T) {
 	ctx := context.Background()
 
 	// Test getting hot posts from r/golang
-	resp, err := client.GetHot(ctx, &types.GetPostsRequest{
+	resp, err := client.GetHot(ctx, &types.PostsRequest{
 		Subreddit: "golang",
 		Pagination: types.Pagination{
 			Limit: 5,
@@ -88,7 +88,7 @@ func TestIntegration_GetComments(t *testing.T) {
 	ctx := context.Background()
 
 	// First, get a post to fetch comments for
-	postsResp, err := client.GetHot(ctx, &types.GetPostsRequest{
+	postsResp, err := client.GetHot(ctx, &types.PostsRequest{
 		Subreddit: "golang",
 		Pagination: types.Pagination{
 			Limit: 1,
@@ -106,7 +106,7 @@ func TestIntegration_GetComments(t *testing.T) {
 	post := postsResp.Posts[0]
 
 	// Get comments for the post
-	commentsResp, err := client.GetComments(ctx, &types.GetCommentsRequest{
+	commentsResp, err := client.GetComments(ctx, &types.CommentsRequest{
 		Subreddit: "golang",
 		PostID:    post.ID,
 		Pagination: types.Pagination{
@@ -165,7 +165,7 @@ func TestIntegration_GetMoreComments(t *testing.T) {
 	ctx := context.Background()
 
 	// Get a post with comments
-	postsResp, err := client.GetHot(ctx, &types.GetPostsRequest{
+	postsResp, err := client.GetHot(ctx, &types.PostsRequest{
 		Subreddit: "golang",
 		Pagination: types.Pagination{
 			Limit: 1,
@@ -183,7 +183,7 @@ func TestIntegration_GetMoreComments(t *testing.T) {
 	post := postsResp.Posts[0]
 
 	// Get initial comments
-	commentsResp, err := client.GetComments(ctx, &types.GetCommentsRequest{
+	commentsResp, err := client.GetComments(ctx, &types.CommentsRequest{
 		Subreddit: "golang",
 		PostID:    post.ID,
 		Pagination: types.Pagination{
@@ -196,7 +196,7 @@ func TestIntegration_GetMoreComments(t *testing.T) {
 	}
 
 	// If there are more comment IDs, try to fetch them
-	if len(commentsResp.MoreChildrenIDs) == 0 {
+	if len(commentsResp.MoreIDs) == 0 {
 		t.Skip("No more comment IDs available to test")
 	}
 
@@ -213,7 +213,7 @@ func TestIntegration_GetMoreComments(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Take a subset of more IDs
-			moreIDs := commentsResp.MoreChildrenIDs
+			moreIDs := commentsResp.MoreIDs
 			if len(moreIDs) > tc.maxIDs {
 				moreIDs = moreIDs[:tc.maxIDs]
 			}
@@ -267,7 +267,7 @@ func TestIntegration_RateLimiting(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		start := time.Now()
 
-		_, err := client.GetHot(ctx, &types.GetPostsRequest{
+		_, err := client.GetHot(ctx, &types.PostsRequest{
 			Subreddit: "golang",
 			Pagination: types.Pagination{
 				Limit: 1,
@@ -288,7 +288,7 @@ func TestIntegration_ErrorHandling(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("invalid subreddit", func(t *testing.T) {
-		_, err := client.GetHot(ctx, &types.GetPostsRequest{
+		_, err := client.GetHot(ctx, &types.PostsRequest{
 			Subreddit: "thisisnotarealsubredditname123456789",
 			Pagination: types.Pagination{
 				Limit: 1,
@@ -301,7 +301,7 @@ func TestIntegration_ErrorHandling(t *testing.T) {
 	})
 
 	t.Run("invalid post ID", func(t *testing.T) {
-		_, err := client.GetComments(ctx, &types.GetCommentsRequest{
+		_, err := client.GetComments(ctx, &types.CommentsRequest{
 			Subreddit: "golang",
 			PostID:    "invalidpostid123",
 			Pagination: types.Pagination{
