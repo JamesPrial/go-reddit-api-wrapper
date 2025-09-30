@@ -1165,7 +1165,7 @@ func TestExtractPostAndComments(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			post, comments, moreIDs, err := parser.ExtractPostAndComments(tt.response)
+			post, comments, moreIDs, _, _, err := parser.ExtractPostAndComments(tt.response)
 
 			if tt.expectError {
 				if err == nil {
@@ -1230,7 +1230,7 @@ func TestExtractPostAndComments_EdgeCases(t *testing.T) {
 			},
 		}
 
-		post, comments, moreIDs, err := parser.ExtractPostAndComments(response)
+		post, comments, moreIDs, _, _, err := parser.ExtractPostAndComments(response)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -1271,7 +1271,7 @@ func TestExtractPostAndComments_EdgeCases(t *testing.T) {
 			},
 		}
 
-		post, comments, moreIDs, err := parser.ExtractPostAndComments(response)
+		post, comments, moreIDs, _, _, err := parser.ExtractPostAndComments(response)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -1298,7 +1298,7 @@ func TestExtractPostAndComments_EdgeCases(t *testing.T) {
 			},
 		}
 
-		post, comments, moreIDs, err := parser.ExtractPostAndComments(response)
+		post, comments, moreIDs, _, _, err := parser.ExtractPostAndComments(response)
 		if err == nil {
 			t.Fatal("expected error but got none")
 		}
@@ -1321,7 +1321,7 @@ func TestExtractPostAndComments_EdgeCases(t *testing.T) {
 			},
 		}
 
-		post, comments, moreIDs, err := parser.ExtractPostAndComments(response)
+		post, comments, moreIDs, _, _, err := parser.ExtractPostAndComments(response)
 		if err == nil {
 			t.Fatal("expected error but got none")
 		}

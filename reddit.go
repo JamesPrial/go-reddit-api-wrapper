@@ -551,16 +551,18 @@ func (c *Client) GetComments(ctx context.Context, request *types.CommentsRequest
 	}
 
 	// Parse the post and comments
-	post, comments, moreIDs, err := c.parser.ExtractPostAndComments(result)
+	post, comments, moreIDs, after, before, err := c.parser.ExtractPostAndComments(result)
 	if err != nil {
 		return nil, &pkgerrs.ParseError{Operation: "parse comments", Err: err}
 	}
 
 	// Note: post may be nil if Reddit only returned comments without the post
 	return &types.CommentsResponse{
-		Post:     post,
-		Comments: comments,
-		MoreIDs:  moreIDs,
+		Post:           post,
+		Comments:       comments,
+		MoreIDs:        moreIDs,
+		AfterFullname:  after,
+		BeforeFullname: before,
 	}, nil
 }
 
