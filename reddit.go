@@ -55,6 +55,12 @@ const (
 	SubPrefixURL = "r/"
 	// DefaultTimeout is the default HTTP client timeout
 	DefaultTimeout = 30 * time.Second
+
+	// Reddit API limits
+	maxPaginationLimit = 100
+	maxCommentIDs      = 100
+	minSubredditLength = 3
+	maxSubredditLength = 21
 )
 
 // Config holds the configuration for the Reddit client.
@@ -277,7 +283,7 @@ func NewClientWithContext(ctx context.Context, config *Config) (*Client, error) 
 		client: httpClient,
 		auth:   auth,
 		config: config,
-		parser: internal.NewParser(),
+		parser: internal.NewParser(config.Logger),
 	}, nil
 }
 
@@ -345,6 +351,11 @@ func (c *Client) Me(ctx context.Context) (*types.AccountData, error) {
 //
 // This method works with both application-only and user authentication.
 func (c *Client) GetSubreddit(ctx context.Context, name string) (*types.SubredditData, error) {
+	// Validate subreddit name
+	if err := validateSubredditName(name); err != nil {
+		return nil, err
+	}
+
 	path := SubPrefixURL + name + "/about"
 	req, err := c.client.NewRequest(ctx, http.MethodGet, path, nil)
 	if err != nil {
@@ -417,6 +428,18 @@ func (c *Client) getPosts(ctx context.Context, request *types.PostsRequest, sort
 	if request != nil {
 		subreddit = request.Subreddit
 		pagination = &request.Pagination
+
+		// Validate subreddit name if provided
+		if subreddit != "" {
+			if err := validateSubredditName(subreddit); err != nil {
+				return nil, err
+			}
+		}
+
+		// Validate pagination parameters
+		if err := validatePagination(pagination); err != nil {
+			return nil, err
+		}
 	}
 
 	path := sort
@@ -493,6 +516,16 @@ func (c *Client) GetComments(ctx context.Context, request *types.CommentsRequest
 	}
 	if request.Subreddit == "" || request.PostID == "" {
 		return nil, &pkgerrs.ConfigError{Message: "subreddit and postID are required"}
+	}
+
+	// Validate subreddit name
+	if err := validateSubredditName(request.Subreddit); err != nil {
+		return nil, err
+	}
+
+	// Validate pagination parameters
+	if err := validatePagination(&request.Pagination); err != nil {
+		return nil, err
 	}
 
 	path := SubPrefixURL + request.Subreddit + "/comments/" + request.PostID
@@ -644,6 +677,11 @@ func (c *Client) GetMoreComments(ctx context.Context, request *types.MoreComment
 		return []*types.Comment{}, nil
 	}
 
+	// Validate comment IDs count
+	if err := validateCommentIDs(request.CommentIDs); err != nil {
+		return nil, err
+	}
+
 	// Reddit's link_id format requires the type prefix (t3_)
 	linkID := request.LinkID
 	if !strings.HasPrefix(linkID, "t3_") {
@@ -695,6 +733,12 @@ func (c *Client) GetMoreComments(ctx context.Context, request *types.MoreComment
 		if thing.Kind == "t1" {
 			comment, err := c.parser.ParseComment(thing)
 			if err != nil {
+				// Log parse error if logger is available
+				if c.config.Logger != nil {
+					c.config.Logger.LogAttrs(ctx, slog.LevelWarn, "failed to parse comment from morechildren",
+						slog.String("error", err.Error()),
+						slog.String("kind", thing.Kind))
+				}
 				continue // Skip if we can't parse
 			}
 			comments = append(comments, comment)
@@ -739,4 +783,54 @@ func mapAPIError(err error) (*pkgerrs.APIError, bool) {
 		return apiErr, true
 	}
 	return nil, false
+}
+
+// validateSubredditName checks if a subreddit name is valid according to Reddit's naming rules.
+// Returns an error if the name is invalid.
+func validateSubredditName(name string) error {
+	if name == "" {
+		return &pkgerrs.ConfigError{Field: "subreddit", Message: "subreddit name cannot be empty"}
+	}
+	if len(name) < minSubredditLength {
+		return &pkgerrs.ConfigError{Field: "subreddit", Message: fmt.Sprintf("subreddit name must be at least %d characters", minSubredditLength)}
+	}
+	if len(name) > maxSubredditLength {
+		return &pkgerrs.ConfigError{Field: "subreddit", Message: fmt.Sprintf("subreddit name cannot exceed %d characters", maxSubredditLength)}
+	}
+	// Check for valid characters: letters, numbers, underscores only
+	for i, ch := range name {
+		if !(ch >= 'a' && ch <= 'z') && !(ch >= 'A' && ch <= 'Z') && !(ch >= '0' && ch <= '9') && ch != '_' {
+			return &pkgerrs.ConfigError{Field: "subreddit", Message: fmt.Sprintf("subreddit name contains invalid character '%c' at position %d", ch, i)}
+		}
+	}
+	return nil
+}
+
+// validatePagination checks if pagination parameters are valid.
+// Returns an error if the parameters are invalid.
+func validatePagination(pagination *types.Pagination) error {
+	if pagination == nil {
+		return nil
+	}
+	// Reddit API doesn't allow both After and Before to be set
+	if pagination.After != "" && pagination.Before != "" {
+		return &pkgerrs.ConfigError{Field: "pagination", Message: "cannot set both After and Before pagination parameters"}
+	}
+	// Validate limit range
+	if pagination.Limit < 0 {
+		return &pkgerrs.ConfigError{Field: "pagination.Limit", Message: "limit cannot be negative"}
+	}
+	if pagination.Limit > maxPaginationLimit {
+		return &pkgerrs.ConfigError{Field: "pagination.Limit", Message: fmt.Sprintf("limit cannot exceed %d", maxPaginationLimit)}
+	}
+	return nil
+}
+
+// validateCommentIDs checks if the comment IDs slice is within Reddit's API limits.
+// Returns an error if there are too many IDs.
+func validateCommentIDs(ids []string) error {
+	if len(ids) > maxCommentIDs {
+		return &pkgerrs.ConfigError{Field: "CommentIDs", Message: fmt.Sprintf("cannot request more than %d comment IDs at once (got %d)", maxCommentIDs, len(ids))}
+	}
+	return nil
 }

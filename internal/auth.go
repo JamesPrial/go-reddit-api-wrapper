@@ -145,13 +145,27 @@ func (a *Authenticator) GetToken(ctx context.Context) (string, error) {
 	}
 	defer resp.Body.Close()
 
-	bodyBytes, err := io.ReadAll(resp.Body)
+	// Limit response body size to prevent DoS attacks
+	limitedReader := io.LimitReader(resp.Body, maxResponseBodySize)
+	bodyBytes, err := io.ReadAll(limitedReader)
 	if err != nil {
 		a.logAuthError(ctx, "failed to read token response", err)
 		// Error reading the response body.
 		return "", &pkgerrs.AuthError{
 			StatusCode: resp.StatusCode,
 			Err:        fmt.Errorf("failed to read response body: %w", err),
+		}
+	}
+	// Check if we hit the size limit
+	if int64(len(bodyBytes)) == maxResponseBodySize {
+		// Try reading one more byte to see if there's more data
+		var extraByte [1]byte
+		if n, _ := resp.Body.Read(extraByte[:]); n > 0 {
+			a.logAuthError(ctx, "response body too large", fmt.Errorf("exceeded max size of %d bytes", maxResponseBodySize))
+			return "", &pkgerrs.AuthError{
+				StatusCode: resp.StatusCode,
+				Err:        fmt.Errorf("response body exceeded max size of %d bytes", maxResponseBodySize),
+			}
 		}
 	}
 
@@ -187,11 +201,20 @@ func (a *Authenticator) GetToken(ctx context.Context) (string, error) {
 
 	// Cache the token with expiry - atomic store
 	// Use 90% of the expiry time to ensure we refresh before it actually expires
-	// Minimum 10 seconds to handle edge cases with very short expiry times
+	// Minimum 10 seconds to handle edge cases, but never exceed actual token lifetime
+	actualExpiry := time.Duration(tokenResp.ExpiresIn) * time.Second
 	expiryDuration := time.Duration(float64(tokenResp.ExpiresIn) * 0.9 * float64(time.Second))
-	if expiryDuration < 10*time.Second {
-		expiryDuration = 10 * time.Second
+
+	// Set a minimum cache duration, but never exceed the token's actual expiry
+	minCacheDuration := 10 * time.Second
+	if minCacheDuration > actualExpiry {
+		// For very short-lived tokens, use the actual expiry
+		expiryDuration = actualExpiry
+	} else if expiryDuration < minCacheDuration {
+		// For tokens with reasonable expiry, use the minimum
+		expiryDuration = minCacheDuration
 	}
+
 	a.cachedToken.Store(&tokenCache{
 		token:  tokenResp.AccessToken,
 		expiry: time.Now().Add(expiryDuration),

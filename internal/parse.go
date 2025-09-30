@@ -1,18 +1,27 @@
 package internal
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 )
 
 // Parser handles parsing of Reddit API responses
-type Parser struct{}
+type Parser struct {
+	logger *slog.Logger
+}
 
-// NewParser creates a new parser instance
-func NewParser() *Parser {
-	return &Parser{}
+// NewParser creates a new parser instance with an optional logger.
+// If logger is nil, parse errors will not be logged.
+func NewParser(logger ...*slog.Logger) *Parser {
+	var log *slog.Logger
+	if len(logger) > 0 {
+		log = logger[0]
+	}
+	return &Parser{logger: log}
 }
 
 // ParseThing determines the type of a Thing and returns the appropriate typed struct.
@@ -200,6 +209,12 @@ func (p *Parser) ExtractPosts(thing *types.Thing) ([]*types.Post, error) {
 		if child.Kind == "t3" {
 			post, err := p.ParsePost(child)
 			if err != nil {
+				// Log parse error if logger is available
+				if p.logger != nil {
+					p.logger.LogAttrs(context.Background(), slog.LevelWarn, "failed to parse post",
+						slog.String("error", err.Error()),
+						slog.String("kind", child.Kind))
+				}
 				continue // Skip unparseable posts
 			}
 			posts = append(posts, post)
@@ -247,6 +262,12 @@ func (p *Parser) ExtractComments(thing *types.Thing) ([]*types.Comment, []string
 		case "t1":
 			comment, err := p.ParseComment(child)
 			if err != nil {
+				// Log parse error if logger is available
+				if p.logger != nil {
+					p.logger.LogAttrs(context.Background(), slog.LevelWarn, "failed to parse comment",
+						slog.String("error", err.Error()),
+						slog.String("kind", child.Kind))
+				}
 				continue // Skip unparseable comments
 			}
 

@@ -26,6 +26,8 @@ const (
 	maxBufferSize = 10 * 1024 * 1024 // 10MB
 	// initialBufferSize is the initial allocation size for new buffers
 	initialBufferSize = 4 * 1024 // 4KB for most API responses
+	// maxResponseBodySize limits the size of HTTP response bodies to prevent DoS
+	maxResponseBodySize = 10 * 1024 * 1024 // 10MB
 )
 
 var bodyBufferPool = sync.Pool{
@@ -202,13 +204,27 @@ func (c *Client) doRequest(req *http.Request) ([]byte, *http.Response, error) {
 	// Apply rate limit headers
 	c.applyRateHeaders(resp)
 
-	// Read body using pooled buffer
+	// Read body using pooled buffer with size limit to prevent DoS
 	buf := getBuffer()
 	defer putBuffer(buf)
 
-	if _, err := io.Copy(buf, resp.Body); err != nil {
+	// Limit response body size
+	limitedReader := io.LimitReader(resp.Body, maxResponseBodySize)
+	bytesRead, err := io.Copy(buf, limitedReader)
+	if err != nil {
 		c.logBodyReadError(ctx, req, resp, time.Since(start), err)
 		return nil, resp, &pkgerrs.ClientError{Err: err}
+	}
+
+	// Check if we hit the size limit
+	if bytesRead == maxResponseBodySize {
+		// Try reading one more byte to see if there's more data
+		var extraByte [1]byte
+		if n, _ := resp.Body.Read(extraByte[:]); n > 0 {
+			err := fmt.Errorf("response body exceeded max size of %d bytes", maxResponseBodySize)
+			c.logBodyReadError(ctx, req, resp, time.Since(start), err)
+			return nil, resp, &pkgerrs.ClientError{Err: err}
+		}
 	}
 
 	// Copy buffer contents to returned byte slice
