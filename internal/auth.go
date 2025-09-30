@@ -165,7 +165,11 @@ func (a *Authenticator) GetToken(ctx context.Context) (string, error) {
 
 	// Cache the token with expiry - atomic store
 	// Use 90% of the expiry time to ensure we refresh before it actually expires
+	// Minimum 10 seconds to handle edge cases with very short expiry times
 	expiryDuration := time.Duration(float64(tokenResp.ExpiresIn) * 0.9 * float64(time.Second))
+	if expiryDuration < 10*time.Second {
+		expiryDuration = 10 * time.Second
+	}
 	a.cachedToken.Store(&tokenCache{
 		token:  tokenResp.AccessToken,
 		expiry: time.Now().Add(expiryDuration),

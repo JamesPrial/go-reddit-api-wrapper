@@ -266,7 +266,11 @@ func NewClientWithContext(ctx context.Context, config *Config) (*Client, error) 
 		config.Logger,
 	)
 	if err != nil {
-		return nil, &pkgerrs.RequestError{Operation: "create HTTP client", Err: err}
+		return nil, &pkgerrs.RequestError{
+			Message:   "failed to create HTTP client",
+			Operation: "create HTTP client",
+			Err:       err,
+		}
 	}
 
 	return &Client{
@@ -588,7 +592,7 @@ func (c *Client) GetCommentsMultiple(ctx context.Context, requests []*types.Comm
 				firstError = ctx.Err()
 			}
 			// Drain remaining results to prevent goroutine leaks
-			for j := i; j < len(requests); j++ {
+			for range len(requests) - i {
 				<-resultChan
 			}
 			return results, firstError
