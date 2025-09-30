@@ -286,7 +286,7 @@ func (c *Client) DoThingArray(req *http.Request) ([]*types.Thing, error) {
 				Message string `json:"message"`
 			}
 			if err := json.Unmarshal(bodyBytes, &errObj); err == nil && errObj.Error != "" {
-				return nil, &pkgerrs.APIError{StatusCode: resp.StatusCode, Message: fmt.Sprintf("API error [%s]: %s", errObj.Error, errObj.Message)}
+				return nil, &pkgerrs.APIError{StatusCode: resp.StatusCode, ErrorCode: errObj.Error, Message: errObj.Message}
 			}
 			return nil, &pkgerrs.ClientError{Err: fmt.Errorf("failed to parse response: %w", err)}
 		}
