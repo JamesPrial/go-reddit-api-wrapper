@@ -75,13 +75,14 @@ func newTestClient(httpClient HTTPClient, auth TokenProvider) *Client {
 		auth = &mockTokenProvider{token: "test_token"}
 	}
 	return &Client{
-		client: httpClient,
-		auth:   auth,
-		config: &Config{
+		client:    httpClient,
+		auth:      auth,
+		config:    &Config{
 			UserAgent: "test/1.0",
 			BaseURL:   "https://oauth.reddit.com/",
 		},
-		parser: internal.NewParser(),
+		parser:    internal.NewParser(),
+		validator: internal.NewValidator(),
 	}
 }
 

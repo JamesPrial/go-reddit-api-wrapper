@@ -62,12 +62,6 @@ const (
 	// MaximumTimeoutWarningThreshold is the threshold above which we warn about long timeouts
 	MaximumTimeoutWarningThreshold = 5 * time.Minute
 
-	// Reddit API limits
-	maxPaginationLimit = 100
-	maxCommentIDs      = 100
-	minSubredditLength = 3
-	maxSubredditLength = 21
-
 	// Concurrency limits
 	// MaxConcurrentCommentRequests limits parallel goroutines in GetCommentsMultiple
 	MaxConcurrentCommentRequests = 10
@@ -191,6 +185,22 @@ type HTTPClient interface {
 	DoMoreChildren(req *http.Request) ([]*types.Thing, error)
 }
 
+// Validator defines validation operations for Reddit API parameters.
+// This interface allows for consistent validation across all API operations.
+type Validator interface {
+	// ValidateSubredditName checks if a subreddit name is valid according to Reddit's naming rules.
+	ValidateSubredditName(name string) error
+
+	// ValidatePagination checks if pagination parameters are valid.
+	ValidatePagination(pagination *types.Pagination) error
+
+	// ValidateCommentIDs checks if comment IDs are valid and within Reddit's API limits.
+	ValidateCommentIDs(ids []string) error
+
+	// ValidateUserAgent validates the User-Agent string to prevent header injection attacks.
+	ValidateUserAgent(ua string) error
+}
+
 // Client is the main Reddit API client.
 // It provides methods for common Reddit operations like fetching posts, comments,
 // and subreddit information. The client is ready to use immediately after creation.
@@ -205,10 +215,11 @@ type HTTPClient interface {
 //	// The client is ready to make API calls
 //	posts, err := client.GetHot(ctx, &types.PostsRequest{Subreddit: "golang", Limit: 25})
 type Client struct {
-	client HTTPClient
-	auth   TokenProvider
-	config *Config
-	parser *internal.Parser
+	client    HTTPClient
+	auth      TokenProvider
+	config    *Config
+	parser    *internal.Parser
+	validator Validator
 }
 
 // NewClient creates a new Reddit client with the provided configuration.
@@ -251,7 +262,8 @@ func NewClientWithContext(ctx context.Context, config *Config) (*Client, error) 
 	}
 
 	// Validate UserAgent to prevent header injection attacks
-	if err := validateUserAgent(config.UserAgent); err != nil {
+	validator := internal.NewValidator()
+	if err := validator.ValidateUserAgent(config.UserAgent); err != nil {
 		return nil, &pkgerrs.ConfigError{
 			Field:   "UserAgent",
 			Message: fmt.Sprintf("invalid user agent: %v", err),
@@ -349,10 +361,11 @@ func NewClientWithContext(ctx context.Context, config *Config) (*Client, error) 
 	}
 
 	return &Client{
-		client: httpClient,
-		auth:   auth,
-		config: config,
-		parser: internal.NewParser(config.Logger),
+		client:    httpClient,
+		auth:      auth,
+		config:    config,
+		parser:    internal.NewParser(config.Logger),
+		validator: internal.NewValidator(),
 	}, nil
 }
 
@@ -418,7 +431,7 @@ func (c *Client) Me(ctx context.Context) (*types.AccountData, error) {
 // This method works with both application-only and user authentication.
 func (c *Client) GetSubreddit(ctx context.Context, name string) (*types.SubredditData, error) {
 	// Validate subreddit name
-	if err := validateSubredditName(name); err != nil {
+	if err := c.validator.ValidateSubredditName(name); err != nil {
 		return nil, err
 	}
 
@@ -494,13 +507,13 @@ func (c *Client) getPosts(ctx context.Context, request *types.PostsRequest, sort
 
 		// Validate subreddit name if provided
 		if subreddit != "" {
-			if err := validateSubredditName(subreddit); err != nil {
+			if err := c.validator.ValidateSubredditName(subreddit); err != nil {
 				return nil, err
 			}
 		}
 
 		// Validate pagination parameters
-		if err := validatePagination(pagination); err != nil {
+		if err := c.validator.ValidatePagination(pagination); err != nil {
 			return nil, err
 		}
 	}
@@ -579,12 +592,12 @@ func (c *Client) GetComments(ctx context.Context, request *types.CommentsRequest
 	}
 
 	// Validate subreddit name
-	if err := validateSubredditName(request.Subreddit); err != nil {
+	if err := c.validator.ValidateSubredditName(request.Subreddit); err != nil {
 		return nil, err
 	}
 
 	// Validate pagination parameters
-	if err := validatePagination(&request.Pagination); err != nil {
+	if err := c.validator.ValidatePagination(&request.Pagination); err != nil {
 		return nil, err
 	}
 
@@ -771,7 +784,7 @@ func (c *Client) GetMoreComments(ctx context.Context, request *types.MoreComment
 	}
 
 	// Validate comment IDs count
-	if err := validateCommentIDs(request.CommentIDs); err != nil {
+	if err := c.validator.ValidateCommentIDs(request.CommentIDs); err != nil {
 		return nil, err
 	}
 
@@ -908,125 +921,4 @@ func wrapDoError(err error, operation, url string) error {
 		return apiErr
 	}
 	return &pkgerrs.RequestError{Operation: operation, URL: url, Err: err}
-}
-
-// validateSubredditName checks if a subreddit name is valid according to Reddit's naming rules.
-// Returns an error if the name is invalid.
-func validateSubredditName(name string) error {
-	if name == "" {
-		return &pkgerrs.ConfigError{Field: "subreddit", Message: "subreddit name cannot be empty"}
-	}
-	if len(name) < minSubredditLength {
-		return &pkgerrs.ConfigError{Field: "subreddit", Message: fmt.Sprintf("subreddit name must be at least %d characters", minSubredditLength)}
-	}
-	if len(name) > maxSubredditLength {
-		return &pkgerrs.ConfigError{Field: "subreddit", Message: fmt.Sprintf("subreddit name cannot exceed %d characters", maxSubredditLength)}
-	}
-	// Check for Reddit naming constraints
-	firstChar := rune(name[0])
-	if firstChar == '_' || rune(name[len(name)-1]) == '_' {
-		return &pkgerrs.ConfigError{Field: "subreddit", Message: "subreddit name cannot start or end with underscore"}
-	}
-	// Check for valid characters: letters, numbers, underscores only
-	prevWasUnderscore := false
-	for i, ch := range name {
-		if !(ch >= 'a' && ch <= 'z') && !(ch >= 'A' && ch <= 'Z') && !(ch >= '0' && ch <= '9') && ch != '_' {
-			return &pkgerrs.ConfigError{Field: "subreddit", Message: fmt.Sprintf("subreddit name contains invalid character '%c' at position %d", ch, i)}
-		}
-		if ch == '_' {
-			if prevWasUnderscore {
-				return &pkgerrs.ConfigError{Field: "subreddit", Message: "subreddit name cannot contain consecutive underscores"}
-			}
-			prevWasUnderscore = true
-		} else {
-			prevWasUnderscore = false
-		}
-	}
-	return nil
-}
-
-// validatePagination checks if pagination parameters are valid.
-// Returns an error if the parameters are invalid.
-func validatePagination(pagination *types.Pagination) error {
-	if pagination == nil {
-		return nil
-	}
-	// Reddit API doesn't allow both After and Before to be set
-	if pagination.After != "" && pagination.Before != "" {
-		return &pkgerrs.ConfigError{Field: "pagination", Message: "cannot set both After and Before pagination parameters"}
-	}
-	// Validate limit range
-	if pagination.Limit < 0 {
-		return &pkgerrs.ConfigError{Field: "pagination.Limit", Message: "limit cannot be negative"}
-	}
-	if pagination.Limit > maxPaginationLimit {
-		return &pkgerrs.ConfigError{Field: "pagination.Limit", Message: fmt.Sprintf("limit cannot exceed %d", maxPaginationLimit)}
-	}
-	return nil
-}
-
-// validateCommentIDs checks if the comment IDs slice is within Reddit's API limits.
-// Returns an error if there are too many IDs.
-func validateCommentIDs(ids []string) error {
-	if len(ids) > maxCommentIDs {
-		return &pkgerrs.ConfigError{Field: "CommentIDs", Message: fmt.Sprintf("cannot request more than %d comment IDs at once (got %d)", maxCommentIDs, len(ids))}
-	}
-
-	// Validate each comment ID content
-	for i, id := range ids {
-		if err := validateCommentID(id); err != nil {
-			return &pkgerrs.ConfigError{
-				Field:   fmt.Sprintf("CommentIDs[%d]", i),
-				Message: fmt.Sprintf("invalid comment ID at index %d: %v", i, err),
-			}
-		}
-	}
-
-	return nil
-}
-
-// validateCommentID validates the format and content of a single comment ID
-func validateCommentID(id string) error {
-	if len(id) == 0 {
-		return fmt.Errorf("comment ID cannot be empty")
-	}
-
-	// Reddit comment IDs have a reasonable maximum length (typically 6-10 characters)
-	const maxCommentIDLength = 100
-	if len(id) > maxCommentIDLength {
-		return fmt.Errorf("comment ID too long (max %d characters)", maxCommentIDLength)
-	}
-
-	// Reddit comment IDs are alphanumeric base36 strings
-	// They should only contain: 0-9, a-z, A-Z
-	for _, char := range id {
-		if !((char >= '0' && char <= '9') ||
-			(char >= 'a' && char <= 'z') ||
-			(char >= 'A' && char <= 'Z')) {
-			return fmt.Errorf("comment ID contains invalid character: %c (only alphanumeric allowed)", char)
-		}
-	}
-
-	return nil
-}
-
-// validateUserAgent validates the User-Agent string to prevent header injection attacks
-func validateUserAgent(ua string) error {
-	// Check for newline characters that could be used for header injection
-	if strings.ContainsAny(ua, "\r\n") {
-		return fmt.Errorf("user agent cannot contain newline characters")
-	}
-
-	// User-Agent should have a reasonable maximum length
-	const maxUserAgentLength = 256
-	if len(ua) > maxUserAgentLength {
-		return fmt.Errorf("user agent too long (max %d characters)", maxUserAgentLength)
-	}
-
-	// User-Agent cannot be empty (should have been set to default before this check)
-	if len(ua) == 0 {
-		return fmt.Errorf("user agent cannot be empty")
-	}
-
-	return nil
 }

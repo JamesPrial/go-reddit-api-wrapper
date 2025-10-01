@@ -7,6 +7,7 @@ import (
 
 	graw "github.com/jamesprial/go-reddit-api-wrapper"
 	"github.com/jamesprial/go-reddit-api-wrapper/adversarial_tests/helpers"
+	"github.com/jamesprial/go-reddit-api-wrapper/internal"
 	pkgerrs "github.com/jamesprial/go-reddit-api-wrapper/pkg/errors"
 )
 
@@ -290,46 +291,15 @@ func TestEmptyAndBoundaryValues(t *testing.T) {
 
 // isValidSubredditName checks if a subreddit name would pass validation
 func isValidSubredditName(name string) bool {
-	// Replicate the validation logic from validateSubredditName
-	if len(name) < 3 || len(name) > 21 {
-		return false
-	}
-
-	if strings.HasPrefix(name, "_") || strings.HasSuffix(name, "_") {
-		return false
-	}
-
-	if strings.Contains(name, "__") {
-		return false
-	}
-
-	for _, char := range name {
-		if !((char >= '0' && char <= '9') ||
-			(char >= 'a' && char <= 'z') ||
-			(char >= 'A' && char <= 'Z') ||
-			char == '_') {
-			return false
-		}
-	}
-
-	return true
+	validator := internal.NewValidator()
+	return validator.ValidateSubredditName(name) == nil
 }
 
 // isValidCommentID checks if a comment ID would pass validation
 func isValidCommentID(id string) bool {
-	if len(id) == 0 || len(id) > 100 {
-		return false
-	}
-
-	for _, char := range id {
-		if !((char >= '0' && char <= '9') ||
-			(char >= 'a' && char <= 'z') ||
-			(char >= 'A' && char <= 'Z')) {
-			return false
-		}
-	}
-
-	return true
+	validator := internal.NewValidator()
+	ids := []string{id}
+	return validator.ValidateCommentIDs(ids) == nil
 }
 
 // isConfigError checks if an error is a ConfigError
