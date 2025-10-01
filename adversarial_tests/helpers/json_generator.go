@@ -469,3 +469,89 @@ func (g *JSONGenerator) PrettyPrint(jsonStr string) (string, error) {
 	}
 	return string(pretty), nil
 }
+
+// GenerateMalformedTokenResponses creates various malformed OAuth token responses
+func (g *JSONGenerator) GenerateMalformedTokenResponses() []string {
+	return []string{
+		// Missing required fields
+		`{}`,
+		`{"access_token": ""}`,
+		`{"expires_in": 3600}`,
+		`{"token_type": "bearer"}`,
+
+		// Invalid expiry values
+		`{"access_token": "valid_token", "expires_in": -1}`,
+		`{"access_token": "valid_token", "expires_in": 0}`,
+		`{"access_token": "valid_token", "expires_in": -999999}`,
+		`{"access_token": "valid_token", "expires_in": 999999999999}`, // Over 1 year
+
+		// Invalid types
+		`{"access_token": "valid_token", "expires_in": "not_a_number"}`,
+		`{"access_token": "valid_token", "expires_in": null}`,
+		`{"access_token": "valid_token", "expires_in": []}`,
+		`{"access_token": "valid_token", "expires_in": {}}`,
+		`{"access_token": 123, "expires_in": 3600}`,
+		`{"access_token": null, "expires_in": 3600}`,
+		`{"access_token": [], "expires_in": 3600}`,
+
+		// Malformed JSON
+		`{"access_token": "valid_token", "expires_in": 3600`,
+		`{access_token: "valid_token", "expires_in": 3600}`,
+		`{"access_token": "valid_token", "expires_in": 3600,}`,
+
+		// Very large token values
+		`{"access_token": "` + strings.Repeat("A", 10000) + `", "expires_in": 3600}`,
+
+		// Special characters in token
+		`{"access_token": "token\nwith\nnewlines", "expires_in": 3600}`,
+		`{"access_token": "token\x00with\x00nulls", "expires_in": 3600}`,
+		`{"access_token": "token'with'quotes", "expires_in": 3600}`,
+
+		// Error responses
+		`{"error": "invalid_grant"}`,
+		`{"error": "invalid_client", "error_description": "Client authentication failed"}`,
+
+		// Unexpected extra fields
+		`{"access_token": "valid_token", "expires_in": 3600, "extra_field": "unexpected"}`,
+	}
+}
+
+// GenerateOversizedTokenResponse creates an extremely large token response (15MB+)
+func (g *JSONGenerator) GenerateOversizedTokenResponse() string {
+	// Create a 15MB token
+	largeToken := strings.Repeat("A", 15*1024*1024)
+	return fmt.Sprintf(`{"access_token": "%s", "expires_in": 3600}`, largeToken)
+}
+
+// GenerateTokenResponseWithInvalidExpiry creates token responses with specific invalid expiry values
+func (g *JSONGenerator) GenerateTokenResponseWithInvalidExpiry() []struct {
+	Name     string
+	Response string
+} {
+	return []struct {
+		Name     string
+		Response string
+	}{
+		{"negative", `{"access_token": "valid_token", "expires_in": -1}`},
+		{"zero", `{"access_token": "valid_token", "expires_in": 0}`},
+		{"max_int", `{"access_token": "valid_token", "expires_in": 2147483647}`},
+		{"over_one_year", `{"access_token": "valid_token", "expires_in": 31536001}`},
+		{"huge_value", `{"access_token": "valid_token", "expires_in": 999999999999}`},
+		{"string", `{"access_token": "valid_token", "expires_in": "3600"}`},
+		{"float", `{"access_token": "valid_token", "expires_in": 3600.5}`},
+		{"nan", `{"access_token": "valid_token", "expires_in": NaN}`},
+		{"infinity", `{"access_token": "valid_token", "expires_in": Infinity}`},
+	}
+}
+
+// GenerateRaceConditionTokens creates multiple token responses for race condition testing
+func (g *JSONGenerator) GenerateRaceConditionTokens(count int) []string {
+	tokens := make([]string, count)
+	for i := 0; i < count; i++ {
+		// Each token has a unique value and expiry
+		token := fmt.Sprintf("token_%d", i)
+		expiry := 3600 + i
+		tokens[i] = fmt.Sprintf(`{"access_token": "%s", "expires_in": %d}`, token, expiry)
+	}
+	return tokens
+}

@@ -73,6 +73,25 @@ const (
 	MaxConcurrentCommentRequests = 10
 )
 
+// RateLimitConfig configures the client's local rate limiting behavior.
+// This is separate from Reddit's server-side rate limiting, which is always enforced.
+// The local rate limiter helps prevent hitting Reddit's limits and ensures smooth operation.
+type RateLimitConfig struct {
+	// RequestsPerMinute caps steady-state throughput.
+	// Defaults to 100 if zero or negative.
+	// Set to a very high value (e.g., 100000) to effectively disable local rate limiting.
+	RequestsPerMinute float64
+
+	// Burst allows short spikes above the steady-state rate.
+	// Defaults to 10 if zero or negative.
+	Burst int
+
+	// ProactiveThreshold is the number of remaining Reddit API requests at which to start throttling.
+	// When Reddit's remaining request count drops below this value, the client will slow down proactively.
+	// Defaults to 10 if zero or negative.
+	ProactiveThreshold float64
+}
+
 // Config holds the configuration for the Reddit client.
 // It provides all necessary authentication credentials and optional customization settings.
 //
@@ -135,6 +154,11 @@ type Config struct {
 	// Logger for structured diagnostics.
 	// Optional. If provided, debug information will be logged during API calls.
 	Logger *slog.Logger
+
+	// RateLimitConfig for customizing local rate limiting behavior.
+	// Optional. If not specified, defaults to 100 requests/minute with burst of 10.
+	// Set RequestsPerMinute to a very high value (e.g., 100000) to effectively disable rate limiting for tests.
+	RateLimitConfig *RateLimitConfig
 }
 
 // TokenProvider defines the interface for retrieving an access token.
@@ -293,12 +317,29 @@ func NewClientWithContext(ctx context.Context, config *Config) (*Client, error) 
 	}
 
 	// Create internal HTTP client
-	httpClient, err := internal.NewClient(
-		config.HTTPClient,
-		config.BaseURL,
-		config.UserAgent,
-		config.Logger,
-	)
+	var httpClient HTTPClient
+	if config.RateLimitConfig != nil {
+		// Convert public config to internal config
+		internalRateLimitCfg := internal.RateLimitConfig{
+			RequestsPerMinute:  config.RateLimitConfig.RequestsPerMinute,
+			Burst:              config.RateLimitConfig.Burst,
+			ProactiveThreshold: config.RateLimitConfig.ProactiveThreshold,
+		}
+		httpClient, err = internal.NewClientWithRateLimit(
+			config.HTTPClient,
+			config.BaseURL,
+			config.UserAgent,
+			config.Logger,
+			internalRateLimitCfg,
+		)
+	} else {
+		httpClient, err = internal.NewClient(
+			config.HTTPClient,
+			config.BaseURL,
+			config.UserAgent,
+			config.Logger,
+		)
+	}
 	if err != nil {
 		return nil, &pkgerrs.RequestError{
 			Message:   "failed to create HTTP client",

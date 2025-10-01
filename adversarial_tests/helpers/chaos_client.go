@@ -52,6 +52,18 @@ const (
 
 	// ChaosIntermittent randomly applies different chaos modes
 	ChaosIntermittent
+
+	// ChaosOversizedToken simulates extremely large token responses (15MB+)
+	ChaosOversizedToken
+
+	// ChaosMaliciousRateHeaders simulates malicious rate limit headers (NaN, Inf, etc.)
+	ChaosMaliciousRateHeaders
+
+	// ChaosTokenExpiry simulates invalid token expiry values
+	ChaosTokenExpiry
+
+	// ChaosMultipleAuthErrors simulates repeated authentication failures
+	ChaosMultipleAuthErrors
 )
 
 // ChaosConfig configures the chaos client behavior
@@ -253,6 +265,85 @@ func (c *ChaosClient) Do(req *http.Request) (*http.Response, error) {
 			ProtoMinor:    1,
 			Body:          io.NopCloser(strings.NewReader(invalidJSON)),
 			ContentLength: int64(len(invalidJSON)),
+			Request:       req,
+			Header:        make(http.Header),
+		}, nil
+
+	case ChaosOversizedToken:
+		// Generate a 15MB token response
+		largeToken := strings.Repeat("A", 15*1024*1024)
+		tokenJSON := fmt.Sprintf(`{"access_token": "%s", "expires_in": 3600}`, largeToken)
+		return &http.Response{
+			Status:        "200 OK",
+			StatusCode:    200,
+			Proto:         "HTTP/1.1",
+			ProtoMajor:    1,
+			ProtoMinor:    1,
+			Body:          io.NopCloser(strings.NewReader(tokenJSON)),
+			ContentLength: int64(len(tokenJSON)),
+			Request:       req,
+			Header:        make(http.Header),
+		}, nil
+
+	case ChaosMaliciousRateHeaders:
+		// Return response with malicious rate limit headers
+		header := make(http.Header)
+		// Randomly pick a malicious header combination
+		maliciousHeaders := []map[string]string{
+			{"X-Ratelimit-Remaining": "NaN", "X-Ratelimit-Reset": "60"},
+			{"X-Ratelimit-Remaining": "Inf", "X-Ratelimit-Reset": "60"},
+			{"X-Ratelimit-Remaining": "-999", "X-Ratelimit-Reset": "60"},
+			{"X-Ratelimit-Remaining": "50", "X-Ratelimit-Reset": "NaN"},
+			{"X-Ratelimit-Remaining": "50", "X-Ratelimit-Reset": "-60"},
+		}
+		chosen := maliciousHeaders[c.rnd.Intn(len(maliciousHeaders))]
+		for k, v := range chosen {
+			header.Set(k, v)
+		}
+
+		return &http.Response{
+			Status:        "200 OK",
+			StatusCode:    200,
+			Proto:         "HTTP/1.1",
+			ProtoMajor:    1,
+			ProtoMinor:    1,
+			Body:          io.NopCloser(strings.NewReader(`{"kind":"t2","data":{"name":"test"}}`)),
+			ContentLength: 40,
+			Request:       req,
+			Header:        header,
+		}, nil
+
+	case ChaosTokenExpiry:
+		// Return token with invalid expiry values
+		invalidExpiries := []string{
+			`{"access_token": "valid_token", "expires_in": -1}`,
+			`{"access_token": "valid_token", "expires_in": 999999999999}`,
+			`{"access_token": "valid_token", "expires_in": "not_a_number"}`,
+			`{"access_token": "valid_token"}`, // missing expires_in
+		}
+		chosen := invalidExpiries[c.rnd.Intn(len(invalidExpiries))]
+		return &http.Response{
+			Status:        "200 OK",
+			StatusCode:    200,
+			Proto:         "HTTP/1.1",
+			ProtoMajor:    1,
+			ProtoMinor:    1,
+			Body:          io.NopCloser(strings.NewReader(chosen)),
+			ContentLength: int64(len(chosen)),
+			Request:       req,
+			Header:        make(http.Header),
+		}, nil
+
+	case ChaosMultipleAuthErrors:
+		// Simulate repeated 401 errors
+		return &http.Response{
+			Status:        "401 Unauthorized",
+			StatusCode:    401,
+			Proto:         "HTTP/1.1",
+			ProtoMajor:    1,
+			ProtoMinor:    1,
+			Body:          io.NopCloser(strings.NewReader(`{"error": "invalid_grant"}`)),
+			ContentLength: 30,
 			Request:       req,
 			Header:        make(http.Header),
 		}, nil
