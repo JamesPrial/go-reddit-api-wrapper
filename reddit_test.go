@@ -5,12 +5,15 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/jamesprial/go-reddit-api-wrapper/internal"
 	pkgerrs "github.com/jamesprial/go-reddit-api-wrapper/pkg/errors"
@@ -75,9 +78,9 @@ func newTestClient(httpClient HTTPClient, auth TokenProvider) *Client {
 		auth = &mockTokenProvider{token: "test_token"}
 	}
 	return &Client{
-		client:    httpClient,
-		auth:      auth,
-		config:    &Config{
+		client: httpClient,
+		auth:   auth,
+		config: &Config{
 			UserAgent: "test/1.0",
 			BaseURL:   "https://oauth.reddit.com/",
 		},
@@ -147,6 +150,227 @@ func TestNewClient(t *testing.T) {
 				t.Error("expected client but got nil")
 			}
 		})
+	}
+}
+
+func TestNewClient_InvalidUserAgent(t *testing.T) {
+	t.Parallel()
+
+	config := &Config{
+		ClientID:     "id",
+		ClientSecret: "secret",
+		UserAgent:    "bad\nagent",
+	}
+
+	_, err := NewClientWithContext(context.Background(), config)
+	if err == nil {
+		t.Fatal("expected error but got none")
+	}
+	var configErr *pkgerrs.ConfigError
+	if !errors.As(err, &configErr) {
+		t.Fatalf("expected ConfigError, got %T", err)
+	}
+	if !strings.Contains(configErr.Message, "invalid user agent") {
+		t.Fatalf("expected invalid user agent message, got %s", configErr.Message)
+	}
+}
+
+func TestNewClient_HTTPClientTimeoutHandling(t *testing.T) {
+	t.Parallel()
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	t.Run("timeout zero sanitized", func(t *testing.T) {
+		t.Parallel()
+
+		tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/api/v1/access_token" {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"access_token":"stub","token_type":"bearer","expires_in":3600}`))
+		}))
+		t.Cleanup(tokenServer.Close)
+
+		httpClient := tokenServer.Client()
+		httpClient.Timeout = 0
+
+		config := &Config{
+			ClientID:     "id",
+			ClientSecret: "secret",
+			UserAgent:    "tester",
+			AuthURL:      tokenServer.URL + "/",
+			BaseURL:      tokenServer.URL + "/",
+			HTTPClient:   httpClient,
+			Logger:       logger,
+		}
+
+		client, err := NewClientWithContext(context.Background(), config)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if client == nil {
+			t.Fatal("expected client instance")
+		}
+		if got := config.HTTPClient.Timeout; got != DefaultTimeout {
+			t.Fatalf("expected timeout to be set to default (%v), got %v", DefaultTimeout, got)
+		}
+		if original := httpClient.Timeout; original != 0 {
+			t.Fatalf("expected original client timeout to remain 0, got %v", original)
+		}
+	})
+
+	t.Run("timeout too short rejected", func(t *testing.T) {
+		t.Parallel()
+
+		config := &Config{
+			ClientID:     "id",
+			ClientSecret: "secret",
+			UserAgent:    "tester",
+			HTTPClient:   &http.Client{Timeout: 500 * time.Millisecond},
+		}
+
+		_, err := NewClientWithContext(context.Background(), config)
+		if err == nil {
+			t.Fatal("expected error but got none")
+		}
+		var configErr *pkgerrs.ConfigError
+		if !errors.As(err, &configErr) {
+			t.Fatalf("expected ConfigError, got %T", err)
+		}
+		if !strings.Contains(configErr.Message, "timeout too short") {
+			t.Fatalf("expected timeout too short message, got %s", configErr.Message)
+		}
+	})
+
+	t.Run("timeout too long warns", func(t *testing.T) {
+		t.Parallel()
+
+		tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/api/v1/access_token" {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"access_token":"stub","token_type":"bearer","expires_in":3600}`))
+		}))
+		t.Cleanup(tokenServer.Close)
+
+		httpClient := tokenServer.Client()
+		httpClient.Timeout = 10 * time.Minute
+
+		config := &Config{
+			ClientID:     "id",
+			ClientSecret: "secret",
+			UserAgent:    "tester",
+			AuthURL:      tokenServer.URL + "/",
+			BaseURL:      tokenServer.URL + "/",
+			HTTPClient:   httpClient,
+			Logger:       logger,
+		}
+
+		client, err := NewClientWithContext(context.Background(), config)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if client == nil {
+			t.Fatal("expected client instance")
+		}
+		if got := config.HTTPClient.Timeout; got != httpClient.Timeout {
+			t.Fatalf("expected timeout to remain %v, got %v", httpClient.Timeout, got)
+		}
+	})
+}
+
+func TestNewClientWithContext_InvalidAuthURL(t *testing.T) {
+	t.Parallel()
+
+	config := &Config{
+		ClientID:     "id",
+		ClientSecret: "secret",
+		UserAgent:    "tester",
+		AuthURL:      "::://bad",
+	}
+
+	_, err := NewClientWithContext(context.Background(), config)
+	if err == nil {
+		t.Fatal("expected error but got none")
+	}
+	var authErr *pkgerrs.AuthError
+	if !errors.As(err, &authErr) {
+		t.Fatalf("expected AuthError, got %T", err)
+	}
+}
+
+func TestNewClientWithContext_AuthenticationFailure(t *testing.T) {
+	t.Parallel()
+
+	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/access_token" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"message":"error"}`))
+	}))
+	t.Cleanup(tokenServer.Close)
+
+	config := &Config{
+		ClientID:     "id",
+		ClientSecret: "secret",
+		UserAgent:    "tester",
+		AuthURL:      tokenServer.URL + "/",
+		BaseURL:      tokenServer.URL + "/",
+		HTTPClient:   tokenServer.Client(),
+	}
+
+	_, err := NewClientWithContext(context.Background(), config)
+	if err == nil {
+		t.Fatal("expected error but got none")
+	}
+	var authErr *pkgerrs.AuthError
+	if !errors.As(err, &authErr) {
+		t.Fatalf("expected AuthError, got %T", err)
+	}
+	if !strings.Contains(authErr.Error(), "failed to authenticate") {
+		t.Fatalf("expected authenticate failure message, got %v", authErr)
+	}
+}
+
+func TestNewClientWithContext_RateLimitConfig(t *testing.T) {
+	t.Parallel()
+
+	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/access_token" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"stub","token_type":"bearer","expires_in":3600}`))
+	}))
+	t.Cleanup(tokenServer.Close)
+
+	config := &Config{
+		ClientID:     "id",
+		ClientSecret: "secret",
+		UserAgent:    "tester",
+		AuthURL:      tokenServer.URL + "/",
+		BaseURL:      tokenServer.URL + "/",
+		HTTPClient:   tokenServer.Client(),
+		RateLimitConfig: &RateLimitConfig{
+			RequestsPerMinute:  120,
+			Burst:              15,
+			ProactiveThreshold: 8,
+		},
+	}
+
+	client, err := NewClientWithContext(context.Background(), config)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if client == nil {
+		t.Fatal("expected client instance")
 	}
 }
 
@@ -264,6 +488,7 @@ func TestClient_GetSubreddit(t *testing.T) {
 		setupMock func() HTTPClient
 		wantError bool
 		checkPath bool
+		errorType string
 	}{
 		{
 			name:      "successful request",
@@ -295,6 +520,46 @@ func TestClient_GetSubreddit(t *testing.T) {
 			},
 			wantError: true,
 		},
+		{
+			name:      "invalid subreddit name",
+			subreddit: "ab",
+			setupMock: func() HTTPClient {
+				return &mockHTTPClient{}
+			},
+			wantError: true,
+			errorType: "ConfigError",
+		},
+		{
+			name:      "request creation error",
+			subreddit: "golang",
+			setupMock: func() HTTPClient {
+				return &mockHTTPClient{
+					newRequestFunc: func(ctx context.Context, method, path string, body io.Reader, params ...url.Values) (*http.Request, error) {
+						return nil, errors.New("failed to create request")
+					},
+				}
+			},
+			wantError: true,
+			errorType: "RequestError",
+		},
+		{
+			name:      "unexpected response type",
+			subreddit: "golang",
+			setupMock: func() HTTPClient {
+				return &mockHTTPClient{
+					doFunc: func(req *http.Request, v *types.Thing) error {
+						listingData := `{"children":[]}`
+						*v = types.Thing{
+							Kind: "Listing",
+							Data: json.RawMessage(listingData),
+						}
+						return nil
+					},
+				}
+			},
+			wantError: true,
+			errorType: "ParseError",
+		},
 	}
 
 	for _, tt := range tests {
@@ -318,6 +583,22 @@ func TestClient_GetSubreddit(t *testing.T) {
 			if tt.wantError {
 				if err == nil {
 					t.Error("expected error but got none")
+				}
+				if tt.errorType != "" {
+					switch tt.errorType {
+					case "ConfigError":
+						if _, ok := err.(*pkgerrs.ConfigError); !ok {
+							t.Errorf("expected ConfigError, got %T", err)
+						}
+					case "RequestError":
+						if _, ok := err.(*pkgerrs.RequestError); !ok {
+							t.Errorf("expected RequestError, got %T", err)
+						}
+					case "ParseError":
+						if _, ok := err.(*pkgerrs.ParseError); !ok {
+							t.Errorf("expected ParseError, got %T", err)
+						}
+					}
 				}
 			} else {
 				if err != nil {
@@ -462,6 +743,92 @@ func TestClient_GetHot(t *testing.T) {
 	}
 }
 
+func TestClient_getPostsErrors(t *testing.T) {
+	tests := []struct {
+		name        string
+		request     *types.PostsRequest
+		httpClient  HTTPClient
+		auth        TokenProvider
+		wantErrType string
+	}{
+		{
+			name: "invalid subreddit",
+			request: &types.PostsRequest{
+				Subreddit: "ab",
+			},
+			httpClient:  &mockHTTPClient{},
+			wantErrType: "ConfigError",
+		},
+		{
+			name: "invalid pagination",
+			request: &types.PostsRequest{
+				Subreddit:  "golang",
+				Pagination: types.Pagination{After: "t3_a", Before: "t3_b"},
+			},
+			httpClient:  &mockHTTPClient{},
+			wantErrType: "ConfigError",
+		},
+		{
+			name:    "request creation error",
+			request: &types.PostsRequest{},
+			httpClient: &mockHTTPClient{
+				newRequestFunc: func(ctx context.Context, method, path string, body io.Reader, params ...url.Values) (*http.Request, error) {
+					return nil, errors.New("boom")
+				},
+			},
+			wantErrType: "RequestError",
+		},
+		{
+			name:        "auth token error",
+			request:     nil,
+			httpClient:  &mockHTTPClient{},
+			auth:        &mockTokenProvider{err: errors.New("token failure")},
+			wantErrType: "AuthError",
+		},
+		{
+			name:    "parse error",
+			request: nil,
+			httpClient: &mockHTTPClient{
+				doFunc: func(req *http.Request, v *types.Thing) error {
+					*v = types.Thing{Kind: "t3"}
+					return nil
+				},
+			},
+			wantErrType: "ParseError",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := newTestClient(tt.httpClient, tt.auth)
+			_, err := client.getPosts(context.Background(), tt.request, "hot")
+			if err == nil {
+				t.Fatal("expected error but got none")
+			}
+			switch tt.wantErrType {
+			case "ConfigError":
+				if _, ok := err.(*pkgerrs.ConfigError); !ok {
+					t.Fatalf("expected ConfigError, got %T", err)
+				}
+			case "RequestError":
+				if _, ok := err.(*pkgerrs.RequestError); !ok {
+					t.Fatalf("expected RequestError, got %T", err)
+				}
+			case "AuthError":
+				if _, ok := err.(*pkgerrs.AuthError); !ok {
+					t.Fatalf("expected AuthError, got %T", err)
+				}
+			case "ParseError":
+				if _, ok := err.(*pkgerrs.ParseError); !ok {
+					t.Fatalf("expected ParseError, got %T", err)
+				}
+			default:
+				t.Fatalf("unhandled error type %q", tt.wantErrType)
+			}
+		})
+	}
+}
+
 func TestClient_GetNew(t *testing.T) {
 	mock := &mockHTTPClient{
 		doFunc: func(req *http.Request, v *types.Thing) error {
@@ -490,6 +857,7 @@ func TestClient_GetComments(t *testing.T) {
 		name         string
 		request      *types.CommentsRequest
 		setupMock    func() HTTPClient
+		setupAuth    func() TokenProvider
 		wantError    bool
 		errorType    string
 		wantComments int
@@ -621,9 +989,34 @@ func TestClient_GetComments(t *testing.T) {
 			errorType: "ConfigError",
 		},
 		{
+			name: "invalid subreddit",
+			request: &types.CommentsRequest{
+				Subreddit: "ab",
+				PostID:    "abc123",
+			},
+			setupMock: func() HTTPClient {
+				return &mockHTTPClient{}
+			},
+			wantError: true,
+			errorType: "ConfigError",
+		},
+		{
 			name: "missing post ID",
 			request: &types.CommentsRequest{
 				Subreddit: "golang",
+			},
+			setupMock: func() HTTPClient {
+				return &mockHTTPClient{}
+			},
+			wantError: true,
+			errorType: "ConfigError",
+		},
+		{
+			name: "invalid pagination",
+			request: &types.CommentsRequest{
+				Subreddit:  "golang",
+				PostID:     "abc123",
+				Pagination: types.Pagination{After: "t1_a", Before: "t1_b"},
 			},
 			setupMock: func() HTTPClient {
 				return &mockHTTPClient{}
@@ -647,11 +1040,64 @@ func TestClient_GetComments(t *testing.T) {
 			wantError: true,
 			errorType: "APIError",
 		},
+		{
+			name: "request creation error",
+			request: &types.CommentsRequest{
+				Subreddit: "golang",
+				PostID:    "abc123",
+			},
+			setupMock: func() HTTPClient {
+				return &mockHTTPClient{
+					newRequestFunc: func(ctx context.Context, method, path string, body io.Reader, params ...url.Values) (*http.Request, error) {
+						return nil, errors.New("request failure")
+					},
+				}
+			},
+			wantError: true,
+			errorType: "RequestError",
+		},
+		{
+			name: "auth token error",
+			request: &types.CommentsRequest{
+				Subreddit: "golang",
+				PostID:    "abc123",
+			},
+			setupMock: func() HTTPClient {
+				return &mockHTTPClient{}
+			},
+			setupAuth: func() TokenProvider {
+				return &mockTokenProvider{err: errors.New("token fail")}
+			},
+			wantError: true,
+			errorType: "AuthError",
+		},
+		{
+			name: "parse error",
+			request: &types.CommentsRequest{
+				Subreddit: "golang",
+				PostID:    "abc123",
+			},
+			setupMock: func() HTTPClient {
+				return &mockHTTPClient{
+					doThingArrayFunc: func(req *http.Request) ([]*types.Thing, error) {
+						return []*types.Thing{
+							{Kind: "t3", Data: json.RawMessage(`{"id":"abc123"}`)},
+						}, nil
+					},
+				}
+			},
+			wantError: true,
+			errorType: "ParseError",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client := newTestClient(tt.setupMock(), nil)
+			var auth TokenProvider
+			if tt.setupAuth != nil {
+				auth = tt.setupAuth()
+			}
+			client := newTestClient(tt.setupMock(), auth)
 			comments, err := client.GetComments(context.Background(), tt.request)
 
 			if tt.wantError {
@@ -671,6 +1117,14 @@ func TestClient_GetComments(t *testing.T) {
 					case "APIError":
 						if _, ok := err.(*pkgerrs.APIError); !ok {
 							t.Errorf("expected APIError, got %T: %v", err, err)
+						}
+					case "AuthError":
+						if _, ok := err.(*pkgerrs.AuthError); !ok {
+							t.Errorf("expected AuthError, got %T: %v", err, err)
+						}
+					case "ParseError":
+						if _, ok := err.(*pkgerrs.ParseError); !ok {
+							t.Errorf("expected ParseError, got %T: %v", err, err)
 						}
 					}
 				}
@@ -700,6 +1154,8 @@ func TestClient_GetCommentsMultiple(t *testing.T) {
 		setupMock func() HTTPClient
 		wantError bool
 		wantCount int
+		errorType string
+		ctxFunc   func() context.Context
 	}{
 		{
 			name:      "empty requests",
@@ -707,6 +1163,15 @@ func TestClient_GetCommentsMultiple(t *testing.T) {
 			setupMock: func() HTTPClient { return &mockHTTPClient{} },
 			wantError: false,
 			wantCount: 0,
+		},
+		{
+			name: "nil request entry",
+			requests: []*types.CommentsRequest{
+				nil,
+			},
+			setupMock: func() HTTPClient { return &mockHTTPClient{} },
+			wantError: true,
+			errorType: "ConfigError",
 		},
 		{
 			name: "multiple successful requests",
@@ -764,16 +1229,61 @@ func TestClient_GetCommentsMultiple(t *testing.T) {
 			wantError: true,
 			wantCount: 2, // Still returns all results, but with error
 		},
+		{
+			name: "context cancelled",
+			requests: []*types.CommentsRequest{
+				{Subreddit: "golang", PostID: "post1"},
+				{Subreddit: "golang", PostID: "post2"},
+			},
+			setupMock: func() HTTPClient {
+				return &mockHTTPClient{
+					doThingArrayFunc: func(req *http.Request) ([]*types.Thing, error) {
+						postListing, _ := json.Marshal(map[string]interface{}{"children": []interface{}{map[string]interface{}{"kind": "t3", "data": map[string]interface{}{"id": "abc"}}}})
+						commentListing, _ := json.Marshal(map[string]interface{}{"children": []interface{}{map[string]interface{}{"kind": "t1", "data": map[string]interface{}{"id": "c1", "body": "Test", "author": "u1"}}}})
+						return []*types.Thing{
+							{Kind: "Listing", Data: postListing},
+							{Kind: "Listing", Data: commentListing},
+						}, nil
+					},
+				}
+			},
+			wantError: true,
+			errorType: "ContextError",
+			wantCount: 2,
+			ctxFunc: func() context.Context {
+				ctx, cancel := context.WithCancel(context.Background())
+				cancel()
+				return ctx
+			},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			client := newTestClient(tt.setupMock(), nil)
-			results, err := client.GetCommentsMultiple(context.Background(), tt.requests)
+
+			ctx := context.Background()
+			if tt.ctxFunc != nil {
+				ctx = tt.ctxFunc()
+			}
+
+			results, err := client.GetCommentsMultiple(ctx, tt.requests)
 
 			if tt.wantError {
 				if err == nil {
 					t.Error("expected error but got none")
+				}
+				if tt.errorType != "" {
+					switch tt.errorType {
+					case "ConfigError":
+						if _, ok := err.(*pkgerrs.ConfigError); !ok {
+							t.Errorf("expected ConfigError, got %T", err)
+						}
+					case "ContextError":
+						if !errors.Is(err, context.Canceled) {
+							t.Errorf("expected context.Canceled, got %v", err)
+						}
+					}
 				}
 			} else {
 				if err != nil {
@@ -793,6 +1303,7 @@ func TestClient_GetMoreComments(t *testing.T) {
 		name         string
 		request      *types.MoreCommentsRequest
 		setupMock    func() HTTPClient
+		setupAuth    func() TokenProvider
 		wantError    bool
 		errorType    string
 		wantComments int
@@ -941,11 +1452,54 @@ func TestClient_GetMoreComments(t *testing.T) {
 			wantError:    false,
 			wantComments: 0,
 		},
+		{
+			name: "invalid comment id",
+			request: &types.MoreCommentsRequest{
+				LinkID:     "t3_abc123",
+				CommentIDs: []string{"bad!"},
+			},
+			setupMock: func() HTTPClient { return &mockHTTPClient{} },
+			wantError: true,
+			errorType: "ConfigError",
+		},
+		{
+			name: "request creation failure",
+			request: &types.MoreCommentsRequest{
+				LinkID:     "t3_abc123",
+				CommentIDs: []string{"comment1"},
+			},
+			setupMock: func() HTTPClient {
+				return &mockHTTPClient{
+					newRequestFunc: func(ctx context.Context, method, path string, body io.Reader, params ...url.Values) (*http.Request, error) {
+						return nil, errors.New("request failure")
+					},
+				}
+			},
+			wantError: true,
+			errorType: "RequestError",
+		},
+		{
+			name: "auth token failure",
+			request: &types.MoreCommentsRequest{
+				LinkID:     "t3_abc123",
+				CommentIDs: []string{"comment1"},
+			},
+			setupMock: func() HTTPClient { return &mockHTTPClient{} },
+			setupAuth: func() TokenProvider {
+				return &mockTokenProvider{err: errors.New("token fail")}
+			},
+			wantError: true,
+			errorType: "AuthError",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client := newTestClient(tt.setupMock(), nil)
+			var auth TokenProvider
+			if tt.setupAuth != nil {
+				auth = tt.setupAuth()
+			}
+			client := newTestClient(tt.setupMock(), auth)
 			comments, err := client.GetMoreComments(context.Background(), tt.request)
 
 			if tt.wantError {
@@ -957,6 +1511,14 @@ func TestClient_GetMoreComments(t *testing.T) {
 					case "ConfigError":
 						if _, ok := err.(*pkgerrs.ConfigError); !ok {
 							t.Errorf("expected ConfigError, got %T: %v", err, err)
+						}
+					case "RequestError":
+						if _, ok := err.(*pkgerrs.RequestError); !ok {
+							t.Errorf("expected RequestError, got %T: %v", err, err)
+						}
+					case "AuthError":
+						if _, ok := err.(*pkgerrs.AuthError); !ok {
+							t.Errorf("expected AuthError, got %T: %v", err, err)
 						}
 					}
 				}

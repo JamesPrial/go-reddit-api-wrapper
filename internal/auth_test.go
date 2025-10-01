@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -222,6 +223,7 @@ func TestAuthenticator_GetToken(t *testing.T) {
 		expectedToken        string
 		wantErr              bool
 		checkErr             func(t *testing.T, err error)
+		logger               *slog.Logger
 	}{
 		{
 			name:                 "success",
@@ -236,6 +238,7 @@ func TestAuthenticator_GetToken(t *testing.T) {
 			grantType:     "password",
 			expectedToken: "test-token",
 			wantErr:       false,
+			logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
 		},
 		{
 			name:                 "success with username and password",
@@ -360,6 +363,69 @@ func TestAuthenticator_GetToken(t *testing.T) {
 				}
 			},
 		},
+		{
+			name:                 "negative expires_in",
+			clientID:             "test-id",
+			clientSecret:         "test-secret",
+			expectedClientID:     "test-id",
+			expectedClientSecret: "test-secret",
+			mockResponse: &mockResponse{
+				statusCode: http.StatusOK,
+				body:       `{"access_token": "tok", "token_type": "bearer", "expires_in": -10}`,
+			},
+			wantErr: true,
+			checkErr: func(t *testing.T, err error) {
+				var authErr *pkgerrs.AuthError
+				if !errors.As(err, &authErr) {
+					t.Fatalf("expected AuthError, got %T", err)
+				}
+				if !strings.Contains(authErr.Err.Error(), "cannot be negative") {
+					t.Errorf("expected negative expires message, got %v", authErr.Err)
+				}
+			},
+		},
+		{
+			name:                 "expires_in exceeds maximum",
+			clientID:             "test-id",
+			clientSecret:         "test-secret",
+			expectedClientID:     "test-id",
+			expectedClientSecret: "test-secret",
+			mockResponse: &mockResponse{
+				statusCode: http.StatusOK,
+				body:       fmt.Sprintf(`{"access_token": "tok", "token_type": "bearer", "expires_in": %d}`, 400*24*60*60),
+			},
+			wantErr: true,
+			checkErr: func(t *testing.T, err error) {
+				var authErr *pkgerrs.AuthError
+				if !errors.As(err, &authErr) {
+					t.Fatalf("expected AuthError, got %T", err)
+				}
+				if !strings.Contains(authErr.Err.Error(), "exceeds maximum") {
+					t.Errorf("expected exceeds maximum message, got %v", authErr.Err)
+				}
+			},
+		},
+		{
+			name:                 "response body too large",
+			clientID:             "test-id",
+			clientSecret:         "test-secret",
+			expectedClientID:     "test-id",
+			expectedClientSecret: "test-secret",
+			mockResponse: &mockResponse{
+				statusCode: http.StatusOK,
+				body:       strings.Repeat("a", maxResponseBodySize+1),
+			},
+			wantErr: true,
+			checkErr: func(t *testing.T, err error) {
+				var authErr *pkgerrs.AuthError
+				if !errors.As(err, &authErr) {
+					t.Fatalf("expected AuthError, got %T", err)
+				}
+				if !strings.Contains(authErr.Err.Error(), "exceeded max size") {
+					t.Errorf("expected max size error, got %v", authErr.Err)
+				}
+			},
+		},
 	}
 
 	for _, tc := range testCases {
@@ -386,7 +452,7 @@ func TestAuthenticator_GetToken(t *testing.T) {
 				defer server.Close()
 			}
 
-			a, err := NewAuthenticator(server.Client(), tc.username, tc.password, tc.clientID, tc.clientSecret, "test-agent", serverURL, tc.grantType, nil)
+			a, err := NewAuthenticator(server.Client(), tc.username, tc.password, tc.clientID, tc.clientSecret, "test-agent", serverURL, tc.grantType, tc.logger)
 			if err != nil {
 				t.Fatalf("failed to create authenticator: %v", err)
 			}
