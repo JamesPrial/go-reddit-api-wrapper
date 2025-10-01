@@ -46,7 +46,7 @@ const (
 	// DefaultAuthURL is the default Reddit OAuth base URL
 	DefaultAuthURL = "https://www.reddit.com/"
 	// DefaultUserAgent is the default user agent string
-	DefaultUserAgent = "go-reddit-api-wrapper/0.01"
+	DefaultUserAgent = "go-reddit-api-wrapper/0.11.2 (by /u/yourusername)"
 	// MoreChildrenURL is the endpoint for loading more comments
 	MoreChildrenURL = "api/morechildren"
 	// MeURL is the endpoint for fetching the authenticated user's info
