@@ -199,6 +199,11 @@ type Validator interface {
 
 	// ValidateUserAgent validates the User-Agent string to prevent header injection attacks.
 	ValidateUserAgent(ua string) error
+
+	// ValidateLinkID validates and normalizes a Reddit link ID (post ID).
+	// It checks for proper formatting and adds the "t3_" prefix if not present.
+	// Returns the normalized link ID with the "t3_" prefix, or an error if invalid.
+	ValidateLinkID(linkID string) (string, error)
 }
 
 // Client is the main Reddit API client.
@@ -776,9 +781,6 @@ func (c *Client) GetMoreComments(ctx context.Context, request *types.MoreComment
 	if request == nil {
 		return nil, &pkgerrs.ConfigError{Message: "more comments request cannot be nil"}
 	}
-	if request.LinkID == "" {
-		return nil, &pkgerrs.ConfigError{Message: "linkID is required"}
-	}
 	if len(request.CommentIDs) == 0 {
 		return []*types.Comment{}, nil
 	}
@@ -788,33 +790,10 @@ func (c *Client) GetMoreComments(ctx context.Context, request *types.MoreComment
 		return nil, err
 	}
 
-	// Reddit's link_id format requires the type prefix (t3_)
-	linkID := request.LinkID
-	if linkID == "" {
-		return nil, &pkgerrs.ConfigError{
-			Field:   "LinkID",
-			Message: "link ID is required",
-		}
-	}
-	// Add t3_ prefix if not present, but validate if it is
-	if strings.HasPrefix(linkID, "t3_") {
-		if len(linkID) <= 3 {
-			return nil, &pkgerrs.ConfigError{
-				Field:   "LinkID",
-				Message: "link ID has t3_ prefix but no content after",
-			}
-		}
-	} else {
-		// Check for wrong prefix (e.g., t1_, t5_)
-		if strings.Contains(linkID, "_") && (strings.HasPrefix(linkID, "t1_") ||
-			strings.HasPrefix(linkID, "t2_") || strings.HasPrefix(linkID, "t4_") ||
-			strings.HasPrefix(linkID, "t5_")) {
-			return nil, &pkgerrs.ConfigError{
-				Field:   "LinkID",
-				Message: fmt.Sprintf("link ID has wrong type prefix, expected t3_ for posts but got: %s", linkID[:3]),
-			}
-		}
-		linkID = "t3_" + linkID
+	// Validate and normalize link ID (adds t3_ prefix if needed)
+	linkID, err := c.validator.ValidateLinkID(request.LinkID)
+	if err != nil {
+		return nil, err
 	}
 
 	// Build form data for POST request

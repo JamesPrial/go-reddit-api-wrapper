@@ -127,6 +127,42 @@ func (v *Validator) ValidateUserAgent(ua string) error {
 	return nil
 }
 
+// ValidateLinkID validates and normalizes a Reddit link ID (post ID).
+// It checks for proper formatting and adds the "t3_" prefix if not present.
+// Returns the normalized link ID with the "t3_" prefix, or an error if invalid.
+func (v *Validator) ValidateLinkID(linkID string) (string, error) {
+	if linkID == "" {
+		return "", &pkgerrs.ConfigError{
+			Field:   "LinkID",
+			Message: "link ID is required",
+		}
+	}
+
+	// Add t3_ prefix if not present, but validate if it is
+	if strings.HasPrefix(linkID, "t3_") {
+		if len(linkID) <= 3 {
+			return "", &pkgerrs.ConfigError{
+				Field:   "LinkID",
+				Message: "link ID has t3_ prefix but no content after",
+			}
+		}
+		return linkID, nil
+	}
+
+	// Check for wrong prefix (e.g., t1_, t5_)
+	if strings.Contains(linkID, "_") && (strings.HasPrefix(linkID, "t1_") ||
+		strings.HasPrefix(linkID, "t2_") || strings.HasPrefix(linkID, "t4_") ||
+		strings.HasPrefix(linkID, "t5_")) {
+		return "", &pkgerrs.ConfigError{
+			Field:   "LinkID",
+			Message: fmt.Sprintf("link ID has wrong type prefix, expected t3_ for posts but got: %s", linkID[:3]),
+		}
+	}
+
+	// Add the t3_ prefix
+	return "t3_" + linkID, nil
+}
+
 // validateCommentID validates the format and content of a single comment ID.
 // This is an internal helper function used by ValidateCommentIDs.
 func validateCommentID(id string) error {

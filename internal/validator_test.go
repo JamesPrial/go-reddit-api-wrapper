@@ -227,6 +227,65 @@ func TestValidator_ValidateUserAgent(t *testing.T) {
 	}
 }
 
+func TestValidator_ValidateLinkID(t *testing.T) {
+	v := NewValidator()
+
+	tests := []struct {
+		name             string
+		linkID           string
+		wantNormalized   string
+		wantError        bool
+		errorMsg         string
+	}{
+		// Valid cases - no prefix
+		{name: "valid without prefix", linkID: "abc123", wantNormalized: "t3_abc123", wantError: false},
+		{name: "valid alphanumeric", linkID: "xyz789", wantNormalized: "t3_xyz789", wantError: false},
+
+		// Valid cases - with correct prefix
+		{name: "valid with t3_ prefix", linkID: "t3_abc123", wantNormalized: "t3_abc123", wantError: false},
+		{name: "valid long ID with prefix", linkID: "t3_abcdefghij", wantNormalized: "t3_abcdefghij", wantError: false},
+
+		// Invalid cases - empty
+		{name: "empty string", linkID: "", wantError: true, errorMsg: "link ID is required"},
+
+		// Invalid cases - wrong prefix
+		{name: "wrong prefix t1_", linkID: "t1_abc123", wantError: true, errorMsg: "wrong type prefix"},
+		{name: "wrong prefix t2_", linkID: "t2_abc123", wantError: true, errorMsg: "wrong type prefix"},
+		{name: "wrong prefix t4_", linkID: "t4_abc123", wantError: true, errorMsg: "wrong type prefix"},
+		{name: "wrong prefix t5_", linkID: "t5_abc123", wantError: true, errorMsg: "wrong type prefix"},
+
+		// Invalid cases - malformed
+		{name: "t3_ prefix but no content", linkID: "t3_", wantError: true, errorMsg: "no content after"},
+		{name: "just t3_", linkID: "t3_", wantError: true, errorMsg: "no content after"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			normalized, err := v.ValidateLinkID(tt.linkID)
+			if tt.wantError {
+				if err == nil {
+					t.Errorf("expected error containing %q, got nil", tt.errorMsg)
+					return
+				}
+				if !strings.Contains(err.Error(), tt.errorMsg) {
+					t.Errorf("expected error containing %q, got %q", tt.errorMsg, err.Error())
+				}
+				// Verify it's a ConfigError
+				if _, ok := err.(*pkgerrs.ConfigError); !ok {
+					t.Errorf("expected *pkgerrs.ConfigError, got %T", err)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("expected no error, got %v", err)
+				}
+				if normalized != tt.wantNormalized {
+					t.Errorf("expected normalized %q, got %q", tt.wantNormalized, normalized)
+				}
+			}
+		})
+	}
+}
+
 func TestValidateCommentID(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -301,5 +360,13 @@ func BenchmarkValidator_ValidateUserAgent(b *testing.B) {
 	ua := "web:myapp:1.0 by /u/myuser"
 	for i := 0; i < b.N; i++ {
 		_ = v.ValidateUserAgent(ua)
+	}
+}
+
+func BenchmarkValidator_ValidateLinkID(b *testing.B) {
+	v := NewValidator()
+	linkID := "abc123"
+	for i := 0; i < b.N; i++ {
+		_, _ = v.ValidateLinkID(linkID)
 	}
 }
