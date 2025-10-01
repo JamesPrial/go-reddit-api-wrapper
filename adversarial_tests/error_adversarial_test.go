@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -152,12 +153,13 @@ func TestContextCancellationPropagation(t *testing.T) {
 // TestConcurrentErrorHandling tests error handling under concurrent load
 func TestConcurrentErrorHandling(t *testing.T) {
 	// Server that returns errors half the time
-	requestNum := int64(0)
+	var requestNum int64
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requestNum++
+		// Atomically increment and get the current request number
+		currentNum := atomic.AddInt64(&requestNum, 1)
 
-		if requestNum%2 == 0 {
+		if currentNum%2 == 0 {
 			// Return error
 			w.WriteHeader(http.StatusInternalServerError)
 			w.Write([]byte(`Internal Server Error`))
