@@ -26,7 +26,7 @@ func TestNewClient_DefaultRateLimiter(t *testing.T) {
 		t.Fatalf("expected limiter to be initialized")
 	}
 
-	expectedLimit := rate.Limit(1000.0 / 60.0) // 1000 requests per minute
+	expectedLimit := rate.Limit(100.0 / 60.0) // 100 requests per minute
 	if got := client.limiter.Limit(); got != expectedLimit {
 		t.Errorf("expected default limit %v req/sec, got %v", expectedLimit, got)
 	}

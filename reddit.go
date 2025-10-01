@@ -874,9 +874,6 @@ func validateSubredditName(name string) error {
 	}
 	// Check for Reddit naming constraints
 	firstChar := rune(name[0])
-	if firstChar >= '0' && firstChar <= '9' {
-		return &pkgerrs.ConfigError{Field: "subreddit", Message: "subreddit name cannot start with a number"}
-	}
 	if firstChar == '_' || rune(name[len(name)-1]) == '_' {
 		return &pkgerrs.ConfigError{Field: "subreddit", Message: "subreddit name cannot start or end with underscore"}
 	}

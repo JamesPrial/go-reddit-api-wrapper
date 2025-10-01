@@ -64,7 +64,7 @@ func NewAuthenticator(httpClient *http.Client, username, password, clientID, cli
 	}
 
 	// Prepare form data upfront
-	form := &url.Values{}
+	form := url.Values{}
 	form.Add("grant_type", grantType)
 	if username != "" && password != "" {
 		form.Add("username", username)
@@ -78,7 +78,7 @@ func NewAuthenticator(httpClient *http.Client, username, password, clientID, cli
 		userAgent:    userAgent,
 		BaseURL:      parsedURL,
 		tokenURL:     resolvedTokenURL,
-		formData:     form,
+		formData:     &form,
 		logger:       logger,
 	}, nil
 }

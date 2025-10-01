@@ -65,7 +65,7 @@ func putBuffer(buf *bytes.Buffer) {
 }
 
 const (
-	DefaultRequestsPerMinute    = 1000
+	DefaultRequestsPerMinute    = 100
 	DefaultRateLimitBurst       = 10
 	SecondsPerMinute            = 60.0
 	ParseFloatBitSize           = 64
