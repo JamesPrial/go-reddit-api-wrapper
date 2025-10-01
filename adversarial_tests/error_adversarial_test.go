@@ -468,6 +468,12 @@ func TestConcurrentErrorTypeAssertion(t *testing.T) {
 
 // TestErrorInDifferentContexts tests errors in various contexts
 func TestErrorInDifferentContexts(t *testing.T) {
+	// Create contexts that need cleanup
+	ctxWithCancel, cancel1 := context.WithCancel(context.Background())
+	defer cancel1()
+	ctxWithDeadline, cancel2 := context.WithDeadline(context.Background(), time.Now().Add(100*time.Millisecond))
+	defer cancel2()
+
 	testCases := []struct {
 		name    string
 		ctx     context.Context
@@ -475,8 +481,8 @@ func TestErrorInDifferentContexts(t *testing.T) {
 	}{
 		{"background_context", context.Background(), 100 * time.Millisecond},
 		{"todo_context", context.TODO(), 100 * time.Millisecond},
-		{"with_cancel", func() context.Context { ctx, _ := context.WithCancel(context.Background()); return ctx }(), 100 * time.Millisecond},
-		{"with_deadline", func() context.Context { ctx, _ := context.WithDeadline(context.Background(), time.Now().Add(100*time.Millisecond)); return ctx }(), 200 * time.Millisecond},
+		{"with_cancel", ctxWithCancel, 100 * time.Millisecond},
+		{"with_deadline", ctxWithDeadline, 200 * time.Millisecond},
 	}
 
 	for _, tc := range testCases {
