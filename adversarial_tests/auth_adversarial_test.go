@@ -320,8 +320,15 @@ func TestAuthenticationUnderStress(t *testing.T) {
 	}))
 	defer server.Close()
 
+	// Use custom HTTP client with keepalives disabled to prevent goroutine leaks
+	httpClient := &http.Client{
+		Transport: &http.Transport{
+			DisableKeepAlives: true,
+		},
+	}
+
 	auth, err := internal.NewAuthenticator(
-		server.Client(),
+		httpClient,
 		"test_user",
 		"test_pass",
 		"test_client",
