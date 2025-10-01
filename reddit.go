@@ -234,8 +234,10 @@ func NewClientWithContext(ctx context.Context, config *Config) (*Client, error) 
 	if config.HTTPClient == nil {
 		config.HTTPClient = &http.Client{Timeout: DefaultTimeout}
 	} else if config.HTTPClient.Timeout == 0 {
-		// Warn about missing timeout and set a default to prevent indefinite hangs
-		config.HTTPClient.Timeout = DefaultTimeout
+		// Create a shallow copy to avoid mutating the user's client
+		clientCopy := *config.HTTPClient
+		clientCopy.Timeout = DefaultTimeout
+		config.HTTPClient = &clientCopy
 		if config.Logger != nil {
 			config.Logger.Warn("HTTPClient timeout was 0, setting to default",
 				slog.Duration("timeout", DefaultTimeout))
@@ -592,6 +594,28 @@ func (c *Client) GetCommentsMultiple(ctx context.Context, requests []*types.Comm
 		return []*types.CommentsResponse{}, nil
 	}
 
+	// Validate all requests upfront before launching goroutines
+	for i, req := range requests {
+		if req == nil {
+			return nil, &pkgerrs.ConfigError{
+				Field:   fmt.Sprintf("requests[%d]", i),
+				Message: "request cannot be nil",
+			}
+		}
+		if req.Subreddit == "" {
+			return nil, &pkgerrs.ConfigError{
+				Field:   fmt.Sprintf("requests[%d].Subreddit", i),
+				Message: "subreddit is required",
+			}
+		}
+		if req.PostID == "" {
+			return nil, &pkgerrs.ConfigError{
+				Field:   fmt.Sprintf("requests[%d].PostID", i),
+				Message: "post ID is required",
+			}
+		}
+	}
+
 	// Create channels for results
 	type result struct {
 		index    int
@@ -703,7 +727,30 @@ func (c *Client) GetMoreComments(ctx context.Context, request *types.MoreComment
 
 	// Reddit's link_id format requires the type prefix (t3_)
 	linkID := request.LinkID
-	if !strings.HasPrefix(linkID, "t3_") {
+	if linkID == "" {
+		return nil, &pkgerrs.ConfigError{
+			Field:   "LinkID",
+			Message: "link ID is required",
+		}
+	}
+	// Add t3_ prefix if not present, but validate if it is
+	if strings.HasPrefix(linkID, "t3_") {
+		if len(linkID) <= 3 {
+			return nil, &pkgerrs.ConfigError{
+				Field:   "LinkID",
+				Message: "link ID has t3_ prefix but no content after",
+			}
+		}
+	} else {
+		// Check for wrong prefix (e.g., t1_, t5_)
+		if strings.Contains(linkID, "_") && (strings.HasPrefix(linkID, "t1_") ||
+			strings.HasPrefix(linkID, "t2_") || strings.HasPrefix(linkID, "t4_") ||
+			strings.HasPrefix(linkID, "t5_")) {
+			return nil, &pkgerrs.ConfigError{
+				Field:   "LinkID",
+				Message: fmt.Sprintf("link ID has wrong type prefix, expected t3_ for posts but got: %s", linkID[:3]),
+			}
+		}
 		linkID = "t3_" + linkID
 	}
 
@@ -825,10 +872,27 @@ func validateSubredditName(name string) error {
 	if len(name) > maxSubredditLength {
 		return &pkgerrs.ConfigError{Field: "subreddit", Message: fmt.Sprintf("subreddit name cannot exceed %d characters", maxSubredditLength)}
 	}
+	// Check for Reddit naming constraints
+	firstChar := rune(name[0])
+	if firstChar >= '0' && firstChar <= '9' {
+		return &pkgerrs.ConfigError{Field: "subreddit", Message: "subreddit name cannot start with a number"}
+	}
+	if firstChar == '_' || rune(name[len(name)-1]) == '_' {
+		return &pkgerrs.ConfigError{Field: "subreddit", Message: "subreddit name cannot start or end with underscore"}
+	}
 	// Check for valid characters: letters, numbers, underscores only
+	prevWasUnderscore := false
 	for i, ch := range name {
 		if !(ch >= 'a' && ch <= 'z') && !(ch >= 'A' && ch <= 'Z') && !(ch >= '0' && ch <= '9') && ch != '_' {
 			return &pkgerrs.ConfigError{Field: "subreddit", Message: fmt.Sprintf("subreddit name contains invalid character '%c' at position %d", ch, i)}
+		}
+		if ch == '_' {
+			if prevWasUnderscore {
+				return &pkgerrs.ConfigError{Field: "subreddit", Message: "subreddit name cannot contain consecutive underscores"}
+			}
+			prevWasUnderscore = true
+		} else {
+			prevWasUnderscore = false
 		}
 	}
 	return nil

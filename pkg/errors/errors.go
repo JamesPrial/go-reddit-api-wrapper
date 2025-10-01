@@ -133,10 +133,16 @@ type ParseError struct {
 }
 
 func (e *ParseError) Error() string {
-	if e.Operation != "" {
-		return fmt.Sprintf("parse error during %s: %s", e.Operation, e.Message)
+	// Use Message if available, otherwise use Err.Error()
+	msg := e.Message
+	if msg == "" && e.Err != nil {
+		msg = e.Err.Error()
 	}
-	return fmt.Sprintf("parse error: %s", e.Message)
+
+	if e.Operation != "" {
+		return fmt.Sprintf("parse error during %s: %s", e.Operation, msg)
+	}
+	return fmt.Sprintf("parse error: %s", msg)
 }
 
 func (e *ParseError) Unwrap() error {

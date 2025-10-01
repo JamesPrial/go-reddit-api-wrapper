@@ -473,7 +473,8 @@ func (c *Client) deferRequests(ctx context.Context, d time.Duration, reason stri
 			}
 			return
 		}
-		// CAS failed, retry
+		// CAS failed, yield to avoid busy-wait before retrying
+		time.Sleep(time.Microsecond)
 	}
 }
 
