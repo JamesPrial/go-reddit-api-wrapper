@@ -9,6 +9,9 @@ import (
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 )
 
+// MaxCommentDepth is the maximum depth of nested comments to prevent stack overflow attacks
+const MaxCommentDepth = 50
+
 // Parser handles parsing of Reddit API responses
 type Parser struct {
 	logger *slog.Logger
@@ -87,11 +90,21 @@ func (p *Parser) ParsePost(thing *types.Thing) (*types.Post, error) {
 // ParseComment extracts a Comment from a Thing of kind "t1" and builds a proper tree structure.
 // The Replies field will contain only direct children, and each child will have its own Replies.
 func (p *Parser) ParseComment(thing *types.Thing) (*types.Comment, error) {
+	return p.parseCommentWithDepth(thing, 0)
+}
+
+// parseCommentWithDepth is the internal implementation that tracks recursion depth
+func (p *Parser) parseCommentWithDepth(thing *types.Thing, depth int) (*types.Comment, error) {
 	if thing == nil {
 		return nil, fmt.Errorf("thing is nil")
 	}
 	if thing.Kind != "t1" {
 		return nil, fmt.Errorf("expected t1 (Comment), got %s", thing.Kind)
+	}
+
+	// Prevent stack overflow from deeply nested comments
+	if depth > MaxCommentDepth {
+		return nil, fmt.Errorf("comment tree depth exceeds maximum of %d", MaxCommentDepth)
 	}
 
 	var result types.Comment
@@ -117,8 +130,8 @@ func (p *Parser) ParseComment(thing *types.Thing) (*types.Comment, error) {
 						for _, child := range listingData.Children {
 							switch child.Kind {
 							case "t1":
-								// Recursively parse child comment (which will parse its own replies)
-								childComment, err := p.ParseComment(child)
+								// Recursively parse child comment with incremented depth
+								childComment, err := p.parseCommentWithDepth(child, depth+1)
 								if err == nil {
 									result.Replies = append(result.Replies, childComment)
 								}
@@ -301,12 +314,23 @@ func (p *Parser) ExtractComments(thing *types.Thing) ([]*types.Comment, []string
 
 // collectMoreIDs recursively collects all MoreChildrenIDs from a comment tree.
 func (p *Parser) collectMoreIDs(comment *types.Comment) []string {
+	return p.collectMoreIDsWithDepth(comment, 0)
+}
+
+// collectMoreIDsWithDepth is the internal implementation that tracks recursion depth
+func (p *Parser) collectMoreIDsWithDepth(comment *types.Comment, depth int) []string {
 	moreIDs := make([]string, 0)
+
+	// Prevent stack overflow from deeply nested comments
+	if depth > MaxCommentDepth {
+		return moreIDs
+	}
+
 	if len(comment.MoreChildrenIDs) > 0 {
 		moreIDs = append(moreIDs, comment.MoreChildrenIDs...)
 	}
 	for _, reply := range comment.Replies {
-		moreIDs = append(moreIDs, p.collectMoreIDs(reply)...)
+		moreIDs = append(moreIDs, p.collectMoreIDsWithDepth(reply, depth+1)...)
 	}
 	return moreIDs
 }

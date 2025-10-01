@@ -225,6 +225,15 @@ func NewClientWithContext(ctx context.Context, config *Config) (*Client, error) 
 	if config.UserAgent == "" {
 		config.UserAgent = DefaultUserAgent
 	}
+
+	// Validate UserAgent to prevent header injection attacks
+	if err := validateUserAgent(config.UserAgent); err != nil {
+		return nil, &pkgerrs.ConfigError{
+			Field:   "UserAgent",
+			Message: fmt.Sprintf("invalid user agent: %v", err),
+		}
+	}
+
 	if config.BaseURL == "" {
 		config.BaseURL = DefaultBaseURL
 	}
@@ -921,5 +930,62 @@ func validateCommentIDs(ids []string) error {
 	if len(ids) > maxCommentIDs {
 		return &pkgerrs.ConfigError{Field: "CommentIDs", Message: fmt.Sprintf("cannot request more than %d comment IDs at once (got %d)", maxCommentIDs, len(ids))}
 	}
+
+	// Validate each comment ID content
+	for i, id := range ids {
+		if err := validateCommentID(id); err != nil {
+			return &pkgerrs.ConfigError{
+				Field:   fmt.Sprintf("CommentIDs[%d]", i),
+				Message: fmt.Sprintf("invalid comment ID at index %d: %v", i, err),
+			}
+		}
+	}
+
+	return nil
+}
+
+// validateCommentID validates the format and content of a single comment ID
+func validateCommentID(id string) error {
+	if len(id) == 0 {
+		return fmt.Errorf("comment ID cannot be empty")
+	}
+
+	// Reddit comment IDs have a reasonable maximum length (typically 6-10 characters)
+	const maxCommentIDLength = 100
+	if len(id) > maxCommentIDLength {
+		return fmt.Errorf("comment ID too long (max %d characters)", maxCommentIDLength)
+	}
+
+	// Reddit comment IDs are alphanumeric base36 strings
+	// They should only contain: 0-9, a-z, A-Z
+	for _, char := range id {
+		if !((char >= '0' && char <= '9') ||
+			(char >= 'a' && char <= 'z') ||
+			(char >= 'A' && char <= 'Z')) {
+			return fmt.Errorf("comment ID contains invalid character: %c (only alphanumeric allowed)", char)
+		}
+	}
+
+	return nil
+}
+
+// validateUserAgent validates the User-Agent string to prevent header injection attacks
+func validateUserAgent(ua string) error {
+	// Check for newline characters that could be used for header injection
+	if strings.ContainsAny(ua, "\r\n") {
+		return fmt.Errorf("user agent cannot contain newline characters")
+	}
+
+	// User-Agent should have a reasonable maximum length
+	const maxUserAgentLength = 256
+	if len(ua) > maxUserAgentLength {
+		return fmt.Errorf("user agent too long (max %d characters)", maxUserAgentLength)
+	}
+
+	// User-Agent cannot be empty (should have been set to default before this check)
+	if len(ua) == 0 {
+		return fmt.Errorf("user agent cannot be empty")
+	}
+
 	return nil
 }

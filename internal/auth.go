@@ -199,6 +199,27 @@ func (a *Authenticator) GetToken(ctx context.Context) (string, error) {
 		}
 	}
 
+	// Validate ExpiresIn bounds to prevent integer overflow and invalid values
+	const maxTokenExpirySeconds = 365 * 24 * 60 * 60 // 1 year in seconds
+	if tokenResp.ExpiresIn < 0 {
+		expiryErr := fmt.Errorf("invalid expires_in value: %d (cannot be negative)", tokenResp.ExpiresIn)
+		a.logAuthError(ctx, "received negative expires_in", expiryErr)
+		return "", &pkgerrs.AuthError{
+			StatusCode: resp.StatusCode,
+			Body:       string(bodyBytes),
+			Err:        expiryErr,
+		}
+	}
+	if tokenResp.ExpiresIn > maxTokenExpirySeconds {
+		expiryErr := fmt.Errorf("invalid expires_in value: %d (exceeds maximum of %d seconds)", tokenResp.ExpiresIn, maxTokenExpirySeconds)
+		a.logAuthError(ctx, "received expires_in exceeding maximum", expiryErr)
+		return "", &pkgerrs.AuthError{
+			StatusCode: resp.StatusCode,
+			Body:       string(bodyBytes),
+			Err:        expiryErr,
+		}
+	}
+
 	// Cache the token with expiry - atomic store
 	// Use 90% of the expiry time to ensure we refresh before it actually expires
 	// Minimum 10 seconds to handle edge cases, but never exceed actual token lifetime
