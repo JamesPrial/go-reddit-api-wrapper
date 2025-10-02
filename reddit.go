@@ -206,6 +206,13 @@ type Validator interface {
 	ValidateLinkID(linkID string) (string, error)
 }
 
+type Parser interface {
+	// ParseThing parses a Reddit Thing into the appropriate Go struct based on its kind.
+	ParseThing(thing *types.Thing) (any, error)
+	ExtractPosts(thing *types.Thing) ([]*types.Post, error)
+	ExtractPostAndComments(things []*types.Thing) (*types.CommentsResponse, error)
+}
+
 // Client is the main Reddit API client.
 // It provides methods for common Reddit operations like fetching posts, comments,
 // and subreddit information. The client is ready to use immediately after creation.
@@ -223,7 +230,7 @@ type Client struct {
 	client    HTTPClient
 	auth      TokenProvider
 	config    *Config
-	parser    *internal.Parser
+	parser    Parser
 	validator Validator
 }
 
@@ -626,19 +633,13 @@ func (c *Client) GetComments(ctx context.Context, request *types.CommentsRequest
 	}
 
 	// Parse the post and comments
-	post, comments, moreIDs, after, before, err := c.parser.ExtractPostAndComments(result)
+	extractResult, err := c.parser.ExtractPostAndComments(result)
 	if err != nil {
 		return nil, &pkgerrs.ParseError{Operation: "parse comments", Err: err}
 	}
 
 	// Note: post may be nil if Reddit only returned comments without the post
-	return &types.CommentsResponse{
-		Post:           post,
-		Comments:       comments,
-		MoreIDs:        moreIDs,
-		AfterFullname:  after,
-		BeforeFullname: before,
-	}, nil
+	return extractResult, nil
 }
 
 // GetCommentsMultiple loads comments for multiple posts in parallel.
@@ -835,19 +836,28 @@ func (c *Client) GetMoreComments(ctx context.Context, request *types.MoreComment
 	// Extract comments from the response
 	var comments []*types.Comment
 	for _, thing := range things {
-		if thing.Kind == "t1" {
-			comment, err := c.parser.ParseComment(thing)
-			if err != nil {
-				// Log parse error if logger is available
-				if c.config.Logger != nil {
-					c.config.Logger.LogAttrs(ctx, slog.LevelWarn, "failed to parse comment from morechildren",
-						slog.String("error", err.Error()),
-						slog.String("kind", thing.Kind))
-				}
-				continue // Skip if we can't parse
+
+		parsed, err := c.parser.ParseThing(thing)
+		if err != nil {
+			// Log parse error if logger is available
+			if c.config.Logger != nil {
+				c.config.Logger.LogAttrs(ctx, slog.LevelWarn, "failed to parse comment from morechildren",
+					slog.String("error", err.Error()),
+					slog.String("kind", thing.Kind))
 			}
-			comments = append(comments, comment)
+			continue // Skip if we can't parse
 		}
+		comment, ok := parsed.(*types.Comment)
+		if !ok {
+			// Log unexpected type if logger is available
+			if c.config.Logger != nil {
+				c.config.Logger.LogAttrs(ctx, slog.LevelWarn, "unexpected type from morechildren",
+					slog.String("kind", thing.Kind))
+			}
+			continue // Skip if not a comment
+		}
+		comments = append(comments, comment)
+
 	}
 
 	return comments, nil

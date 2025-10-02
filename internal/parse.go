@@ -336,32 +336,32 @@ func (p *Parser) collectMoreIDsWithDepth(comment *types.Comment, depth int) []st
 }
 
 // ExtractPostAndComments parses the typical response from GetComments which contains
-// [post_listing, comments_listing]. Returns the post, comments, more IDs, pagination info, and error.
-func (p *Parser) ExtractPostAndComments(response []*types.Thing) (*types.Post, []*types.Comment, []string, string, string, error) {
+// [post_listing, comments_listing]. Returns the extracted post and comments data.
+func (p *Parser) ExtractPostAndComments(response []*types.Thing) (*types.CommentsResponse, error) {
 	if len(response) == 0 {
-		return nil, nil, nil, "", "", fmt.Errorf("empty response")
+		return nil, fmt.Errorf("empty response")
 	}
 
 	// Reddit can return either:
 	// 1. Two listings: [post_listing, comments_listing]
 	// 2. One listing with just comments (when fetching comments for a specific post)
 
+	result := &types.CommentsResponse{}
+
 	if len(response) >= 2 {
 		// Standard format: first is post, second is comments
-		var post *types.Post
 		posts, err := p.ExtractPosts(response[0])
 		if err == nil && len(posts) > 0 {
-			post = posts[0]
+			result.Post = posts[0]
 		}
 		// Even if post extraction fails, try to extract comments
 
 		// Second element should be the comments listing - extract pagination info
-		var after, before string
 		if response[1] != nil && response[1].Kind == "Listing" {
 			listingData, err := p.ParseListing(response[1])
 			if err == nil {
-				after = listingData.AfterFullname
-				before = listingData.BeforeFullname
+				result.AfterFullname = listingData.AfterFullname
+				result.BeforeFullname = listingData.BeforeFullname
 			}
 		}
 
@@ -369,25 +369,25 @@ func (p *Parser) ExtractPostAndComments(response []*types.Thing) (*types.Post, [
 		comments, moreIDs, err := p.ExtractComments(response[1])
 		if err != nil {
 			// If we have a post but no comments, return the post
-			if post != nil {
-				return post, nil, nil, after, before, fmt.Errorf("failed to extract comments: %w", err)
+			if result.Post != nil {
+				return result, fmt.Errorf("failed to extract comments: %w", err)
 			}
 			// If we have neither post nor comments, return error
-			return nil, nil, nil, "", "", fmt.Errorf("failed to extract both post and comments")
+			return nil, fmt.Errorf("failed to extract both post and comments")
 		}
 
-		// Return whatever we successfully extracted (post might be nil)
-		return post, comments, moreIDs, after, before, nil
+		result.Comments = comments
+		result.MoreIDs = moreIDs
+		return result, nil
 	}
 
 	// Single listing format: just comments, no post
 	// This happens when fetching additional comments or in certain API responses
-	var after, before string
 	if response[0] != nil && response[0].Kind == "Listing" {
 		listingData, err := p.ParseListing(response[0])
 		if err == nil {
-			after = listingData.AfterFullname
-			before = listingData.BeforeFullname
+			result.AfterFullname = listingData.AfterFullname
+			result.BeforeFullname = listingData.BeforeFullname
 		}
 	}
 
@@ -396,11 +396,13 @@ func (p *Parser) ExtractPostAndComments(response []*types.Thing) (*types.Post, [
 		// Try to extract as posts instead (might be a post-only response)
 		posts, err := p.ExtractPosts(response[0])
 		if err != nil || len(posts) == 0 {
-			return nil, nil, nil, "", "", fmt.Errorf("failed to extract data from single listing: %w", err)
+			return nil, fmt.Errorf("failed to extract data from single listing: %w", err)
 		}
-		return posts[0], nil, nil, "", "", nil
+		result.Post = posts[0]
+		return result, nil
 	}
 
-	// Return nil post with the comments
-	return nil, comments, moreIDs, after, before, nil
+	result.Comments = comments
+	result.MoreIDs = moreIDs
+	return result, nil
 }
