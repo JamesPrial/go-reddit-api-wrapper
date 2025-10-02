@@ -1165,7 +1165,7 @@ func TestExtractPostAndComments(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			post, comments, moreIDs, _, _, err := parser.ExtractPostAndComments(tt.response)
+			result, err := parser.ExtractPostAndComments(tt.response)
 
 			if tt.expectError {
 				if err == nil {
@@ -1182,21 +1182,25 @@ func TestExtractPostAndComments(t *testing.T) {
 					t.Errorf("unexpected error: %v", err)
 				}
 
+				if result == nil {
+					t.Fatal("expected result but got nil")
+				}
+
 				if tt.expectPost {
-					if post == nil {
+					if result.Post == nil {
 						t.Errorf("expected post but got nil")
 					}
 				} else {
-					if post != nil {
+					if result.Post != nil {
 						t.Errorf("expected no post but got one")
 					}
 				}
 
-				if len(comments) != tt.expectComments {
-					t.Errorf("expected %d comments, got %d", tt.expectComments, len(comments))
+				if len(result.Comments) != tt.expectComments {
+					t.Errorf("expected %d comments, got %d", tt.expectComments, len(result.Comments))
 				}
-				if len(moreIDs) != tt.expectMore {
-					t.Errorf("expected %d more IDs, got %d", tt.expectMore, len(moreIDs))
+				if len(result.MoreIDs) != tt.expectMore {
+					t.Errorf("expected %d more IDs, got %d", tt.expectMore, len(result.MoreIDs))
 				}
 			}
 		})
@@ -1230,19 +1234,19 @@ func TestExtractPostAndComments_EdgeCases(t *testing.T) {
 			},
 		}
 
-		post, comments, moreIDs, _, _, err := parser.ExtractPostAndComments(response)
+		result, err := parser.ExtractPostAndComments(response)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		// ExtractComments succeeds but finds no t1 children, returns nil post
-		if post != nil {
-			t.Errorf("expected no post for single listing, got %v", post)
+		if result.Post != nil {
+			t.Errorf("expected no post for single listing, got %v", result.Post)
 		}
-		if len(comments) != 0 {
-			t.Errorf("expected 0 comments, got %d", len(comments))
+		if len(result.Comments) != 0 {
+			t.Errorf("expected 0 comments, got %d", len(result.Comments))
 		}
-		if len(moreIDs) != 0 {
-			t.Errorf("expected 0 more IDs, got %d", len(moreIDs))
+		if len(result.MoreIDs) != 0 {
+			t.Errorf("expected 0 more IDs, got %d", len(result.MoreIDs))
 		}
 	})
 
@@ -1271,18 +1275,18 @@ func TestExtractPostAndComments_EdgeCases(t *testing.T) {
 			},
 		}
 
-		post, comments, moreIDs, _, _, err := parser.ExtractPostAndComments(response)
+		result, err := parser.ExtractPostAndComments(response)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if post != nil {
+		if result.Post != nil {
 			t.Errorf("expected no post but got one")
 		}
-		if len(comments) != 1 {
-			t.Errorf("expected 1 comment, got %d", len(comments))
+		if len(result.Comments) != 1 {
+			t.Errorf("expected 1 comment, got %d", len(result.Comments))
 		}
-		if len(moreIDs) != 0 {
-			t.Errorf("expected 0 more IDs, got %d", len(moreIDs))
+		if len(result.MoreIDs) != 0 {
+			t.Errorf("expected 0 more IDs, got %d", len(result.MoreIDs))
 		}
 	})
 
@@ -1298,18 +1302,12 @@ func TestExtractPostAndComments_EdgeCases(t *testing.T) {
 			},
 		}
 
-		post, comments, moreIDs, _, _, err := parser.ExtractPostAndComments(response)
+		result, err := parser.ExtractPostAndComments(response)
 		if err == nil {
 			t.Fatal("expected error but got none")
 		}
-		if post != nil {
-			t.Errorf("expected no post but got one")
-		}
-		if comments != nil {
-			t.Errorf("expected nil comments but got %v", comments)
-		}
-		if moreIDs != nil {
-			t.Errorf("expected nil more IDs but got %v", moreIDs)
+		if result != nil {
+			t.Errorf("expected nil result but got %v", result)
 		}
 	})
 
@@ -1321,12 +1319,12 @@ func TestExtractPostAndComments_EdgeCases(t *testing.T) {
 			},
 		}
 
-		post, comments, moreIDs, _, _, err := parser.ExtractPostAndComments(response)
+		result, err := parser.ExtractPostAndComments(response)
 		if err == nil {
 			t.Fatal("expected error but got none")
 		}
-		if post != nil || comments != nil || moreIDs != nil {
-			t.Error("expected all nil on error")
+		if result != nil {
+			t.Error("expected nil result on error")
 		}
 	})
 }
