@@ -2,7 +2,10 @@ package internal
 
 import (
 	"fmt"
+	"log/slog"
+	"net/http"
 	"strings"
+	"time"
 
 	pkgerrs "github.com/jamesprial/go-reddit-api-wrapper/pkg/errors"
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
@@ -22,6 +25,10 @@ const (
 
 	// User agent constraints
 	maxUserAgentLength = 256
+
+	// HTTP timeout constants
+	MinimumTimeout                 = 1 * time.Second
+	MaximumTimeoutWarningThreshold = 5 * time.Minute
 )
 
 // Validator provides validation operations for Reddit API parameters.
@@ -186,4 +193,49 @@ func validateCommentID(id string) error {
 	}
 
 	return nil
+}
+
+// ValidateConfig validates the configuration fields and returns the validated/defaulted httpClient.
+// Returns an error if validation fails.
+func (v *Validator) ValidateConfig(clientID, clientSecret, userAgent string, httpClient *http.Client, logger *slog.Logger, defaultTimeout time.Duration) (*http.Client, error) {
+	// Validate required fields
+	if clientID == "" || clientSecret == "" {
+		return nil, &pkgerrs.ConfigError{Message: "ClientID and ClientSecret are required"}
+	}
+
+	// Validate user agent (should already be set by caller)
+	if err := v.ValidateUserAgent(userAgent); err != nil {
+		return nil, &pkgerrs.ConfigError{
+			Field:   "UserAgent",
+			Message: fmt.Sprintf("invalid user agent: %v", err),
+		}
+	}
+
+	// Set default HTTP client if not provided
+	if httpClient == nil {
+		httpClient = &http.Client{Timeout: defaultTimeout}
+	} else if httpClient.Timeout == 0 {
+		// Create a shallow copy to avoid mutating the user's client
+		clientCopy := *httpClient
+		clientCopy.Timeout = defaultTimeout
+		httpClient = &clientCopy
+		if logger != nil {
+			logger.Warn("HTTPClient timeout was 0, setting to default",
+				slog.Duration("timeout", defaultTimeout))
+		}
+	} else if httpClient.Timeout < MinimumTimeout {
+		// Validate that timeout is not unreasonably short
+		return nil, &pkgerrs.ConfigError{
+			Field:   "HTTPClient.Timeout",
+			Message: fmt.Sprintf("timeout too short: %v (minimum %v)", httpClient.Timeout, MinimumTimeout),
+		}
+	} else if httpClient.Timeout > MaximumTimeoutWarningThreshold {
+		// Warn about very long timeouts
+		if logger != nil {
+			logger.Warn("HTTPClient timeout may be too long",
+				slog.Duration("timeout", httpClient.Timeout))
+		}
+	}
+
+	return httpClient, nil
 }

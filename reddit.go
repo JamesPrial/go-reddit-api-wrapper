@@ -57,10 +57,6 @@ const (
 	// HTTP timeout constants
 	// DefaultTimeout is the default HTTP client timeout
 	DefaultTimeout = 30 * time.Second
-	// MinimumTimeout is the minimum acceptable timeout value
-	MinimumTimeout = 1 * time.Second
-	// MaximumTimeoutWarningThreshold is the threshold above which we warn about long timeouts
-	MaximumTimeoutWarningThreshold = 5 * time.Minute
 
 	// Concurrency limits
 	// MaxConcurrentCommentRequests limits parallel goroutines in GetCommentsMultiple
@@ -204,6 +200,10 @@ type Validator interface {
 	// It checks for proper formatting and adds the "t3_" prefix if not present.
 	// Returns the normalized link ID with the "t3_" prefix, or an error if invalid.
 	ValidateLinkID(linkID string) (string, error)
+
+	// ValidateConfig validates the configuration fields and returns the validated/defaulted httpClient.
+	// Returns an error if validation fails.
+	ValidateConfig(clientID, clientSecret, userAgent string, httpClient *http.Client, logger *slog.Logger, defaultTimeout time.Duration) (*http.Client, error)
 }
 
 type Parser interface {
@@ -263,54 +263,30 @@ func NewClientWithContext(ctx context.Context, config *Config) (*Client, error) 
 		return nil, &pkgerrs.ConfigError{Message: "config cannot be nil"}
 	}
 
-	// Validate required fields
-	if config.ClientID == "" || config.ClientSecret == "" {
-		return nil, &pkgerrs.ConfigError{Message: "ClientID and ClientSecret are required"}
-	}
-
 	// Set defaults
 	if config.UserAgent == "" {
 		config.UserAgent = DefaultUserAgent
 	}
-
-	// Validate UserAgent to prevent header injection attacks
-	validator := internal.NewValidator()
-	if err := validator.ValidateUserAgent(config.UserAgent); err != nil {
-		return nil, &pkgerrs.ConfigError{
-			Field:   "UserAgent",
-			Message: fmt.Sprintf("invalid user agent: %v", err),
-		}
-	}
-
 	if config.BaseURL == "" {
 		config.BaseURL = DefaultBaseURL
 	}
 	if config.AuthURL == "" {
 		config.AuthURL = DefaultAuthURL
 	}
-	if config.HTTPClient == nil {
-		config.HTTPClient = &http.Client{Timeout: DefaultTimeout}
-	} else if config.HTTPClient.Timeout == 0 {
-		// Create a shallow copy to avoid mutating the user's client
-		clientCopy := *config.HTTPClient
-		clientCopy.Timeout = DefaultTimeout
-		config.HTTPClient = &clientCopy
-		if config.Logger != nil {
-			config.Logger.Warn("HTTPClient timeout was 0, setting to default",
-				slog.Duration("timeout", DefaultTimeout))
-		}
-	} else if config.HTTPClient.Timeout < MinimumTimeout {
-		// Validate that timeout is not unreasonably short
-		return nil, &pkgerrs.ConfigError{
-			Field:   "HTTPClient.Timeout",
-			Message: fmt.Sprintf("timeout too short: %v (minimum %v)", config.HTTPClient.Timeout, MinimumTimeout),
-		}
-	} else if config.HTTPClient.Timeout > MaximumTimeoutWarningThreshold {
-		// Warn about very long timeouts
-		if config.Logger != nil {
-			config.Logger.Warn("HTTPClient timeout may be too long",
-				slog.Duration("timeout", config.HTTPClient.Timeout))
-		}
+
+	// Validate config and set HTTP client defaults
+	validator := internal.NewValidator()
+	var err error
+	config.HTTPClient, err = validator.ValidateConfig(
+		config.ClientID,
+		config.ClientSecret,
+		config.UserAgent,
+		config.HTTPClient,
+		config.Logger,
+		DefaultTimeout,
+	)
+	if err != nil {
+		return nil, err
 	}
 
 	// Create authenticator
