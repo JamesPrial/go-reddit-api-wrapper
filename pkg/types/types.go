@@ -96,7 +96,11 @@ func (e *Edited) UnmarshalJSON(data []byte) error {
 	return fmt.Errorf("unrecognized type for 'edited' field: %s", s)
 }
 
-// ListingData contains the data for a Listing, which is used for pagination.
+// ListingData contains the data inside a Listing wrapper.
+// While Listings are conceptually distinct from Things in Reddit's API documentation,
+// Reddit's actual API responses wrap Listings in a Thing-like structure with
+// kind="Listing" and a data field containing this ListingData.
+// This struct represents the contents of that data field for pagination and enumeration.
 type ListingData struct {
 	BeforeFullname string   `json:"before"` // Reddit fullname for pagination (previous page)
 	AfterFullname  string   `json:"after"`  // Reddit fullname for pagination (next page)
