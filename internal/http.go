@@ -444,14 +444,10 @@ func (c *Client) applyRateHeaders(resp *http.Response) {
 	}
 
 	// Enhanced proactive throttling with better calculations
+	// Note: X-Ratelimit-Reset contains seconds remaining until reset (delta time), not a Unix timestamp
 	if remaining < c.rateLimitThreshold {
-		now := time.Now()
-		resetTime := time.Unix(int64(resetSeconds), 0)
-
-		// Only apply throttling if reset time is in the future and reasonable
-		if resetTime.After(now) && resetTime.Before(now.Add(time.Hour)) {
-			timeUntilReset := resetTime.Sub(now)
-
+		// Only apply throttling if reset time is reasonable (positive and less than 1 hour)
+		if resetSeconds > 0 && resetSeconds < 3600 {
 			if remaining > 0 {
 				// Calculate delay to spread remaining requests over the reset period
 				// Add conservative buffer and ensure minimum delay
@@ -468,7 +464,7 @@ func (c *Client) applyRateHeaders(resp *http.Response) {
 				c.deferRequests(ctx, delay, "proactive_ratelimit")
 			} else {
 				// No requests remaining, wait until reset but cap at 5 minutes
-				waitTime := timeUntilReset
+				waitTime := time.Duration(resetSeconds * float64(time.Second))
 				if waitTime > 5*time.Minute {
 					waitTime = 5 * time.Minute
 				}
