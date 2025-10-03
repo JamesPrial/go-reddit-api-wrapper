@@ -6,6 +6,18 @@ import (
 	"fmt"
 )
 
+// KindPrefix represents a Reddit "kind" prefix used in fullnames.
+type KindPrefix string
+
+const (
+	KindComment   KindPrefix = "t1_"
+	KindAccount   KindPrefix = "t2_"
+	KindPost      KindPrefix = "t3_"
+	KindMessage   KindPrefix = "t4_"
+	KindSubreddit KindPrefix = "t5_"
+	KindAward     KindPrefix = "t6_"
+)
+
 // RedditObject defines the common behavior for all Reddit API objects like
 // Posts, Comments, and Subreddits.
 type RedditObject interface {
@@ -42,7 +54,7 @@ type Thing struct {
 type Votable struct {
 	// Score is the net vote count (upvotes minus downvotes).
 	Score int `json:"score"`
-	// Ups is a legacy field that typically equals Score. Reddit no longer returns actual upvote counts.
+	// Ups is a legacy field that always equals Score. Reddit no longer returns actual upvote counts.
 	Ups int `json:"ups"`
 	// Downs is a legacy field that is always 0. Reddit deprecated individual downvote counts.
 	Downs int `json:"downs"`
