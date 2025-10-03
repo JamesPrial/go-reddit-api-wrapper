@@ -669,7 +669,7 @@ func TestCPUUsageEfficiency(t *testing.T) {
 	ctx := context.Background()
 
 	// Measure CPU time
-	const numRequests := 10
+	const numRequests = 10
 	start := time.Now()
 
 	for i := 0; i < numRequests; i++ {

@@ -3,16 +3,16 @@ package test_helpers
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"sync"
 	"time"
 
-	"github.com/JamesPrial/go-reddit-api-wrapper"
-	"github.com/JamesPrial/go-reddit-api-wrapper/internal"
+	graw "github.com/jamesprial/go-reddit-api-wrapper"
 )
 
 // TestClient provides a wrapper around the Reddit client for testing
 type TestClient struct {
-	*reddit.Client
+	*graw.Client
 	mockServer *RedditMockServer
 	config     MockClientConfig
 	mu         sync.RWMutex
@@ -30,18 +30,23 @@ func NewTestClient(config *MockClientConfig) *TestClient {
 	// Update config with mock server URL
 	config.BaseURL = mockServer.URL()
 
-	// Create internal client with mock transport
-	internalClient := &internal.Client{
-		BaseURL:    config.BaseURL,
-		UserAgent:  config.UserAgent,
-		Timeout:    config.Timeout,
-		RetryCount: config.RetryAttempts,
-		RetryDelay: config.RetryDelay,
+	// Create Reddit client using constructor with mock server URLs
+	grawConfig := &graw.Config{
+		ClientID:     "test_client_id",
+		ClientSecret: "test_client_secret",
+		Username:     "test_user",
+		Password:     "test_pass",
+		UserAgent:    config.UserAgent,
+		BaseURL:      config.BaseURL,
+		AuthURL:      config.BaseURL, // Use same URL for auth
+		HTTPClient: &http.Client{
+			Timeout: config.Timeout,
+		},
 	}
 
-	// Create Reddit client
-	client := &reddit.Client{
-		Client: internalClient,
+	client, err := graw.NewClient(grawConfig)
+	if err != nil {
+		panic(fmt.Sprintf("failed to create reddit client: %v", err))
 	}
 
 	return &TestClient{
@@ -285,12 +290,9 @@ func (pth *PerformanceTestHelper) RecordRequest(latency time.Duration, bytes int
 	}
 }
 
-// GetMetrics returns the current performance metrics
-func (pth *PerformanceTestHelper) GetMetrics() PerformanceMetrics {
-	pth.metrics.mu.RLock()
-	defer pth.metrics.mu.RUnlock()
-
-	return *pth.metrics
+// GetMetrics returns a pointer to the current performance metrics
+func (pth *PerformanceTestHelper) GetMetrics() *PerformanceMetrics {
+	return pth.metrics
 }
 
 // Reset resets the performance metrics

@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/JamesPrial/go-reddit-api-wrapper/pkg/types"
+	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 )
 
 // MockServer provides a configurable mock Reddit API server for testing

@@ -618,7 +618,7 @@ func TestBufferResourceManagement(t *testing.T) {
 	ctx := context.Background()
 
 	// Test buffer management with many requests
-	const numRequests := 50
+	const numRequests = 50
 	var totalResponseSize int64
 
 	for i := 0; i < numRequests; i++ {
