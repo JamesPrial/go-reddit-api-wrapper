@@ -40,7 +40,11 @@ type Thing struct {
 
 // Votable is an embeddable struct for things that can be voted on.
 type Votable struct {
-	Ups   int `json:"ups"`
+	// Score is the net vote count (upvotes minus downvotes).
+	Score int `json:"score"`
+	// Ups is a legacy field that typically equals Score. Reddit no longer returns actual upvote counts.
+	Ups int `json:"ups"`
+	// Downs is a legacy field that is always 0. Reddit deprecated individual downvote counts.
 	Downs int `json:"downs"`
 	// Likes indicates the user's vote: true for upvote, false for downvote, null for no vote.
 	Likes *bool `json:"likes"`
@@ -314,7 +318,6 @@ type Post struct {
 	Over18              bool            `json:"over_18"`
 	Permalink           string          `json:"permalink"`
 	Saved               bool            `json:"saved"`
-	Score               int             `json:"score"`
 	SelfText            string          `json:"selftext"`
 	SelfTextHTML        *string         `json:"selftext_html"`
 	Subreddit           string          `json:"subreddit"`
@@ -350,7 +353,6 @@ type Comment struct {
 	ParentID            string     `json:"parent_id"`
 	Replies             []*Comment `json:"-"` // Parsed by Parser from the raw replies field
 	Saved               bool       `json:"saved"`
-	Score               int        `json:"score"`
 	ScoreHidden         bool       `json:"score_hidden"`
 	Subreddit           string     `json:"subreddit"`
 	SubredditID         string     `json:"subreddit_id"`
