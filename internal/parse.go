@@ -1,10 +1,12 @@
 package internal
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"sync"
 
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 )
@@ -12,9 +14,10 @@ import (
 // MaxCommentDepth is the maximum depth of nested comments to prevent stack overflow attacks
 const MaxCommentDepth = 50
 
-// Parser handles parsing of Reddit API responses
+// Parser handles parsing of Reddit API responses with context support and optimized performance
 type Parser struct {
 	logger *slog.Logger
+	pool   sync.Pool // Reuse parsing structures for better performance
 }
 
 // NewParser creates a new parser instance with an optional logger.
@@ -24,37 +27,69 @@ func NewParser(logger ...*slog.Logger) *Parser {
 	if len(logger) > 0 {
 		log = logger[0]
 	}
-	return &Parser{logger: log}
+
+	return &Parser{
+		logger: log,
+		pool: sync.Pool{
+			New: func() interface{} {
+				return &parseContext{
+					seenIDs: make(map[string]bool),
+				}
+			},
+		},
+	}
+}
+
+// parseContext holds state for parsing operations
+type parseContext struct {
+	depth   int
+	seenIDs map[string]bool // Prevent infinite loops
 }
 
 // ParseThing determines the type of a Thing and returns the appropriate typed struct.
-func (p *Parser) ParseThing(thing *types.Thing) (interface{}, error) {
+func (p *Parser) ParseThing(ctx context.Context, thing *types.Thing) (any, error) {
 	if thing == nil {
 		return nil, fmt.Errorf("thing is nil")
 	}
 
+	pc := p.pool.Get().(*parseContext)
+	defer p.pool.Put(pc)
+
+	// Reset parse context
+	pc.depth = 0
+	clear(pc.seenIDs)
+
+	return p.parseThingWithContext(ctx, thing, pc)
+}
+
+// parseThingWithContext is the internal implementation with context tracking
+func (p *Parser) parseThingWithContext(ctx context.Context, thing *types.Thing, pc *parseContext) (any, error) {
 	switch thing.Kind {
 	case "Listing":
-		return p.ParseListing(thing)
+		return p.ParseListing(ctx, thing)
 	case "t1":
-		return p.ParseComment(thing)
+		return p.ParseComment(ctx, thing, pc)
 	case "t2":
-		return p.ParseAccount(thing)
+		return p.ParseAccount(ctx, thing)
 	case "t3":
-		return p.ParsePost(thing)
+		return p.ParsePost(ctx, thing)
 	case "t4":
-		return p.ParseMessage(thing)
+		return p.ParseMessage(ctx, thing)
 	case "t5":
-		return p.ParseSubreddit(thing)
+		return p.ParseSubreddit(ctx, thing)
 	case "more":
-		return p.ParseMore(thing)
+		return p.ParseMore(ctx, thing)
 	default:
+		if p.logger != nil {
+			p.logger.LogAttrs(ctx, slog.LevelWarn, "unknown thing kind",
+				slog.String("kind", thing.Kind))
+		}
 		return nil, fmt.Errorf("unknown kind: %s", thing.Kind)
 	}
 }
 
 // ParseListing extracts a ListingData from a Thing of kind "Listing".
-func (p *Parser) ParseListing(thing *types.Thing) (*types.ListingData, error) {
+func (p *Parser) ParseListing(ctx context.Context, thing *types.Thing) (*types.ListingData, error) {
 	if thing == nil {
 		return nil, fmt.Errorf("thing is nil")
 	}
@@ -64,6 +99,10 @@ func (p *Parser) ParseListing(thing *types.Thing) (*types.ListingData, error) {
 
 	var result types.ListingData
 	if err := json.Unmarshal(thing.Data, &result); err != nil {
+		if p.logger != nil {
+			p.logger.LogAttrs(ctx, slog.LevelWarn, "failed to parse listing data",
+				slog.String("error", err.Error()))
+		}
 		return nil, fmt.Errorf("failed to parse Listing data: %w", err)
 	}
 
@@ -71,7 +110,7 @@ func (p *Parser) ParseListing(thing *types.Thing) (*types.ListingData, error) {
 }
 
 // ParsePost extracts a Post from a Thing of kind "t3".
-func (p *Parser) ParsePost(thing *types.Thing) (*types.Post, error) {
+func (p *Parser) ParsePost(ctx context.Context, thing *types.Thing) (*types.Post, error) {
 	if thing == nil {
 		return nil, fmt.Errorf("thing is nil")
 	}
@@ -81,6 +120,10 @@ func (p *Parser) ParsePost(thing *types.Thing) (*types.Post, error) {
 
 	var result types.Post
 	if err := json.Unmarshal(thing.Data, &result); err != nil {
+		if p.logger != nil {
+			p.logger.LogAttrs(ctx, slog.LevelWarn, "failed to parse post data",
+				slog.String("error", err.Error()))
+		}
 		return nil, fmt.Errorf("failed to parse Post data: %w", err)
 	}
 
@@ -89,12 +132,7 @@ func (p *Parser) ParsePost(thing *types.Thing) (*types.Post, error) {
 
 // ParseComment extracts a Comment from a Thing of kind "t1" and builds a proper tree structure.
 // The Replies field will contain only direct children, and each child will have its own Replies.
-func (p *Parser) ParseComment(thing *types.Thing) (*types.Comment, error) {
-	return p.parseCommentWithDepth(thing, 0)
-}
-
-// parseCommentWithDepth is the internal implementation that tracks recursion depth
-func (p *Parser) parseCommentWithDepth(thing *types.Thing, depth int) (*types.Comment, error) {
+func (p *Parser) ParseComment(ctx context.Context, thing *types.Thing, pc *parseContext) (*types.Comment, error) {
 	if thing == nil {
 		return nil, fmt.Errorf("thing is nil")
 	}
@@ -103,57 +141,96 @@ func (p *Parser) parseCommentWithDepth(thing *types.Thing, depth int) (*types.Co
 	}
 
 	// Prevent stack overflow from deeply nested comments
-	if depth > MaxCommentDepth {
+	if pc.depth > MaxCommentDepth {
+		if p.logger != nil {
+			p.logger.LogAttrs(ctx, slog.LevelWarn, "comment tree depth exceeds maximum",
+				slog.Int("depth", pc.depth),
+				slog.Int("max_depth", MaxCommentDepth))
+		}
 		return nil, fmt.Errorf("comment tree depth exceeds maximum of %d", MaxCommentDepth)
 	}
 
-	var result types.Comment
-	if err := json.Unmarshal(thing.Data, &result); err != nil {
+	// Optimized single unmarshal with unified structure
+	var data struct {
+		types.Comment
+		Replies json.RawMessage `json:"replies"`
+	}
+
+	if err := json.Unmarshal(thing.Data, &data); err != nil {
+		if p.logger != nil {
+			p.logger.LogAttrs(ctx, slog.LevelWarn, "failed to parse comment data",
+				slog.String("error", err.Error()))
+		}
 		return nil, fmt.Errorf("failed to parse Comment data: %w", err)
 	}
 
-	// Handle the replies field which can be a Listing object or an empty string
-	var rawData struct {
-		Replies json.RawMessage `json:"replies"`
+	// Check for infinite loops
+	if pc.seenIDs[data.ID] {
+		if p.logger != nil {
+			p.logger.LogAttrs(ctx, slog.LevelWarn, "detected comment loop",
+				slog.String("id", data.ID))
+		}
+		return &data.Comment, nil // Return what we have, skip the loop
 	}
-	if err := json.Unmarshal(thing.Data, &rawData); err == nil && len(rawData.Replies) > 0 {
-		// Check if it's an empty string (Reddit sends "" when there are no replies)
-		if string(rawData.Replies) != `""` {
-			// Parse the replies Thing
-			var repliesThing types.Thing
-			if err := json.Unmarshal(rawData.Replies, &repliesThing); err == nil {
-				// Parse only direct children to maintain tree structure
-				if repliesThing.Kind == "Listing" {
-					listingData, err := p.ParseListing(&repliesThing)
-					if err == nil {
-						// Process each direct child
-						for _, child := range listingData.Children {
-							switch child.Kind {
-							case "t1":
-								// Recursively parse child comment with incremented depth
-								childComment, err := p.parseCommentWithDepth(child, depth+1)
-								if err == nil {
-									result.Replies = append(result.Replies, childComment)
-								}
-							case "more":
-								// Collect "more" IDs for deferred loading
-								more, err := p.ParseMore(child)
-								if err == nil {
-									result.MoreChildrenIDs = append(result.MoreChildrenIDs, more.Children...)
-								}
-							}
-						}
-					}
-				}
+	pc.seenIDs[data.ID] = true
+
+	// Parse replies if present
+	if len(data.Replies) > 0 && !bytes.Equal(data.Replies, []byte(`""`)) {
+		if err := p.parseReplies(ctx, &data.Comment, data.Replies, pc); err != nil {
+			if p.logger != nil {
+				p.logger.LogAttrs(ctx, slog.LevelWarn, "failed to parse replies",
+					slog.String("error", err.Error()),
+					slog.String("comment_id", data.ID))
 			}
+			// Don't fail the entire comment for reply parsing errors
 		}
 	}
 
-	return &result, nil
+	return &data.Comment, nil
+}
+
+// parseReplies handles the replies field parsing with error recovery
+func (p *Parser) parseReplies(ctx context.Context, comment *types.Comment, repliesData json.RawMessage, pc *parseContext) error {
+	var repliesThing types.Thing
+	if err := json.Unmarshal(repliesData, &repliesThing); err != nil {
+		return fmt.Errorf("failed to unmarshal replies: %w", err)
+	}
+
+	if repliesThing.Kind != "Listing" {
+		return fmt.Errorf("expected Listing for replies, got %s", repliesThing.Kind)
+	}
+
+	listingData, err := p.ParseListing(ctx, &repliesThing)
+	if err != nil {
+		return fmt.Errorf("failed to parse replies listing: %w", err)
+	}
+
+	// Process children with error recovery
+	for _, child := range listingData.Children {
+		switch child.Kind {
+		case "t1":
+			pc.depth++
+			childComment, err := p.ParseComment(ctx, child, pc)
+			pc.depth--
+			if err != nil {
+				continue // Skip unparseable replies
+			}
+			comment.Replies = append(comment.Replies, childComment)
+
+		case "more":
+			more, err := p.ParseMore(ctx, child)
+			if err != nil {
+				continue
+			}
+			comment.MoreChildrenIDs = append(comment.MoreChildrenIDs, more.Children...)
+		}
+	}
+
+	return nil
 }
 
 // ParseSubreddit extracts a SubredditData from a Thing of kind "t5".
-func (p *Parser) ParseSubreddit(thing *types.Thing) (*types.SubredditData, error) {
+func (p *Parser) ParseSubreddit(ctx context.Context, thing *types.Thing) (*types.SubredditData, error) {
 	if thing == nil {
 		return nil, fmt.Errorf("thing is nil")
 	}
@@ -163,6 +240,10 @@ func (p *Parser) ParseSubreddit(thing *types.Thing) (*types.SubredditData, error
 
 	var result types.SubredditData
 	if err := json.Unmarshal(thing.Data, &result); err != nil {
+		if p.logger != nil {
+			p.logger.LogAttrs(ctx, slog.LevelWarn, "failed to parse subreddit data",
+				slog.String("error", err.Error()))
+		}
 		return nil, fmt.Errorf("failed to parse Subreddit data: %w", err)
 	}
 
@@ -170,7 +251,7 @@ func (p *Parser) ParseSubreddit(thing *types.Thing) (*types.SubredditData, error
 }
 
 // ParseAccount extracts an AccountData from a Thing of kind "t2".
-func (p *Parser) ParseAccount(thing *types.Thing) (*types.AccountData, error) {
+func (p *Parser) ParseAccount(ctx context.Context, thing *types.Thing) (*types.AccountData, error) {
 	if thing == nil {
 		return nil, fmt.Errorf("thing is nil")
 	}
@@ -180,6 +261,10 @@ func (p *Parser) ParseAccount(thing *types.Thing) (*types.AccountData, error) {
 
 	var result types.AccountData
 	if err := json.Unmarshal(thing.Data, &result); err != nil {
+		if p.logger != nil {
+			p.logger.LogAttrs(ctx, slog.LevelWarn, "failed to parse account data",
+				slog.String("error", err.Error()))
+		}
 		return nil, fmt.Errorf("failed to parse Account data: %w", err)
 	}
 
@@ -187,7 +272,7 @@ func (p *Parser) ParseAccount(thing *types.Thing) (*types.AccountData, error) {
 }
 
 // ParseMessage extracts a MessageData from a Thing of kind "t4".
-func (p *Parser) ParseMessage(thing *types.Thing) (*types.MessageData, error) {
+func (p *Parser) ParseMessage(ctx context.Context, thing *types.Thing) (*types.MessageData, error) {
 	if thing == nil {
 		return nil, fmt.Errorf("thing is nil")
 	}
@@ -197,6 +282,10 @@ func (p *Parser) ParseMessage(thing *types.Thing) (*types.MessageData, error) {
 
 	var result types.MessageData
 	if err := json.Unmarshal(thing.Data, &result); err != nil {
+		if p.logger != nil {
+			p.logger.LogAttrs(ctx, slog.LevelWarn, "failed to parse message data",
+				slog.String("error", err.Error()))
+		}
 		return nil, fmt.Errorf("failed to parse Message data: %w", err)
 	}
 
@@ -204,7 +293,7 @@ func (p *Parser) ParseMessage(thing *types.Thing) (*types.MessageData, error) {
 }
 
 // ParseMore extracts a MoreData from a Thing of kind "more".
-func (p *Parser) ParseMore(thing *types.Thing) (*types.MoreData, error) {
+func (p *Parser) ParseMore(ctx context.Context, thing *types.Thing) (*types.MoreData, error) {
 	if thing == nil {
 		return nil, fmt.Errorf("thing is nil")
 	}
@@ -214,6 +303,10 @@ func (p *Parser) ParseMore(thing *types.Thing) (*types.MoreData, error) {
 
 	var result types.MoreData
 	if err := json.Unmarshal(thing.Data, &result); err != nil {
+		if p.logger != nil {
+			p.logger.LogAttrs(ctx, slog.LevelWarn, "failed to parse more data",
+				slog.String("error", err.Error()))
+		}
 		return nil, fmt.Errorf("failed to parse More data: %w", err)
 	}
 
@@ -221,7 +314,7 @@ func (p *Parser) ParseMore(thing *types.Thing) (*types.MoreData, error) {
 }
 
 // ExtractPosts extracts all Post objects from a listing Thing.
-func (p *Parser) ExtractPosts(thing *types.Thing) ([]*types.Post, error) {
+func (p *Parser) ExtractPosts(ctx context.Context, thing *types.Thing) ([]*types.Post, error) {
 	if thing == nil {
 		return nil, fmt.Errorf("thing is nil")
 	}
@@ -229,7 +322,7 @@ func (p *Parser) ExtractPosts(thing *types.Thing) ([]*types.Post, error) {
 		return nil, fmt.Errorf("expected Listing, got %s", thing.Kind)
 	}
 
-	listingData, err := p.ParseListing(thing)
+	listingData, err := p.ParseListing(ctx, thing)
 	if err != nil {
 		return nil, err
 	}
@@ -237,11 +330,11 @@ func (p *Parser) ExtractPosts(thing *types.Thing) ([]*types.Post, error) {
 	posts := make([]*types.Post, 0, len(listingData.Children))
 	for _, child := range listingData.Children {
 		if child.Kind == "t3" {
-			post, err := p.ParsePost(child)
+			post, err := p.ParsePost(ctx, child)
 			if err != nil {
 				// Log parse error if logger is available
 				if p.logger != nil {
-					p.logger.LogAttrs(context.Background(), slog.LevelWarn, "failed to parse post",
+					p.logger.LogAttrs(ctx, slog.LevelWarn, "failed to parse post",
 						slog.String("error", err.Error()),
 						slog.String("kind", child.Kind))
 				}
@@ -257,13 +350,18 @@ func (p *Parser) ExtractPosts(thing *types.Thing) ([]*types.Post, error) {
 // ExtractComments extracts top-level comments from a Listing or single comment Thing.
 // Returns comments with proper tree structure (each comment has its Replies populated).
 // Also returns all "more" IDs found at any level in the tree for deferred loading.
-func (p *Parser) ExtractComments(thing *types.Thing) ([]*types.Comment, []string, error) {
+func (p *Parser) ExtractComments(ctx context.Context, thing *types.Thing) ([]*types.Comment, []string, error) {
 	comments := make([]*types.Comment, 0)
 	moreIDs := make([]string, 0)
 
 	// Handle both single comments and listings
 	if thing.Kind == "t1" {
-		comment, err := p.ParseComment(thing)
+		pc := p.pool.Get().(*parseContext)
+		defer p.pool.Put(pc)
+		pc.depth = 0
+		clear(pc.seenIDs)
+
+		comment, err := p.ParseComment(ctx, thing, pc)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -278,19 +376,24 @@ func (p *Parser) ExtractComments(thing *types.Thing) ([]*types.Comment, []string
 		return nil, nil, fmt.Errorf("expected Listing or t1, got %s", thing.Kind)
 	}
 
-	listingData, err := p.ParseListing(thing)
+	listingData, err := p.ParseListing(ctx, thing)
 	if err != nil {
 		return nil, nil, err
 	}
 
+	pc := p.pool.Get().(*parseContext)
+	defer p.pool.Put(pc)
+	pc.depth = 0
+	clear(pc.seenIDs)
+
 	for _, child := range listingData.Children {
 		switch child.Kind {
 		case "t1":
-			comment, err := p.ParseComment(child)
+			comment, err := p.ParseComment(ctx, child, pc)
 			if err != nil {
 				// Log parse error if logger is available
 				if p.logger != nil {
-					p.logger.LogAttrs(context.Background(), slog.LevelWarn, "failed to parse comment",
+					p.logger.LogAttrs(ctx, slog.LevelWarn, "failed to parse comment",
 						slog.String("error", err.Error()),
 						slog.String("kind", child.Kind))
 				}
@@ -301,7 +404,7 @@ func (p *Parser) ExtractComments(thing *types.Thing) ([]*types.Comment, []string
 			// Collect more IDs from the entire tree
 			moreIDs = append(moreIDs, p.collectMoreIDs(comment)...)
 		case "more":
-			more, err := p.ParseMore(child)
+			more, err := p.ParseMore(ctx, child)
 			if err != nil {
 				continue
 			}
@@ -337,7 +440,7 @@ func (p *Parser) collectMoreIDsWithDepth(comment *types.Comment, depth int) []st
 
 // ExtractPostAndComments parses the typical response from GetComments which contains
 // [post_listing, comments_listing]. Returns the extracted post and comments data.
-func (p *Parser) ExtractPostAndComments(response []*types.Thing) (*types.CommentsResponse, error) {
+func (p *Parser) ExtractPostAndComments(ctx context.Context, response []*types.Thing) (*types.CommentsResponse, error) {
 	if len(response) == 0 {
 		return nil, fmt.Errorf("empty response")
 	}
@@ -350,7 +453,7 @@ func (p *Parser) ExtractPostAndComments(response []*types.Thing) (*types.Comment
 
 	if len(response) >= 2 {
 		// Standard format: first is post, second is comments
-		posts, err := p.ExtractPosts(response[0])
+		posts, err := p.ExtractPosts(ctx, response[0])
 		if err == nil && len(posts) > 0 {
 			result.Post = posts[0]
 		}
@@ -358,7 +461,7 @@ func (p *Parser) ExtractPostAndComments(response []*types.Thing) (*types.Comment
 
 		// Second element should be the comments listing - extract pagination info
 		if response[1] != nil && response[1].Kind == "Listing" {
-			listingData, err := p.ParseListing(response[1])
+			listingData, err := p.ParseListing(ctx, response[1])
 			if err == nil {
 				result.AfterFullname = listingData.AfterFullname
 				result.BeforeFullname = listingData.BeforeFullname
@@ -366,7 +469,7 @@ func (p *Parser) ExtractPostAndComments(response []*types.Thing) (*types.Comment
 		}
 
 		// Extract comments from the listing
-		comments, moreIDs, err := p.ExtractComments(response[1])
+		comments, moreIDs, err := p.ExtractComments(ctx, response[1])
 		if err != nil {
 			// If we have a post but no comments, return the post
 			if result.Post != nil {
@@ -384,17 +487,17 @@ func (p *Parser) ExtractPostAndComments(response []*types.Thing) (*types.Comment
 	// Single listing format: just comments, no post
 	// This happens when fetching additional comments or in certain API responses
 	if response[0] != nil && response[0].Kind == "Listing" {
-		listingData, err := p.ParseListing(response[0])
+		listingData, err := p.ParseListing(ctx, response[0])
 		if err == nil {
 			result.AfterFullname = listingData.AfterFullname
 			result.BeforeFullname = listingData.BeforeFullname
 		}
 	}
 
-	comments, moreIDs, err := p.ExtractComments(response[0])
+	comments, moreIDs, err := p.ExtractComments(ctx, response[0])
 	if err != nil {
 		// Try to extract as posts instead (might be a post-only response)
-		posts, err := p.ExtractPosts(response[0])
+		posts, err := p.ExtractPosts(ctx, response[0])
 		if err != nil || len(posts) == 0 {
 			return nil, fmt.Errorf("failed to extract data from single listing: %w", err)
 		}

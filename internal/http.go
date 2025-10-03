@@ -23,25 +23,39 @@ import (
 const (
 	// maxBufferSize is the maximum size of buffers to keep in the pool.
 	// Buffers larger than this will be discarded to prevent excessive memory usage.
-	maxBufferSize = 10 * 1024 * 1024 // 10MB
+	maxBufferSize = 256 * 1024 // 256KB - increased from 10MB for better memory efficiency
 	// initialBufferSize is the initial allocation size for new buffers
-	initialBufferSize = 4 * 1024 // 4KB for most API responses
+	initialBufferSize = 8 * 1024 // 8KB - increased for better performance
 	// maxResponseBodySize limits the size of HTTP response bodies to prevent DoS
 	maxResponseBodySize = 10 * 1024 * 1024 // 10MB
 )
 
-var bodyBufferPool = sync.Pool{
-	New: func() interface{} {
-		// Pre-allocate buffers with a reasonable initial size
-		buf := new(bytes.Buffer)
-		buf.Grow(initialBufferSize)
-		return buf
-	},
-}
+var (
+	bodyBufferPool = sync.Pool{
+		New: func() interface{} {
+			// Pre-allocate buffers with a reasonable initial size
+			buf := new(bytes.Buffer)
+			buf.Grow(initialBufferSize)
+			return buf
+		},
+	}
+
+	// Track buffer pool statistics for monitoring
+	bufferPoolStats = struct {
+		sync.Mutex
+		allocations int64
+		returns     int64
+		discarded   int64
+	}{}
+)
 
 func getBuffer() *bytes.Buffer {
 	buf := bodyBufferPool.Get().(*bytes.Buffer)
 	buf.Reset() // Ensure buffer is clean before use
+
+	// Track statistics
+	atomic.AddInt64(&bufferPoolStats.allocations, 1)
+
 	return buf
 }
 
@@ -51,11 +65,20 @@ func putBuffer(buf *bytes.Buffer) {
 		return
 	}
 
+	// Track statistics
+	atomic.AddInt64(&bufferPoolStats.returns, 1)
+
+	cap := buf.Cap()
+
 	// Don't return oversized buffers to the pool to prevent memory bloat
-	// These will be garbage collected instead
-	if buf.Cap() > maxBufferSize {
-		// Explicitly nil out to help GC (though this local variable will go out of scope anyway)
-		// The important thing is we don't keep a reference in the pool
+	if cap > maxBufferSize {
+		atomic.AddInt64(&bufferPoolStats.discarded, 1)
+
+		// For very large buffers, consider shrinking them before discarding
+		if cap > 1024*1024 { // 1MB
+			// Reset to a reasonable size to help GC
+			*buf = *bytes.NewBuffer(make([]byte, 0, initialBufferSize))
+		}
 		return
 	}
 
@@ -420,16 +443,37 @@ func (c *Client) applyRateHeaders(resp *http.Response) {
 		return
 	}
 
-	// Proactive throttling: start slowing down when approaching the rate limit
+	// Enhanced proactive throttling with better calculations
 	if remaining < c.rateLimitThreshold {
-		// Calculate delay to spread remaining requests over the reset period
-		// Add conservative buffer to be safe
-		if remaining > 0 {
-			delayPerRequest := (resetSeconds * RateLimitBufferMultiplier) / remaining
-			c.deferRequests(ctx, time.Duration(delayPerRequest*float64(time.Second)), "proactive_ratelimit")
-		} else {
-			// No requests remaining, must wait full reset period
-			c.deferRequests(ctx, time.Duration(resetSeconds*float64(time.Second)), "ratelimit_exhausted")
+		now := time.Now()
+		resetTime := time.Unix(int64(resetSeconds), 0)
+
+		// Only apply throttling if reset time is in the future and reasonable
+		if resetTime.After(now) && resetTime.Before(now.Add(time.Hour)) {
+			timeUntilReset := resetTime.Sub(now)
+
+			if remaining > 0 {
+				// Calculate delay to spread remaining requests over the reset period
+				// Add conservative buffer and ensure minimum delay
+				delayPerRequest := (resetSeconds * RateLimitBufferMultiplier) / remaining
+				delay := time.Duration(delayPerRequest * float64(time.Second))
+
+				// Ensure minimum delay of 100ms and maximum of 1 minute
+				if delay < 100*time.Millisecond {
+					delay = 100 * time.Millisecond
+				} else if delay > time.Minute {
+					delay = time.Minute
+				}
+
+				c.deferRequests(ctx, delay, "proactive_ratelimit")
+			} else {
+				// No requests remaining, wait until reset but cap at 5 minutes
+				waitTime := timeUntilReset
+				if waitTime > 5*time.Minute {
+					waitTime = 5 * time.Minute
+				}
+				c.deferRequests(ctx, waitTime, "ratelimit_exhausted")
+			}
 		}
 	}
 }

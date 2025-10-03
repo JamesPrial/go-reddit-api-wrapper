@@ -1,9 +1,9 @@
 package types
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
-	"strings"
 )
 
 // RedditObject defines the common behavior for all Reddit API objects like
@@ -62,38 +62,82 @@ type Edited struct {
 }
 
 // UnmarshalJSON implements json.Unmarshaler to handle mixed types for the "edited" field.
+// This implementation is more robust against malformed input and potential attacks.
 func (e *Edited) UnmarshalJSON(data []byte) error {
-	s := string(data)
-	// It can be a boolean `false`.
-	if strings.ToLower(s) == "false" {
+	// Trim whitespace first
+	data = trimSpace(data)
+
+	// Handle null case
+	if len(data) == 0 || bytes.Equal(data, []byte("null")) {
 		e.IsEdited = false
 		e.Timestamp = 0
 		return nil
 	}
 
-	// It can be a boolean `true` for old edits.
-	if strings.ToLower(s) == "true" {
+	// Handle boolean cases
+	if bytes.Equal(data, []byte("true")) || bytes.Equal(data, []byte("\"true\"")) {
 		e.IsEdited = true
 		e.Timestamp = 0
 		return nil
 	}
 
-	// It could be null, which we treat as not edited.
-	if strings.ToLower(s) == "null" {
+	if bytes.Equal(data, []byte("false")) || bytes.Equal(data, []byte("\"false\"")) {
 		e.IsEdited = false
 		e.Timestamp = 0
 		return nil
 	}
 
-	// It can be a float timestamp.
+	// Handle quoted boolean strings
+	if len(data) >= 2 && data[0] == '"' && data[len(data)-1] == '"' {
+		unquoted := data[1 : len(data)-1]
+		if bytes.Equal(unquoted, []byte("true")) {
+			e.IsEdited = true
+			e.Timestamp = 0
+			return nil
+		}
+		if bytes.Equal(unquoted, []byte("false")) {
+			e.IsEdited = false
+			e.Timestamp = 0
+			return nil
+		}
+	}
+
+	// Handle numeric timestamp
 	var timestamp float64
 	if err := json.Unmarshal(data, &timestamp); err == nil {
-		e.IsEdited = true
-		e.Timestamp = timestamp
-		return nil
+		// Validate timestamp is reasonable (not negative, not too far in future)
+		if timestamp >= 0 && timestamp <= 9999999999 { // Reasonable range up to ~2286
+			e.IsEdited = true
+			e.Timestamp = timestamp
+			return nil
+		}
 	}
 
-	return fmt.Errorf("unrecognized type for 'edited' field: %s", s)
+	// If we get here, the data is invalid
+	return fmt.Errorf("invalid value for 'edited' field: %s", string(data))
+}
+
+// trimSpace safely trims whitespace from JSON data
+func trimSpace(data []byte) []byte {
+	start := 0
+	end := len(data)
+
+	// Find first non-whitespace character
+	for start < end && isSpace(data[start]) {
+		start++
+	}
+
+	// Find last non-whitespace character
+	for end > start && isSpace(data[end-1]) {
+		end--
+	}
+
+	return data[start:end]
+}
+
+// isSpace checks if a byte is a whitespace character
+func isSpace(c byte) bool {
+	return c == ' ' || c == '\t' || c == '\n' || c == '\r'
 }
 
 // ListingData contains the data inside a Listing wrapper.

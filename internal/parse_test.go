@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
@@ -111,7 +112,7 @@ func TestParseThing(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := parser.ParseThing(tt.thing)
+			result, err := parser.ParseThing(context.Background(), tt.thing)
 
 			if tt.expectError {
 				if err == nil {
@@ -185,7 +186,7 @@ func TestParseListing(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := parser.ParseListing(tt.thing)
+			result, err := parser.ParseListing(context.Background(), tt.thing)
 
 			if tt.expectError {
 				if err == nil {
@@ -273,7 +274,7 @@ func TestParsePost(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := parser.ParsePost(tt.thing)
+			result, err := parser.ParsePost(context.Background(), tt.thing)
 
 			if tt.expectError {
 				if err == nil {
@@ -380,7 +381,9 @@ func TestParseComment(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := parser.ParseComment(tt.thing)
+			result, err := parser.ParseComment(context.Background(), tt.thing, &parseContext{
+				seenIDs: make(map[string]bool),
+			})
 
 			if tt.expectError {
 				if err == nil {
@@ -448,7 +451,7 @@ func TestParseSubreddit(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := parser.ParseSubreddit(tt.thing)
+			result, err := parser.ParseSubreddit(context.Background(), tt.thing)
 
 			if tt.expectError {
 				if err == nil {
@@ -516,7 +519,7 @@ func TestParseAccount(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := parser.ParseAccount(tt.thing)
+			result, err := parser.ParseAccount(context.Background(), tt.thing)
 
 			if tt.expectError {
 				if err == nil {
@@ -583,7 +586,7 @@ func TestParseMessage(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := parser.ParseMessage(tt.thing)
+			result, err := parser.ParseMessage(context.Background(), tt.thing)
 
 			if tt.expectError {
 				if err == nil {
@@ -657,7 +660,7 @@ func TestParseMore(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := parser.ParseMore(tt.thing)
+			result, err := parser.ParseMore(context.Background(), tt.thing)
 
 			if tt.expectError {
 				if err == nil {
@@ -784,7 +787,7 @@ func TestExtractPosts(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			posts, err := parser.ExtractPosts(tt.thing)
+			posts, err := parser.ExtractPosts(context.Background(), tt.thing)
 
 			if tt.expectError {
 				if err == nil {
@@ -984,7 +987,7 @@ func TestExtractComments(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			comments, moreIDs, err := parser.ExtractComments(tt.thing)
+			comments, moreIDs, err := parser.ExtractComments(context.Background(), tt.thing)
 
 			if tt.expectError {
 				if err == nil {
@@ -1165,7 +1168,7 @@ func TestExtractPostAndComments(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := parser.ExtractPostAndComments(tt.response)
+			result, err := parser.ExtractPostAndComments(context.Background(), tt.response)
 
 			if tt.expectError {
 				if err == nil {
@@ -1234,7 +1237,7 @@ func TestExtractPostAndComments_EdgeCases(t *testing.T) {
 			},
 		}
 
-		result, err := parser.ExtractPostAndComments(response)
+		result, err := parser.ExtractPostAndComments(context.Background(), response)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -1275,7 +1278,7 @@ func TestExtractPostAndComments_EdgeCases(t *testing.T) {
 			},
 		}
 
-		result, err := parser.ExtractPostAndComments(response)
+		result, err := parser.ExtractPostAndComments(context.Background(), response)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -1302,7 +1305,7 @@ func TestExtractPostAndComments_EdgeCases(t *testing.T) {
 			},
 		}
 
-		result, err := parser.ExtractPostAndComments(response)
+		result, err := parser.ExtractPostAndComments(context.Background(), response)
 		if err == nil {
 			t.Fatal("expected error but got none")
 		}
@@ -1319,7 +1322,7 @@ func TestExtractPostAndComments_EdgeCases(t *testing.T) {
 			},
 		}
 
-		result, err := parser.ExtractPostAndComments(response)
+		result, err := parser.ExtractPostAndComments(context.Background(), response)
 		if err == nil {
 			t.Fatal("expected error but got none")
 		}
@@ -1455,7 +1458,9 @@ func TestCommentTreeStructure(t *testing.T) {
 		}`),
 	}
 
-	parent, err := parser.ParseComment(thing)
+	parent, err := parser.ParseComment(context.Background(), thing, &parseContext{
+		seenIDs: make(map[string]bool),
+	})
 	if err != nil {
 		t.Fatalf("ParseComment failed: %v", err)
 	}
@@ -1532,7 +1537,9 @@ func TestCommentTreeWithMoreIDs(t *testing.T) {
 		}`),
 	}
 
-	parent, err := parser.ParseComment(thing)
+	parent, err := parser.ParseComment(context.Background(), thing, &parseContext{
+		seenIDs: make(map[string]bool),
+	})
 	if err != nil {
 		t.Fatalf("ParseComment failed: %v", err)
 	}

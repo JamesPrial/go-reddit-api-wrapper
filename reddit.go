@@ -61,6 +61,8 @@ const (
 	// Concurrency limits
 	// MaxConcurrentCommentRequests limits parallel goroutines in GetCommentsMultiple
 	MaxConcurrentCommentRequests = 10
+	// MaxTotalCommentRequests limits total requests in GetCommentsMultiple to prevent DoS
+	MaxTotalCommentRequests = 100
 )
 
 // RateLimitConfig configures the client's local rate limiting behavior.
@@ -208,9 +210,9 @@ type Validator interface {
 
 type Parser interface {
 	// ParseThing parses a Reddit Thing into the appropriate Go struct based on its kind.
-	ParseThing(thing *types.Thing) (any, error)
-	ExtractPosts(thing *types.Thing) ([]*types.Post, error)
-	ExtractPostAndComments(things []*types.Thing) (*types.CommentsResponse, error)
+	ParseThing(ctx context.Context, thing *types.Thing) (any, error)
+	ExtractPosts(ctx context.Context, thing *types.Thing) ([]*types.Post, error)
+	ExtractPostAndComments(ctx context.Context, things []*types.Thing) (*types.CommentsResponse, error)
 }
 
 // Client is the main Reddit API client.
@@ -386,7 +388,7 @@ func (c *Client) Me(ctx context.Context) (*types.AccountData, error) {
 	}
 
 	// Parse the account data
-	parsed, err := c.parser.ParseThing(&result)
+	parsed, err := c.parser.ParseThing(ctx, &result)
 	if err != nil {
 		return nil, &pkgerrs.ParseError{Operation: "parse user info", Err: err}
 	}
@@ -441,7 +443,7 @@ func (c *Client) GetSubreddit(ctx context.Context, name string) (*types.Subreddi
 	}
 
 	// Parse the subreddit data
-	parsed, err := c.parser.ParseThing(&result)
+	parsed, err := c.parser.ParseThing(ctx, &result)
 	if err != nil {
 		return nil, &pkgerrs.ParseError{Operation: "parse subreddit", Err: err}
 	}
@@ -530,13 +532,13 @@ func (c *Client) getPosts(ctx context.Context, request *types.PostsRequest, sort
 		return nil, wrapDoError(err, "get "+sort+" posts", path)
 	}
 
-	posts, err := c.parser.ExtractPosts(&result)
+	posts, err := c.parser.ExtractPosts(ctx, &result)
 	if err != nil {
 		return nil, &pkgerrs.ParseError{Operation: "parse posts", Err: err}
 	}
 
 	var after, before string
-	listing, err := c.parser.ParseThing(&result)
+	listing, err := c.parser.ParseThing(ctx, &result)
 	if err == nil {
 		if listingData, ok := listing.(*types.ListingData); ok {
 			after = listingData.AfterFullname
@@ -609,7 +611,7 @@ func (c *Client) GetComments(ctx context.Context, request *types.CommentsRequest
 	}
 
 	// Parse the post and comments
-	extractResult, err := c.parser.ExtractPostAndComments(result)
+	extractResult, err := c.parser.ExtractPostAndComments(ctx, result)
 	if err != nil {
 		return nil, &pkgerrs.ParseError{Operation: "parse comments", Err: err}
 	}
@@ -633,10 +635,17 @@ func (c *Client) GetComments(ctx context.Context, request *types.CommentsRequest
 // preventing resource exhaustion when processing many requests. Results are collected in the original order.
 // If any request fails, the error is returned but successful responses are still included in the result slice.
 //
-// Returns an error if any individual request fails.
+// Returns an error if any individual request fails or if too many requests are provided.
 func (c *Client) GetCommentsMultiple(ctx context.Context, requests []*types.CommentsRequest) ([]*types.CommentsResponse, error) {
 	if len(requests) == 0 {
 		return []*types.CommentsResponse{}, nil
+	}
+
+	// Add overall limit check to prevent DoS
+	if len(requests) > MaxTotalCommentRequests {
+		return nil, &pkgerrs.ConfigError{
+			Message: fmt.Sprintf("too many requests (%d), maximum is %d", len(requests), MaxTotalCommentRequests),
+		}
 	}
 
 	// Validate all requests upfront before launching goroutines
@@ -813,7 +822,7 @@ func (c *Client) GetMoreComments(ctx context.Context, request *types.MoreComment
 	var comments []*types.Comment
 	for _, thing := range things {
 
-		parsed, err := c.parser.ParseThing(thing)
+		parsed, err := c.parser.ParseThing(ctx, thing)
 		if err != nil {
 			// Log parse error if logger is available
 			if c.config.Logger != nil {
