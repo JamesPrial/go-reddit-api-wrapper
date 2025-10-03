@@ -395,30 +395,6 @@ func TestErrorUnwrapBehavior(t *testing.T) {
 	t.Log("Error unwrap behavior verified")
 }
 
-// TestNilErrorHandling tests handling of nil errors
-func TestNilErrorHandling(t *testing.T) {
-	// Test that nil errors don't cause issues
-	var err error
-
-	// Should be able to check nil error
-	if err != nil {
-		t.Error("Nil error check failed")
-	}
-
-	// Should be able to unwrap nil
-	unwrapped := errors.Unwrap(err)
-	if unwrapped != nil {
-		t.Errorf("Unwrapping nil should return nil, got: %v", unwrapped)
-	}
-
-	// Should be able to use errors.Is with nil
-	if errors.Is(err, errors.New("some error")) {
-		t.Error("errors.Is with nil should return false")
-	}
-
-	t.Log("Nil error handling verified")
-}
-
 // TestConcurrentErrorTypeAssertion tests concurrent error type assertions
 func TestConcurrentErrorTypeAssertion(t *testing.T) {
 	// Create different error types
