@@ -325,6 +325,7 @@ type Post struct {
 	Edited              Edited          `json:"edited"` // Can be a boolean or a float64 timestamp
 	Distinguished       *string         `json:"distinguished"`
 	Stickied            bool            `json:"stickied"`
+	UpvoteRatio         float64         `json:"upvote_ratio"` // Percentage of upvotes (0.0 to 1.0, e.g. 0.95 = 95% upvoted)
 }
 
 // Comment represents a Reddit comment with all its fields
