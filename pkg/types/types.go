@@ -6,6 +6,15 @@ import (
 	"fmt"
 )
 
+const PREFIX_LENGTH = 3  // Length of kind prefixes like "t1_"
+const PREFIX_IDX = 2     // Index of '_' in kind prefixes like "t1_" (no magic numbers!!!)
+const ID_MAX_LENGTH = 13 // Max length of Reddit IDs (without prefix)
+
+const MAX_POST_TITLE_LENGTH = 300     // Reddit enforces a maximum title length of 300 characters
+const MAX_COMMENT_BODY_LENGTH = 10000 // Reddit enforces a maximum comment body length of 10,000 characters
+const MIN_USERNAME_LENGTH = 3         // Reddit enforces a minimum username length of 3 characters
+const MAX_USERNAME_LENGTH = 20        // Reddit enforces a maximum username length of 20 characters
+
 // KindPrefix represents a Reddit "kind" prefix used in fullnames.
 type KindPrefix string
 
@@ -17,10 +26,6 @@ const (
 	KIND_SUBREDDIT KindPrefix = "t5_"
 	KIND_AWARD     KindPrefix = "t6_"
 )
-
-const PREFIX_LENGTH = 3  // Length of kind prefixes like "t1_"
-const PREFIX_IDX = 2     // Index of '_' in kind prefixes like "t1_" (no magic numbers!!!)
-const ID_MAX_LENGTH = 13 // Max length of Reddit IDs (without prefix)
 
 // IsValidKindPrefix checks if a string is a valid KindPrefix.
 func IsValidKindPrefix(s string) bool {
@@ -356,8 +361,6 @@ type Post struct {
 	Stickied            bool            `json:"stickied"`
 	UpvoteRatio         float64         `json:"upvote_ratio"` // Percentage of upvotes (0.0 to 1.0, e.g. 0.95 = 95% upvoted)
 }
-
-const MAX_POST_TITLE_LENGTH = 300 // Reddit enforces a maximum title length of 300 characters
 
 // Comment represents a Reddit comment with all its fields
 type Comment struct {
