@@ -60,36 +60,32 @@ func NewCommentGenerator(seed int64) *CommentGenerator {
 func (cg *CommentGenerator) GenerateComment() types.Comment {
 	now := time.Now()
 	createdTime := now.Add(-time.Duration(cg.rand.Intn(86400)) * time.Second) // Random time in last 24h
+	createdUTC := float64(createdTime.Unix())
 
 	comment := types.Comment{
-		ID:        cg.generateCommentID(),
+		ThingData: types.ThingData{
+			ID:   cg.generateCommentID(),
+			Name: "t1_" + cg.generateCommentID(),
+		},
+		Votable: types.Votable{
+			Score: cg.generateCommentScore(),
+		},
+		Created: types.Created{
+			Created:    createdUTC,
+			CreatedUTC: createdUTC,
+		},
 		Author:    cg.randElement(cg.users),
 		Body:      cg.generateCommentBody(),
-		Score:     cg.generateCommentScore(),
-		Created:   createdTime,
 		Edited:    cg.generateEditedTime(createdTime),
 		ParentID:  cg.generateParentID(),
-		PostID:    cg.generatePostID(),
+		LinkID:    cg.generatePostID(),
 		Subreddit: cg.randElement([]string{"programming", "gaming", "technology", "science", "askreddit"}),
-		Depth:     0,
-		Replies:   make([]types.Comment, 0),
+		Replies:   make([]*types.Comment, 0),
 	}
 
 	// Add optional characteristics
-	if cg.rand.Float32() < 0.1 { // 10% chance
-		comment.IsSubmitter = true
-	}
-
-	if cg.rand.Float32() < 0.05 { // 5% chance
-		comment.IsModerator = true
-	}
-
-	if cg.rand.Float32() < 0.02 { // 2% chance
-		comment.IsAdmin = true
-	}
-
 	if cg.rand.Float32() < 0.08 { // 8% chance
-		comment.Awards = cg.rand.Intn(5) + 1
+		comment.Gilded = cg.rand.Intn(5) + 1
 	}
 
 	return comment
@@ -102,7 +98,6 @@ func (cg *CommentGenerator) GenerateCommentThread(maxDepth int, maxComments int)
 	}
 
 	rootComment := cg.GenerateComment()
-	rootComment.Depth = 0
 
 	remainingComments := maxComments - 1
 	if remainingComments <= 0 {
@@ -110,7 +105,7 @@ func (cg *CommentGenerator) GenerateCommentThread(maxDepth int, maxComments int)
 	}
 
 	// Generate replies to create thread structure
-	replies := cg.generateReplies(rootComment, 1, maxDepth, remainingComments)
+	replies := cg.generateReplies(&rootComment, 1, maxDepth, remainingComments)
 	rootComment.Replies = replies
 
 	return []types.Comment{rootComment}
@@ -135,7 +130,6 @@ func (cg *CommentGenerator) GenerateCommentThreadWithOptions(maxDepth, maxCommen
 	}
 
 	rootComment := cg.GenerateCommentWithOptions(opts)
-	rootComment.Depth = 0
 
 	remainingComments := maxComments - 1
 	if remainingComments <= 0 {
@@ -143,7 +137,7 @@ func (cg *CommentGenerator) GenerateCommentThreadWithOptions(maxDepth, maxCommen
 	}
 
 	// Generate replies with options
-	replies := cg.generateRepliesWithOptions(rootComment, 1, maxDepth, remainingComments, opts)
+	replies := cg.generateRepliesWithOptions(&rootComment, 1, maxDepth, remainingComments, opts)
 	rootComment.Replies = replies
 
 	return []types.Comment{rootComment}
@@ -177,22 +171,21 @@ func (cg *CommentGenerator) GenerateCommentWithOptions(opts CommentThreadOptions
 
 	if opts.Controversial {
 		comment.Score = cg.rand.Intn(1000) + 100
-		comment.Controversial = true
 	}
 
 	if opts.Popular {
 		comment.Score = cg.rand.Intn(5000) + 1000
 		if cg.rand.Float32() < 0.3 {
-			comment.Awards = cg.rand.Intn(10) + 1
+			comment.Gilded = cg.rand.Intn(10) + 1
 		}
 	}
 
 	if !opts.HasEdited {
-		comment.Edited = time.Time{}
+		comment.Edited = types.Edited{IsEdited: false, Timestamp: 0}
 	}
 
 	if !opts.HasAwards {
-		comment.Awards = 0
+		comment.Gilded = 0
 	}
 
 	if opts.Subreddit != "" {
@@ -200,16 +193,16 @@ func (cg *CommentGenerator) GenerateCommentWithOptions(opts CommentThreadOptions
 	}
 
 	if opts.PostID != "" {
-		comment.PostID = opts.PostID
+		comment.LinkID = opts.PostID
 	}
 
 	return comment
 }
 
 // GenerateReplies generates replies for a comment
-func (cg *CommentGenerator) generateReplies(parent types.Comment, currentDepth, maxDepth, remainingComments int) []types.Comment {
+func (cg *CommentGenerator) generateReplies(parent *types.Comment, currentDepth, maxDepth, remainingComments int) []*types.Comment {
 	if currentDepth > maxDepth || remainingComments <= 0 {
-		return []types.Comment{}
+		return []*types.Comment{}
 	}
 
 	replyCount := cg.rand.Intn(3) + 1 // 1-3 replies per comment
@@ -217,25 +210,24 @@ func (cg *CommentGenerator) generateReplies(parent types.Comment, currentDepth, 
 		replyCount = remainingComments
 	}
 
-	var replies []types.Comment
+	var replies []*types.Comment
 	usedComments := 0
 
 	for i := 0; i < replyCount && usedComments < remainingComments; i++ {
 		reply := cg.GenerateComment()
 		reply.ParentID = parent.ID
-		reply.PostID = parent.PostID
+		reply.LinkID = parent.LinkID
 		reply.Subreddit = parent.Subreddit
-		reply.Depth = currentDepth
 
 		// Generate nested replies
 		nestedRemaining := remainingComments - usedComments - 1
 		if nestedRemaining > 0 && currentDepth < maxDepth {
-			nestedReplies := cg.generateReplies(reply, currentDepth+1, maxDepth, nestedRemaining)
+			nestedReplies := cg.generateReplies(&reply, currentDepth+1, maxDepth, nestedRemaining)
 			reply.Replies = nestedReplies
 			usedComments += len(nestedReplies)
 		}
 
-		replies = append(replies, reply)
+		replies = append(replies, &reply)
 		usedComments++
 	}
 
@@ -243,9 +235,9 @@ func (cg *CommentGenerator) generateReplies(parent types.Comment, currentDepth, 
 }
 
 // GenerateRepliesWithOptions generates replies with specific options
-func (cg *CommentGenerator) generateRepliesWithOptions(parent types.Comment, currentDepth, maxDepth, remainingComments int, opts CommentThreadOptions) []types.Comment {
+func (cg *CommentGenerator) generateRepliesWithOptions(parent *types.Comment, currentDepth, maxDepth, remainingComments int, opts CommentThreadOptions) []*types.Comment {
 	if currentDepth > maxDepth || remainingComments <= 0 {
-		return []types.Comment{}
+		return []*types.Comment{}
 	}
 
 	replyCount := opts.MinReplies + cg.rand.Intn(opts.MaxReplies-opts.MinReplies+1)
@@ -253,25 +245,24 @@ func (cg *CommentGenerator) generateRepliesWithOptions(parent types.Comment, cur
 		replyCount = remainingComments
 	}
 
-	var replies []types.Comment
+	var replies []*types.Comment
 	usedComments := 0
 
 	for i := 0; i < replyCount && usedComments < remainingComments; i++ {
 		reply := cg.GenerateCommentWithOptions(opts)
 		reply.ParentID = parent.ID
-		reply.PostID = parent.PostID
+		reply.LinkID = parent.LinkID
 		reply.Subreddit = parent.Subreddit
-		reply.Depth = currentDepth
 
 		// Generate nested replies
 		nestedRemaining := remainingComments - usedComments - 1
 		if nestedRemaining > 0 && currentDepth < maxDepth {
-			nestedReplies := cg.generateRepliesWithOptions(reply, currentDepth+1, maxDepth, nestedRemaining, opts)
+			nestedReplies := cg.generateRepliesWithOptions(&reply, currentDepth+1, maxDepth, nestedRemaining, opts)
 			reply.Replies = nestedReplies
 			usedComments += len(nestedReplies)
 		}
 
-		replies = append(replies, reply)
+		replies = append(replies, &reply)
 		usedComments++
 	}
 
@@ -409,14 +400,15 @@ func (cg *CommentGenerator) generatePostID() string {
 	return fmt.Sprintf("t3_%x", cg.rand.Int63())
 }
 
-func (cg *CommentGenerator) generateEditedTime(created time.Time) time.Time {
+func (cg *CommentGenerator) generateEditedTime(created time.Time) types.Edited {
 	if cg.rand.Float32() < 0.85 { // 85% chance not edited
-		return time.Time{}
+		return types.Edited{IsEdited: false, Timestamp: 0}
 	}
 
 	// Edited sometime after creation
 	editDelay := time.Duration(cg.rand.Intn(7200)) * time.Second // Within 2 hours
-	return created.Add(editDelay)
+	editedTime := created.Add(editDelay)
+	return types.Edited{IsEdited: true, Timestamp: float64(editedTime.Unix())}
 }
 
 func (cg *CommentGenerator) randElement(slice []string) string {
@@ -472,7 +464,14 @@ func FlattenComments(comments []types.Comment) []types.Comment {
 	for _, comment := range comments {
 		flat = append(flat, comment)
 		if len(comment.Replies) > 0 {
-			flat = append(flat, FlattenComments(comment.Replies)...)
+			// Convert []*Comment to []Comment for recursion
+			var replyComments []types.Comment
+			for _, reply := range comment.Replies {
+				if reply != nil {
+					replyComments = append(replyComments, *reply)
+				}
+			}
+			flat = append(flat, FlattenComments(replyComments)...)
 		}
 	}
 
@@ -483,20 +482,41 @@ func FlattenComments(comments []types.Comment) []types.Comment {
 func CountComments(comments []types.Comment) int {
 	count := len(comments)
 	for _, comment := range comments {
-		count += CountComments(comment.Replies)
+		if len(comment.Replies) > 0 {
+			// Convert []*Comment to []Comment for recursion
+			var replyComments []types.Comment
+			for _, reply := range comment.Replies {
+				if reply != nil {
+					replyComments = append(replyComments, *reply)
+				}
+			}
+			count += CountComments(replyComments)
+		}
 	}
 	return count
 }
 
 // GetMaxDepth finds the maximum depth in a nested comment structure
 func GetMaxDepth(comments []types.Comment) int {
-	maxDepth := 0
+	return getMaxDepthHelper(comments, 0)
+}
+
+func getMaxDepthHelper(comments []types.Comment, currentDepth int) int {
+	if len(comments) == 0 {
+		return currentDepth
+	}
+
+	maxDepth := currentDepth
 	for _, comment := range comments {
-		if comment.Depth > maxDepth {
-			maxDepth = comment.Depth
-		}
 		if len(comment.Replies) > 0 {
-			replyDepth := GetMaxDepth(comment.Replies)
+			// Convert []*Comment to []Comment for recursion
+			var replyComments []types.Comment
+			for _, reply := range comment.Replies {
+				if reply != nil {
+					replyComments = append(replyComments, *reply)
+				}
+			}
+			replyDepth := getMaxDepthHelper(replyComments, currentDepth+1)
 			if replyDepth > maxDepth {
 				maxDepth = replyDepth
 			}

@@ -3,7 +3,6 @@ package test_utils
 import (
 	"fmt"
 	"reflect"
-	"regexp"
 	"strings"
 	"time"
 
@@ -71,7 +70,7 @@ func AssertValidComment(comment types.Comment) error {
 }
 
 // AssertValidSubreddit validates that subreddit data is valid
-func AssertValidSubreddit(subreddit types.Subreddit) error {
+func AssertValidSubreddit(subreddit types.SubredditData) error {
 	if subreddit.DisplayName == "" {
 		return fmt.Errorf("subreddit display name is empty")
 	}
@@ -82,10 +81,6 @@ func AssertValidSubreddit(subreddit types.Subreddit) error {
 
 	if subreddit.Subscribers < 0 {
 		return fmt.Errorf("subreddit subscriber count is negative: %d", subreddit.Subscribers)
-	}
-
-	if subreddit.Created.IsZero() {
-		return fmt.Errorf("subreddit created time is zero")
 	}
 
 	return nil
@@ -109,8 +104,8 @@ func AssertPostsEqual(expected, actual types.Post) error {
 		return fmt.Errorf("post subreddit mismatch: expected %s, got %s", expected.Subreddit, actual.Subreddit)
 	}
 
-	if expected.Body != actual.Body {
-		return fmt.Errorf("post body mismatch: expected %s, got %s", expected.Body, actual.Body)
+	if expected.SelfText != actual.SelfText {
+		return fmt.Errorf("post body mismatch: expected %s, got %s", expected.SelfText, actual.SelfText)
 	}
 
 	if expected.Score != actual.Score {
@@ -129,12 +124,8 @@ func AssertPostsEqual(expected, actual types.Post) error {
 		return fmt.Errorf("post permalink mismatch: expected %s, got %s", expected.Permalink, actual.Permalink)
 	}
 
-	if expected.NSFW != actual.NSFW {
-		return fmt.Errorf("post NSFW mismatch: expected %v, got %v", expected.NSFW, actual.NSFW)
-	}
-
-	if expected.Spoiler != actual.Spoiler {
-		return fmt.Errorf("post spoiler mismatch: expected %v, got %v", expected.Spoiler, actual.Spoiler)
+	if expected.Over18 != actual.Over18 {
+		return fmt.Errorf("post NSFW mismatch: expected %v, got %v", expected.Over18, actual.Over18)
 	}
 
 	return nil
@@ -166,12 +157,8 @@ func AssertCommentsEqual(expected, actual types.Comment) error {
 		return fmt.Errorf("comment parent ID mismatch: expected %s, got %s", expected.ParentID, actual.ParentID)
 	}
 
-	if expected.PostID != actual.PostID {
-		return fmt.Errorf("comment post ID mismatch: expected %s, got %s", expected.PostID, actual.PostID)
-	}
-
-	if expected.Depth != actual.Depth {
-		return fmt.Errorf("comment depth mismatch: expected %d, got %d", expected.Depth, actual.Depth)
+	if expected.LinkID != actual.LinkID {
+		return fmt.Errorf("comment link ID mismatch: expected %s, got %s", expected.LinkID, actual.LinkID)
 	}
 
 	return nil
@@ -225,29 +212,34 @@ func AssertCommentThreadValid(comments []types.Comment) error {
 
 	// Validate thread structure
 	for i, comment := range comments {
-		// Check that depth is consistent with parent-child relationships
-		if comment.Depth > 0 {
-			// Find parent comment
+		// Validate parent references
+		if comment.ParentID != "" && !strings.HasPrefix(comment.ParentID, "t3_") {
+			// Check parent exists if it's a comment (t1_)
 			parentFound := false
 			for _, potentialParent := range comments {
 				if potentialParent.ID == comment.ParentID {
-					if potentialParent.Depth != comment.Depth-1 {
-						return fmt.Errorf("comment at index %d has depth %d but parent has depth %d", i, comment.Depth, potentialParent.Depth)
-					}
 					parentFound = true
 					break
 				}
 			}
 
-			// If parent is a post (t3_), depth should be 0
-			if !parentFound && !strings.HasPrefix(comment.ParentID, "t3_") {
+			if !parentFound && strings.HasPrefix(comment.ParentID, "t1_") {
 				return fmt.Errorf("comment at index %d references non-existent parent: %s", i, comment.ParentID)
 			}
 		}
 
 		// Validate nested replies
-		if err := AssertCommentThreadValid(comment.Replies); err != nil {
-			return fmt.Errorf("invalid replies for comment at index %d: %v", i, err)
+		if len(comment.Replies) > 0 {
+			// Convert []*Comment to []Comment for recursion
+			var replyComments []types.Comment
+			for _, reply := range comment.Replies {
+				if reply != nil {
+					replyComments = append(replyComments, *reply)
+				}
+			}
+			if err := AssertCommentThreadValid(replyComments); err != nil {
+				return fmt.Errorf("invalid replies for comment at index %d: %v", i, err)
+			}
 		}
 	}
 

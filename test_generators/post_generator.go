@@ -79,29 +79,38 @@ func (pg *PostGenerator) GeneratePost() types.Post {
 
 	now := time.Now()
 	createdTime := now.Add(-time.Duration(pg.rand.Intn(86400)) * time.Second) // Random time in last 24h
+	createdUTC := float64(createdTime.Unix())
 
 	post := types.Post{
-		ID:        pg.generatePostID(),
-		Title:     title,
-		Author:    author,
-		Subreddit: subreddit,
-		Score:     pg.generateScore(),
-		Created:   createdTime,
-		Edited:    pg.generateEditedTime(createdTime),
-		Flair:     flair,
-		Body:      body,
-		URL:       pg.generatePostURL(subreddit, title),
-		Permalink: pg.generatePermalink(subreddit, title),
-		IsSelf:    len(body) > 0,
-		NSFW:      pg.rand.Float32() < 0.05, // 5% chance
-		Spoiler:   pg.rand.Float32() < 0.02, // 2% chance
-		Locked:    pg.rand.Float32() < 0.01, // 1% chance
-		Archived:  pg.rand.Float32() < 0.01, // 1% chance
+		ThingData: types.ThingData{
+			ID:   pg.generatePostID(),
+			Name: "t3_" + pg.generatePostID(),
+		},
+		Votable: types.Votable{
+			Score: pg.generateScore(),
+		},
+		Created: types.Created{
+			Created:    createdUTC,
+			CreatedUTC: createdUTC,
+		},
+		Title:         title,
+		Author:        author,
+		Subreddit:     subreddit,
+		Edited:        pg.generateEditedTime(createdTime),
+		LinkFlairText: &flair,
+		SelfText:      body,
+		URL:           pg.generatePostURL(subreddit, title),
+		Permalink:     pg.generatePermalink(subreddit, title),
+		IsSelf:        len(body) > 0,
+		Over18:        pg.rand.Float32() < 0.05, // 5% chance
+		Locked:        pg.rand.Float32() < 0.01, // 1% chance
+		NumComments:   pg.rand.Intn(1000),
+		UpvoteRatio:   0.5 + pg.rand.Float64()*0.5, // 50-100% ratio
 	}
 
 	// Add optional fields
 	if pg.rand.Float32() < 0.3 { // 30% chance
-		post.ThumbnailURL = pg.generateThumbnailURL()
+		post.Thumbnail = pg.generateThumbnailURL()
 	}
 
 	if pg.rand.Float32() < 0.2 { // 20% chance
@@ -162,22 +171,20 @@ func (pg *PostGenerator) GeneratePostWithOptions(opts PostOptions) types.Post {
 		post.NumComments = opts.MinComments + pg.rand.Intn(opts.MaxComments-opts.MinComments+1)
 	}
 
-	post.NSFW = opts.NSFW
-	post.Spoiler = opts.Spoiler
+	post.Over18 = opts.NSFW
 	post.Locked = opts.Locked
-	post.Archived = opts.Archived
 
 	if !opts.HasBody {
-		post.Body = ""
+		post.SelfText = ""
 		post.IsSelf = false
 	}
 
 	if !opts.HasFlair {
-		post.Flair = ""
+		post.LinkFlairText = nil
 	}
 
 	if !opts.HasThumbnail {
-		post.ThumbnailURL = ""
+		post.Thumbnail = ""
 	}
 
 	if opts.Subreddit != "" {
@@ -199,7 +206,7 @@ func (pg *PostGenerator) GenerateControversialPost() types.Post {
 
 	// Controversial posts typically have high upvotes and downvotes
 	post.Score = pg.rand.Intn(5000) + 1000
-	post.UpvoteRatio = 0.4 + pg.rand.Float32()*0.2 // 40-60% upvote ratio
+	post.UpvoteRatio = 0.4 + float64(pg.rand.Float32())*0.2 // 40-60% upvote ratio
 	post.NumComments = pg.rand.Intn(2000) + 500
 
 	// Often controversial topics
@@ -209,7 +216,8 @@ func (pg *PostGenerator) GenerateControversialPost() types.Post {
 	}
 
 	if pg.rand.Float32() < 0.7 {
-		post.Flair = pg.randElement(controversialTopics)
+		flair := pg.randElement(controversialTopics)
+		post.LinkFlairText = &flair
 	}
 
 	return post
@@ -221,13 +229,8 @@ func (pg *PostGenerator) GeneratePopularPost() types.Post {
 
 	// Popular posts have high scores and many comments
 	post.Score = pg.rand.Intn(50000) + 10000
-	post.UpvoteRatio = 0.85 + pg.rand.Float32()*0.14 // 85-99% upvote ratio
+	post.UpvoteRatio = 0.85 + float64(pg.rand.Float32())*0.14 // 85-99% upvote ratio
 	post.NumComments = pg.rand.Intn(10000) + 1000
-
-	// Often have awards
-	if pg.rand.Float32() < 0.6 {
-		post.TotalAwards = pg.rand.Intn(50) + 1
-	}
 
 	return post
 }
@@ -238,13 +241,13 @@ func (pg *PostGenerator) GenerateOldPost() types.Post {
 
 	// Old posts are from months or years ago
 	daysAgo := pg.rand.Intn(365*2) + 30 // 30 days to 2 years ago
-	post.Created = time.Now().Add(-time.Duration(daysAgo) * 24 * time.Hour)
-	post.Edited = time.Time{} // Usually not edited
-
-	// Often archived
-	if pg.rand.Float32() < 0.3 {
-		post.Archived = true
+	oldTime := time.Now().Add(-time.Duration(daysAgo) * 24 * time.Hour)
+	oldUTC := float64(oldTime.Unix())
+	post.Created = types.Created{
+		Created:    oldUTC,
+		CreatedUTC: oldUTC,
 	}
+	post.Edited = types.Edited{IsEdited: false, Timestamp: 0} // Usually not edited
 
 	return post
 }
@@ -359,14 +362,15 @@ func (pg *PostGenerator) generatePostID() string {
 	return fmt.Sprintf("t3_%x", pg.rand.Int63())
 }
 
-func (pg *PostGenerator) generateEditedTime(created time.Time) time.Time {
+func (pg *PostGenerator) generateEditedTime(created time.Time) types.Edited {
 	if pg.rand.Float32() < 0.8 { // 80% chance not edited
-		return time.Time{}
+		return types.Edited{IsEdited: false, Timestamp: 0}
 	}
 
 	// Edited sometime after creation
 	editDelay := time.Duration(pg.rand.Intn(3600)) * time.Second // Within 1 hour
-	return created.Add(editDelay)
+	editedTime := created.Add(editDelay)
+	return types.Edited{IsEdited: true, Timestamp: float64(editedTime.Unix())}
 }
 
 func (pg *PostGenerator) generatePostURL(subreddit, title string) string {
