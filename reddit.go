@@ -203,6 +203,16 @@ type Validator interface {
 	// Returns the normalized link ID with the "t3_" prefix, or an error if invalid.
 	ValidateLinkID(linkID string) (string, error)
 
+	// ValidatePostID validates a post ID is valid base36 format (without prefix).
+	// This is stricter than ValidateLinkID - it does not accept or add prefixes.
+	ValidatePostID(postID string) error
+
+	// ValidatePaginationToken validates that a pagination token (after/before) is a valid Reddit fullname.
+	ValidatePaginationToken(token string) error
+
+	// ValidateURL validates that a URL is a valid HTTP/HTTPS URL without protocol injection risks.
+	ValidateURL(url string) error
+
 	// ValidateConfig validates the configuration fields and returns the validated/defaulted httpClient.
 	// Returns an error if validation fails.
 	ValidateConfig(clientID, clientSecret, userAgent string, httpClient *http.Client, logger *slog.Logger, defaultTimeout time.Duration) (*http.Client, error)
@@ -278,6 +288,14 @@ func NewClientWithContext(ctx context.Context, config *Config) (*Client, error) 
 
 	// Validate config and set HTTP client defaults
 	validator := internal.NewValidator()
+
+	// Validate URLs
+	if err := validator.ValidateURL(config.BaseURL); err != nil {
+		return nil, &pkgerrs.ConfigError{Field: "BaseURL", Message: fmt.Sprintf("invalid base URL: %v", err)}
+	}
+	if err := validator.ValidateURL(config.AuthURL); err != nil {
+		return nil, &pkgerrs.ConfigError{Field: "AuthURL", Message: fmt.Sprintf("invalid auth URL: %v", err)}
+	}
 	var err error
 	config.HTTPClient, err = validator.ValidateConfig(
 		config.ClientID,
@@ -586,6 +604,11 @@ func (c *Client) GetComments(ctx context.Context, request *types.CommentsRequest
 		return nil, err
 	}
 
+	// Validate post ID format
+	if err := c.validator.ValidatePostID(request.PostID); err != nil {
+		return nil, err
+	}
+
 	// Validate pagination parameters
 	if err := c.validator.ValidatePagination(&request.Pagination); err != nil {
 		return nil, err
@@ -666,6 +689,20 @@ func (c *Client) GetCommentsMultiple(ctx context.Context, requests []*types.Comm
 			return nil, &pkgerrs.ConfigError{
 				Field:   fmt.Sprintf("requests[%d].PostID", i),
 				Message: "post ID is required",
+			}
+		}
+		// Validate subreddit name format
+		if err := c.validator.ValidateSubredditName(req.Subreddit); err != nil {
+			return nil, &pkgerrs.ConfigError{
+				Field:   fmt.Sprintf("requests[%d].Subreddit", i),
+				Message: err.Error(),
+			}
+		}
+		// Validate post ID format
+		if err := c.validator.ValidatePostID(req.PostID); err != nil {
+			return nil, &pkgerrs.ConfigError{
+				Field:   fmt.Sprintf("requests[%d].PostID", i),
+				Message: err.Error(),
 			}
 		}
 	}
