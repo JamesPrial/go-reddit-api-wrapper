@@ -32,10 +32,12 @@ func TestConcurrentClientUsage(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 
 		switch {
-		case strings.Contains(r.URL.Path, "/r/testsubreddit/about.json"):
+		case strings.Contains(r.URL.Path, "/r/testsubreddit/about") || strings.Contains(r.URL.Path, "r/testsubreddit/about"):
 			subredditData := map[string]interface{}{
 				"kind": "t5",
 				"data": map[string]interface{}{
+					"id":           "testsub1",
+					"name":         "t5_testsub1",
 					"display_name": "testsubreddit",
 					"subscribers":  100000,
 					"created_utc":  1234567890.0,
@@ -43,25 +45,31 @@ func TestConcurrentClientUsage(t *testing.T) {
 			}
 			json.NewEncoder(w).Encode(subredditData)
 
-		case strings.Contains(r.URL.Path, "/r/testsubreddit/hot.json"):
-			posts := []map[string]interface{}{
-				{
-					"kind": "t3",
-					"data": map[string]interface{}{
-						"id":     "post1",
-						"title":  "Test Post",
-						"score":  100,
-						"author": "testuser",
+		case strings.Contains(r.URL.Path, "/r/testsubreddit/hot") || strings.Contains(r.URL.Path, "r/testsubreddit/hot"):
+			response := map[string]interface{}{
+				"kind": "Listing",
+				"data": map[string]interface{}{
+					"after":  "",
+					"before": "",
+					"children": []map[string]interface{}{
+						{
+							"kind": "t3",
+							"data": map[string]interface{}{
+								"id":          "post1",
+								"name":        "t3_post1",
+								"title":       "Test Post",
+								"score":       100,
+								"author":      "testuser",
+								"subreddit":   "testsubreddit",
+								"permalink":   "/r/testsubreddit/comments/post1/test_post/",
+								"url":         "https://reddit.com/r/testsubreddit/comments/post1",
+								"created_utc": 1234567890.0,
+							},
+						},
 					},
 				},
 			}
-			listingData := map[string]interface{}{
-				"kind": "Listing",
-				"data": map[string]interface{}{
-					"children": posts,
-				},
-			}
-			json.NewEncoder(w).Encode(listingData)
+			json.NewEncoder(w).Encode(response)
 
 		default:
 			w.WriteHeader(http.StatusNotFound)
