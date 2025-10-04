@@ -96,8 +96,10 @@ func TestTokenRefreshTimingEdgeCases(t *testing.T) {
 		response := map[string]interface{}{
 			"kind": "t2",
 			"data": map[string]interface{}{
-				"id":   "user123",
-				"name": "testuser",
+				"id":          "user123",
+				"name":        "t2_user123",
+				"created":     1234567890.0,
+				"created_utc": 1234567890.0,
 			},
 		}
 		json.NewEncoder(w).Encode(response)
@@ -115,14 +117,14 @@ func TestTokenRefreshTimingEdgeCases(t *testing.T) {
 			{
 				name:          "FreshToken",
 				tokenLifespan: 1 * time.Hour,
-				requestDelay:  1 * time.Minute,
+				requestDelay:  100 * time.Millisecond,
 				expectRefresh: false,
 				description:   "Token should not refresh when fresh",
 			},
 			{
 				name:          "NearExpiry",
-				tokenLifespan: 2 * time.Minute,
-				requestDelay:  1 * time.Minute,
+				tokenLifespan: 2 * time.Second,
+				requestDelay:  1 * time.Second,
 				expectRefresh: true,
 				description:   "Token should refresh when near expiry",
 			},
@@ -240,7 +242,9 @@ func TestConcurrentTokenRefreshRaceCondition(t *testing.T) {
 			"kind": "t2",
 			"data": map[string]interface{}{
 				"id":   "user123",
-				"name": "testuser",
+				"name": "t2_user123",
+				"created":     1234567890.0,
+				"created_utc": 1234567890.0,
 			},
 		}
 		json.NewEncoder(w).Encode(response)
@@ -382,7 +386,9 @@ func TestAuthenticationFailureRecovery(t *testing.T) {
 			"kind": "t2",
 			"data": map[string]interface{}{
 				"id":   "user123",
-				"name": "testuser",
+				"name": "t2_user123",
+				"created":     1234567890.0,
+				"created_utc": 1234567890.0,
 			},
 		}
 		json.NewEncoder(w).Encode(response)
@@ -520,7 +526,9 @@ func TestTokenCacheInvalidation(t *testing.T) {
 			"kind": "t2",
 			"data": map[string]interface{}{
 				"id":   "user123",
-				"name": "testuser",
+				"name": "t2_user123",
+				"created":     1234567890.0,
+				"created_utc": 1234567890.0,
 			},
 		}
 		json.NewEncoder(w).Encode(response)
@@ -635,7 +643,9 @@ func TestMultiClientAuthBehavior(t *testing.T) {
 			"kind": "t2",
 			"data": map[string]interface{}{
 				"id":   "user123",
-				"name": "testuser",
+				"name": "t2_user123",
+				"created":     1234567890.0,
+				"created_utc": 1234567890.0,
 			},
 		}
 		json.NewEncoder(w).Encode(response)
@@ -775,7 +785,9 @@ func TestAuthSystemClockManipulation(t *testing.T) {
 			"kind": "t2",
 			"data": map[string]interface{}{
 				"id":   "user123",
-				"name": "testuser",
+				"name": "t2_user123",
+				"created":     1234567890.0,
+				"created_utc": 1234567890.0,
 			},
 		}
 		json.NewEncoder(w).Encode(response)
