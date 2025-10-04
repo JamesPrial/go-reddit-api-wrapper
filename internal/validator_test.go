@@ -135,30 +135,30 @@ func TestValidator_ValidateCommentIDs(t *testing.T) {
 		wantError bool
 		errorMsg  string
 	}{
-		// Valid cases
+		// Valid cases (base36 is lowercase only)
 		{name: "empty slice", ids: []string{}, wantError: false},
 		{name: "single valid ID", ids: []string{"abc123"}, wantError: false},
 		{name: "multiple valid IDs", ids: []string{"abc123", "def456", "ghi789"}, wantError: false},
 		{name: "max count", ids: makeIDs(100), wantError: false},
-		{name: "mixed case IDs", ids: []string{"AbC123", "XyZ789"}, wantError: false},
 
 		// Invalid cases - count
 		{name: "too many IDs", ids: makeIDs(101), wantError: true, errorMsg: "cannot request more than 100"},
 
 		// Invalid cases - ID format
 		{name: "empty ID", ids: []string{""}, wantError: true, errorMsg: "cannot be empty"},
-		{name: "ID with space", ids: []string{"abc 123"}, wantError: true, errorMsg: "invalid character"},
-		{name: "ID with dash", ids: []string{"abc-123"}, wantError: true, errorMsg: "invalid character"},
-		{name: "ID with underscore", ids: []string{"abc_123"}, wantError: true, errorMsg: "invalid character"},
-		{name: "ID with special char", ids: []string{"abc@123"}, wantError: true, errorMsg: "invalid character"},
-		{name: "ID with slash", ids: []string{"abc/123"}, wantError: true, errorMsg: "invalid character"},
-		{name: "ID with newline", ids: []string{"abc\n123"}, wantError: true, errorMsg: "invalid character"},
+		{name: "mixed case IDs", ids: []string{"AbC123", "XyZ789"}, wantError: true, errorMsg: "invalid format"},
+		{name: "ID with space", ids: []string{"abc 123"}, wantError: true, errorMsg: "invalid format"},
+		{name: "ID with dash", ids: []string{"abc-123"}, wantError: true, errorMsg: "invalid format"},
+		{name: "ID with underscore", ids: []string{"abc_123"}, wantError: true, errorMsg: "invalid format"},
+		{name: "ID with special char", ids: []string{"abc@123"}, wantError: true, errorMsg: "invalid format"},
+		{name: "ID with slash", ids: []string{"abc/123"}, wantError: true, errorMsg: "invalid format"},
+		{name: "ID with newline", ids: []string{"abc\n123"}, wantError: true, errorMsg: "invalid format"},
 		{name: "ID too long", ids: []string{strings.Repeat("a", 101)}, wantError: true, errorMsg: "too long"},
-		{name: "SQL injection", ids: []string{"'; DROP TABLE--"}, wantError: true, errorMsg: "invalid character"},
-		{name: "path traversal", ids: []string{"../etc"}, wantError: true, errorMsg: "invalid character"},
+		{name: "SQL injection", ids: []string{"'; DROP TABLE--"}, wantError: true, errorMsg: "invalid format"},
+		{name: "path traversal", ids: []string{"../etc"}, wantError: true, errorMsg: "invalid format"},
 
 		// Invalid cases - mixed
-		{name: "one valid one invalid", ids: []string{"abc123", "invalid!"}, wantError: true, errorMsg: "invalid character"},
+		{name: "one valid one invalid", ids: []string{"abc123", "invalid!"}, wantError: true, errorMsg: "invalid format"},
 	}
 
 	for _, tt := range tests {
@@ -293,10 +293,8 @@ func TestValidateCommentID(t *testing.T) {
 		wantError bool
 		errorMsg  string
 	}{
-		// Valid cases
+		// Valid cases (base36 is lowercase only)
 		{name: "valid lowercase", id: "abc123", wantError: false},
-		{name: "valid uppercase", id: "ABC123", wantError: false},
-		{name: "valid mixed", id: "AbC123", wantError: false},
 		{name: "valid all numbers", id: "123456", wantError: false},
 		{name: "valid all letters", id: "abcdef", wantError: false},
 		{name: "valid max length", id: strings.Repeat("a", 100), wantError: false},
@@ -304,11 +302,13 @@ func TestValidateCommentID(t *testing.T) {
 		// Invalid cases
 		{name: "empty", id: "", wantError: true, errorMsg: "cannot be empty"},
 		{name: "too long", id: strings.Repeat("a", 101), wantError: true, errorMsg: "too long"},
-		{name: "with space", id: "abc 123", wantError: true, errorMsg: "invalid character"},
-		{name: "with underscore", id: "abc_123", wantError: true, errorMsg: "invalid character"},
-		{name: "with dash", id: "abc-123", wantError: true, errorMsg: "invalid character"},
-		{name: "with dot", id: "abc.123", wantError: true, errorMsg: "invalid character"},
-		{name: "with special char", id: "abc!123", wantError: true, errorMsg: "invalid character"},
+		{name: "uppercase", id: "ABC123", wantError: true, errorMsg: "invalid format"},
+		{name: "mixed case", id: "AbC123", wantError: true, errorMsg: "invalid format"},
+		{name: "with space", id: "abc 123", wantError: true, errorMsg: "invalid format"},
+		{name: "with underscore", id: "abc_123", wantError: true, errorMsg: "invalid format"},
+		{name: "with dash", id: "abc-123", wantError: true, errorMsg: "invalid format"},
+		{name: "with dot", id: "abc.123", wantError: true, errorMsg: "invalid format"},
+		{name: "with special char", id: "abc!123", wantError: true, errorMsg: "invalid format"},
 	}
 
 	for _, tt := range tests {
@@ -368,5 +368,140 @@ func BenchmarkValidator_ValidateLinkID(b *testing.B) {
 	linkID := "abc123"
 	for i := 0; i < b.N; i++ {
 		_, _ = v.ValidateLinkID(linkID)
+	}
+}
+
+// Tests for new validation methods
+
+func TestValidator_ValidatePostID(t *testing.T) {
+	v := NewValidator()
+
+	tests := []struct {
+		name      string
+		postID    string
+		wantError bool
+		errorMsg  string
+	}{
+		// Valid cases
+		{name: "valid lowercase", postID: "abc123", wantError: false},
+		{name: "valid all numbers", postID: "123456", wantError: false},
+		{name: "valid all letters", postID: "abcdef", wantError: false},
+
+		// Invalid cases
+		{name: "empty", postID: "", wantError: true, errorMsg: "required"},
+		{name: "uppercase", postID: "ABC123", wantError: true, errorMsg: "invalid format"},
+		{name: "mixed case", postID: "AbC123", wantError: true, errorMsg: "invalid format"},
+		{name: "with underscore", postID: "abc_123", wantError: true, errorMsg: "invalid format"},
+		{name: "with dash", postID: "abc-123", wantError: true, errorMsg: "invalid format"},
+		{name: "with space", postID: "abc 123", wantError: true, errorMsg: "invalid format"},
+		{name: "too long", postID: strings.Repeat("a", 101), wantError: true, errorMsg: "too long"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := v.ValidatePostID(tt.postID)
+			if tt.wantError {
+				if err == nil {
+					t.Errorf("expected error containing %q, got nil", tt.errorMsg)
+					return
+				}
+				if !strings.Contains(err.Error(), tt.errorMsg) {
+					t.Errorf("expected error containing %q, got %q", tt.errorMsg, err.Error())
+				}
+			} else {
+				if err != nil {
+					t.Errorf("expected no error, got %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestValidator_ValidatePaginationToken(t *testing.T) {
+	v := NewValidator()
+
+	tests := []struct {
+		name      string
+		token     string
+		wantError bool
+		errorMsg  string
+	}{
+		// Valid cases
+		{name: "valid comment", token: "t1_abc123", wantError: false},
+		{name: "valid post", token: "t3_def456", wantError: false},
+		{name: "valid subreddit", token: "t5_xyz789", wantError: false},
+
+		// Invalid cases
+		{name: "empty", token: "", wantError: true, errorMsg: "cannot be empty"},
+		{name: "no prefix", token: "abc123", wantError: true, errorMsg: "invalid fullname format"},
+		{name: "wrong prefix", token: "t0_abc123", wantError: true, errorMsg: "invalid fullname format"},
+		{name: "uppercase ID", token: "t3_ABC123", wantError: true, errorMsg: "invalid fullname format"},
+		{name: "no underscore", token: "t3abc123", wantError: true, errorMsg: "invalid fullname format"},
+		{name: "missing ID", token: "t3_", wantError: true, errorMsg: "invalid fullname format"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := v.ValidatePaginationToken(tt.token)
+			if tt.wantError {
+				if err == nil {
+					t.Errorf("expected error containing %q, got nil", tt.errorMsg)
+					return
+				}
+				if !strings.Contains(err.Error(), tt.errorMsg) {
+					t.Errorf("expected error containing %q, got %q", tt.errorMsg, err.Error())
+				}
+			} else {
+				if err != nil {
+					t.Errorf("expected no error, got %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestValidator_ValidateURL(t *testing.T) {
+	v := NewValidator()
+
+	tests := []struct {
+		name      string
+		url       string
+		wantError bool
+		errorMsg  string
+	}{
+		// Valid cases
+		{name: "valid http", url: "http://example.com", wantError: false},
+		{name: "valid https", url: "https://example.com", wantError: false},
+		{name: "valid with path", url: "https://example.com/path", wantError: false},
+		{name: "valid with query", url: "https://example.com?key=value", wantError: false},
+		{name: "valid with port", url: "https://example.com:8080", wantError: false},
+
+		// Invalid cases
+		{name: "empty", url: "", wantError: true, errorMsg: "cannot be empty"},
+		{name: "invalid scheme", url: "javascript:alert(1)", wantError: true, errorMsg: "must use http or https scheme"},
+		{name: "file scheme", url: "file:///etc/passwd", wantError: true, errorMsg: "must use http or https scheme"},
+		{name: "no scheme", url: "example.com", wantError: true, errorMsg: "must use http or https scheme"},
+		{name: "no host", url: "https://", wantError: true, errorMsg: "must have a valid host"},
+		{name: "with newline", url: "https://example.com\nX-Injected: header", wantError: true, errorMsg: "invalid"},
+		{name: "with carriage return", url: "https://example.com\rX-Injected: header", wantError: true, errorMsg: "invalid"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := v.ValidateURL(tt.url)
+			if tt.wantError {
+				if err == nil {
+					t.Errorf("expected error containing %q, got nil", tt.errorMsg)
+					return
+				}
+				if !strings.Contains(err.Error(), tt.errorMsg) {
+					t.Errorf("expected error containing %q, got %q", tt.errorMsg, err.Error())
+				}
+			} else {
+				if err != nil {
+					t.Errorf("expected no error, got %v", err)
+				}
+			}
+		})
 	}
 }

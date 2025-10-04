@@ -3,7 +3,9 @@ package internal
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
+	"time"
 
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 )
@@ -33,7 +35,7 @@ func TestParseThing(t *testing.T) {
 			name: "Listing kind",
 			thing: &types.Thing{
 				Kind: "Listing",
-				Data: json.RawMessage(`{"after":"after123","before":null,"children":[]}`),
+				Data: json.RawMessage(`{"after":"t3_after123","before":null,"children":[]}`),
 			},
 			expectError:  false,
 			expectedType: "*types.ListingData",
@@ -46,7 +48,7 @@ func TestParseThing(t *testing.T) {
 					Name: "t1_comment123",
 				},
 				Kind: "t1",
-				Data: json.RawMessage(`{"author":"testuser","body":"test comment","score":10,"replies":""}`),
+				Data: json.RawMessage(`{"id":"comment123","name":"t1_comment123","author":"testuser","body":"test comment","score":10,"ups":10,"downs":0,"created":1234567890,"created_utc":1234567890,"parent_id":"t3_post123","link_id":"t3_post123","subreddit":"test","replies":""}`),
 			},
 			expectError:  false,
 			expectedType: "*types.Comment",
@@ -55,7 +57,7 @@ func TestParseThing(t *testing.T) {
 			name: "t2 account",
 			thing: &types.Thing{
 				Kind: "t2",
-				Data: json.RawMessage(`{"name":"testuser","link_karma":100,"comment_karma":200}`),
+				Data: json.RawMessage(`{"id":"user123","name":"t2_user123","link_karma":100,"comment_karma":200,"created":1234567890,"created_utc":1234567890}`),
 			},
 			expectError:  false,
 			expectedType: "*types.AccountData",
@@ -68,7 +70,7 @@ func TestParseThing(t *testing.T) {
 					Name: "t3_post123",
 				},
 				Kind: "t3",
-				Data: json.RawMessage(`{"author":"testuser","title":"Test Post","url":"http://example.com","score":100}`),
+				Data: json.RawMessage(`{"id":"post123","name":"t3_post123","author":"testuser","title":"Test Post","url":"http://example.com","permalink":"/r/test/comments/post123/test_post/","subreddit":"test","score":100,"ups":100,"downs":0,"created":1234567890,"created_utc":1234567890,"upvote_ratio":0.95,"num_comments":5}`),
 			},
 			expectError:  false,
 			expectedType: "*types.Post",
@@ -77,7 +79,7 @@ func TestParseThing(t *testing.T) {
 			name: "t4 message",
 			thing: &types.Thing{
 				Kind: "t4",
-				Data: json.RawMessage(`{"author":"testuser","body":"test message","subject":"Test Subject"}`),
+				Data: json.RawMessage(`{"id":"msg123","name":"t4_msg123","author":"testuser","body":"test message","subject":"Test Subject","created":1234567890,"created_utc":1234567890}`),
 			},
 			expectError:  false,
 			expectedType: "*types.MessageData",
@@ -86,7 +88,7 @@ func TestParseThing(t *testing.T) {
 			name: "t5 subreddit",
 			thing: &types.Thing{
 				Kind: "t5",
-				Data: json.RawMessage(`{"display_name":"golang","title":"Go Programming","subscribers":100000}`),
+				Data: json.RawMessage(`{"id":"2qh1i","name":"t5_2qh1i","display_name":"golang","title":"Go Programming","subscribers":100000,"created":1234567890,"created_utc":1234567890}`),
 			},
 			expectError:  false,
 			expectedType: "*types.SubredditData",
@@ -155,7 +157,7 @@ func TestParseListing(t *testing.T) {
 			name: "valid listing",
 			thing: &types.Thing{
 				Kind: "Listing",
-				Data: json.RawMessage(`{"after":"after123","before":"before456","modhash":"modhash789","children":[]}`),
+				Data: json.RawMessage(`{"after":"t3_after123","before":"t3_before456","modhash":"modhash789","children":[]}`),
 			},
 			expectError: false,
 		},
@@ -164,7 +166,7 @@ func TestParseListing(t *testing.T) {
 			thing: &types.Thing{
 				Kind: "Listing",
 				Data: json.RawMessage(`{
-					"after":"after123",
+					"after":"t3_after123",
 					"before":null,
 					"children":[
 						{"kind":"t3","id":"post1","data":{}},
@@ -230,13 +232,20 @@ func TestParsePost(t *testing.T) {
 			thing: &types.Thing{
 				Kind: "t3",
 				Data: json.RawMessage(`{
+					"id":"post123",
+					"name":"t3_post123",
 					"author":"testuser",
 					"title":"Test Post",
 					"url":"http://example.com",
+					"permalink":"/r/golang/comments/post123/test_post/",
 					"score":100,
+					"ups":100,
+					"downs":0,
 					"num_comments":50,
 					"subreddit":"golang",
+					"created":1234567890,
 					"created_utc":1234567890,
+					"upvote_ratio":0.95,
 					"edited":false,
 					"is_self":false,
 					"over_18":false,
@@ -250,13 +259,22 @@ func TestParsePost(t *testing.T) {
 			thing: &types.Thing{
 				Kind: "t3",
 				Data: json.RawMessage(`{
+					"id":"selfpost456",
+					"name":"t3_selfpost456",
 					"author":"testuser",
 					"title":"Self Post Title",
+					"url":"http://example.com",
+					"permalink":"/r/AskReddit/comments/selfpost456/self_post_title/",
 					"selftext":"This is the self text",
 					"is_self":true,
 					"score":50,
+					"ups":50,
+					"downs":0,
 					"subreddit":"AskReddit",
+					"created":1234567890,
 					"created_utc":1234567890,
+					"upvote_ratio":0.85,
+					"num_comments":10,
 					"edited":1234567900
 				}`),
 			},
@@ -318,10 +336,15 @@ func TestParseComment(t *testing.T) {
 			thing: &types.Thing{
 				Kind: "t1",
 				Data: json.RawMessage(`{
+					"id":"comment123",
+					"name":"t1_comment123",
 					"author":"testuser",
 					"body":"This is a test comment",
 					"body_html":"<p>This is a test comment</p>",
 					"score":10,
+					"ups":10,
+					"downs":0,
+					"created":1234567890,
 					"created_utc":1234567890,
 					"edited":false,
 					"replies":"",
@@ -339,9 +362,18 @@ func TestParseComment(t *testing.T) {
 			thing: &types.Thing{
 				Kind: "t1",
 				Data: json.RawMessage(`{
+					"id":"parentcomment",
+					"name":"t1_parentcomment",
 					"author":"testuser",
 					"body":"Parent comment",
 					"score":20,
+					"ups":20,
+					"downs":0,
+					"created":1234567890,
+					"created_utc":1234567890,
+					"parent_id":"t3_post123",
+					"link_id":"t3_post123",
+					"subreddit":"golang",
 					"replies":{
 						"kind":"Listing",
 						"data":{
@@ -359,12 +391,20 @@ func TestParseComment(t *testing.T) {
 			thing: &types.Thing{
 				Kind: "t1",
 				Data: json.RawMessage(`{
+					"id":"editedcomment",
+					"name":"t1_editedcomment",
 					"author":"testuser",
 					"body":"Edited comment",
 					"score":5,
+					"ups":5,
+					"downs":0,
+					"created":1234567890,
+					"created_utc":1234567890,
 					"edited":1234567900,
 					"replies":"",
-					"parent_id":"t1_parent"
+					"parent_id":"t1_parent",
+					"link_id":"t3_post123",
+					"subreddit":"golang"
 				}`),
 			},
 			expectError: false,
@@ -427,6 +467,8 @@ func TestParseSubreddit(t *testing.T) {
 			thing: &types.Thing{
 				Kind: "t5",
 				Data: json.RawMessage(`{
+					"id":"2qh1i",
+					"name":"t5_2qh1i",
 					"display_name":"golang",
 					"title":"Go Programming Language",
 					"subscribers":150000,
@@ -434,7 +476,9 @@ func TestParseSubreddit(t *testing.T) {
 					"public_description":"Public description",
 					"url":"/r/golang",
 					"over18":false,
-					"subreddit_type":"public"
+					"subreddit_type":"public",
+					"created":1234567890,
+					"created_utc":1234567890
 				}`),
 			},
 			expectError: false,
@@ -495,10 +539,11 @@ func TestParseAccount(t *testing.T) {
 			thing: &types.Thing{
 				Kind: "t2",
 				Data: json.RawMessage(`{
-					"name":"testuser",
+					"name":"t2_user123",
 					"id":"user123",
 					"link_karma":1000,
 					"comment_karma":5000,
+					"created":1234567890,
 					"created_utc":1234567890,
 					"is_gold":true,
 					"is_mod":false,
@@ -563,10 +608,13 @@ func TestParseMessage(t *testing.T) {
 			thing: &types.Thing{
 				Kind: "t4",
 				Data: json.RawMessage(`{
+					"id":"msg123",
+					"name":"t4_msg123",
 					"author":"sender",
 					"body":"Message body",
 					"body_html":"<p>Message body</p>",
 					"subject":"Test Subject",
+					"created":1234567890,
 					"created_utc":1234567890,
 					"new":true,
 					"was_comment":false
@@ -632,7 +680,7 @@ func TestParseMore(t *testing.T) {
 				Data: json.RawMessage(`{
 					"children":["id1","id2","id3","id4"],
 					"id":"more123",
-					"name":"more_more123"
+					"name":"t1_more123"
 				}`),
 			},
 			expectError: false,
@@ -707,17 +755,27 @@ func TestExtractPosts(t *testing.T) {
 			thing: &types.Thing{
 				Kind: "Listing",
 				Data: json.RawMessage(`{
-					"after":"after123",
+					"after":"t3_after123",
 					"children":[
 						{
 							"kind":"t3",
 							"id":"post1",
 							"name":"t3_post1",
 							"data":{
+								"id":"post1",
+								"name":"t3_post1",
 								"author":"user1",
 								"title":"First Post",
 								"url":"http://example.com/1",
-								"score":100
+								"permalink":"/r/test/comments/post1/first_post/",
+								"subreddit":"test",
+								"score":100,
+								"ups":100,
+								"downs":0,
+								"created":1234567890,
+								"created_utc":1234567890,
+								"upvote_ratio":0.95,
+								"num_comments":10
 							}
 						},
 						{
@@ -725,10 +783,20 @@ func TestExtractPosts(t *testing.T) {
 							"id":"post2",
 							"name":"t3_post2",
 							"data":{
+								"id":"post2",
+								"name":"t3_post2",
 								"author":"user2",
 								"title":"Second Post",
 								"url":"http://example.com/2",
-								"score":200
+								"permalink":"/r/test/comments/post2/second_post/",
+								"subreddit":"test",
+								"score":200,
+								"ups":200,
+								"downs":0,
+								"created":1234567890,
+								"created_utc":1234567890,
+								"upvote_ratio":0.90,
+								"num_comments":5
 							}
 						}
 					]
@@ -748,9 +816,20 @@ func TestExtractPosts(t *testing.T) {
 							"id":"post1",
 							"name":"t3_post1",
 							"data":{
+								"id":"post1",
+								"name":"t3_post1",
 								"author":"user1",
 								"title":"Post",
-								"url":"http://example.com"
+								"url":"http://example.com",
+								"permalink":"/r/test/comments/post1/post/",
+								"subreddit":"test",
+								"score":50,
+								"ups":50,
+								"downs":0,
+								"created":1234567890,
+								"created_utc":1234567890,
+								"upvote_ratio":0.85,
+								"num_comments":3
 							}
 						},
 						{
@@ -824,9 +903,18 @@ func TestExtractComments(t *testing.T) {
 				},
 				Kind: "t1",
 				Data: json.RawMessage(`{
+					"id":"comment1",
+					"name":"t1_comment1",
 					"author":"user1",
 					"body":"Test comment",
 					"score":10,
+					"ups":10,
+					"downs":0,
+					"created":1234567890,
+					"created_utc":1234567890,
+					"parent_id":"t3_post1",
+					"link_id":"t3_post1",
+					"subreddit":"test",
 					"replies":""
 				}`),
 			},
@@ -843,8 +931,18 @@ func TestExtractComments(t *testing.T) {
 				},
 				Kind: "t1",
 				Data: json.RawMessage(`{
+					"id":"comment1",
+					"name":"t1_comment1",
 					"author":"user1",
 					"body":"Parent comment",
+					"score":10,
+					"ups":10,
+					"downs":0,
+					"created":1234567890,
+					"created_utc":1234567890,
+					"parent_id":"t3_post1",
+					"link_id":"t3_post1",
+					"subreddit":"test",
 					"replies":{
 						"kind":"Listing",
 						"data":{
@@ -854,8 +952,18 @@ func TestExtractComments(t *testing.T) {
 									"id":"reply1",
 									"name":"t1_reply1",
 									"data":{
+										"id":"reply1",
+										"name":"t1_reply1",
 										"author":"user2",
 										"body":"Reply",
+										"score":5,
+										"ups":5,
+										"downs":0,
+										"created":1234567895,
+										"created_utc":1234567895,
+										"parent_id":"t1_comment1",
+										"link_id":"t3_post1",
+										"subreddit":"test",
 										"replies":""
 									}
 								}
@@ -879,8 +987,18 @@ func TestExtractComments(t *testing.T) {
 							"id":"comment1",
 							"name":"t1_comment1",
 							"data":{
+								"id":"comment1",
+								"name":"t1_comment1",
 								"author":"user1",
 								"body":"First comment",
+								"score":10,
+								"ups":10,
+								"downs":0,
+								"created":1234567890,
+								"created_utc":1234567890,
+								"parent_id":"t3_post1",
+								"link_id":"t3_post1",
+								"subreddit":"test",
 								"replies":""
 							}
 						},
@@ -889,8 +1007,18 @@ func TestExtractComments(t *testing.T) {
 							"id":"comment2",
 							"name":"t1_comment2",
 							"data":{
+								"id":"comment2",
+								"name":"t1_comment2",
 								"author":"user2",
 								"body":"Second comment",
+								"score":5,
+								"ups":5,
+								"downs":0,
+								"created":1234567895,
+								"created_utc":1234567895,
+								"parent_id":"t3_post1",
+								"link_id":"t3_post1",
+								"subreddit":"test",
 								"replies":""
 							}
 						},
@@ -898,6 +1026,8 @@ func TestExtractComments(t *testing.T) {
 							"kind":"more",
 							"id":"more1",
 							"data":{
+								"id":"more1",
+								"name":"t1_more1",
 								"children":["id1","id2","id3"]
 							}
 						}
@@ -919,8 +1049,18 @@ func TestExtractComments(t *testing.T) {
 							"id":"comment1",
 							"name":"t1_comment1",
 							"data":{
+								"id":"comment1",
+								"name":"t1_comment1",
 								"author":"user1",
 								"body":"Parent",
+								"score":10,
+								"ups":10,
+								"downs":0,
+								"created":1234567890,
+								"created_utc":1234567890,
+								"parent_id":"t3_post1",
+								"link_id":"t3_post1",
+								"subreddit":"test",
 								"replies":{
 									"kind":"Listing",
 									"data":{
@@ -930,8 +1070,18 @@ func TestExtractComments(t *testing.T) {
 												"id":"reply1",
 												"name":"t1_reply1",
 												"data":{
+													"id":"reply1",
+													"name":"t1_reply1",
 													"author":"user2",
 													"body":"Child",
+													"score":5,
+													"ups":5,
+													"downs":0,
+													"created":1234567895,
+													"created_utc":1234567895,
+													"parent_id":"t1_comment1",
+													"link_id":"t3_post1",
+													"subreddit":"test",
 													"replies":{
 														"kind":"Listing",
 														"data":{
@@ -941,8 +1091,18 @@ func TestExtractComments(t *testing.T) {
 																	"id":"reply2",
 																	"name":"t1_reply2",
 																	"data":{
+																		"id":"reply2",
+																		"name":"t1_reply2",
 																		"author":"user3",
 																		"body":"Grandchild",
+																		"score":3,
+																		"ups":3,
+																		"downs":0,
+																		"created":1234567900,
+																		"created_utc":1234567900,
+																		"parent_id":"t1_reply1",
+																		"link_id":"t3_post1",
+																		"subreddit":"test",
 																		"replies":""
 																	}
 																}
@@ -1052,10 +1212,20 @@ func TestExtractPostAndComments(t *testing.T) {
 								"id":"post1",
 								"name":"t3_post1",
 								"data":{
+									"id":"post1",
+									"name":"t3_post1",
 									"author":"postauthor",
 									"title":"Test Post",
 									"url":"http://example.com",
-									"score":100
+									"permalink":"/r/test/comments/post1/test_post/",
+									"subreddit":"test",
+									"score":100,
+									"ups":100,
+									"downs":0,
+									"created":1234567890,
+									"created_utc":1234567890,
+									"upvote_ratio":0.95,
+									"num_comments":2
 								}
 							}
 						]
@@ -1070,8 +1240,18 @@ func TestExtractPostAndComments(t *testing.T) {
 								"id":"comment1",
 								"name":"t1_comment1",
 								"data":{
+									"id":"comment1",
+									"name":"t1_comment1",
 									"author":"commenter1",
 									"body":"First comment",
+									"score":10,
+									"ups":10,
+									"downs":0,
+									"created":1234567890,
+									"created_utc":1234567890,
+									"parent_id":"t3_post1",
+									"link_id":"t3_post1",
+									"subreddit":"test",
 									"replies":""
 								}
 							},
@@ -1080,8 +1260,18 @@ func TestExtractPostAndComments(t *testing.T) {
 								"id":"comment2",
 								"name":"t1_comment2",
 								"data":{
+									"id":"comment2",
+									"name":"t1_comment2",
 									"author":"commenter2",
 									"body":"Second comment",
+									"score":5,
+									"ups":5,
+									"downs":0,
+									"created":1234567890,
+									"created_utc":1234567890,
+									"parent_id":"t3_post1",
+									"link_id":"t3_post1",
+									"subreddit":"test",
 									"replies":{
 										"kind":"Listing",
 										"data":{
@@ -1091,8 +1281,18 @@ func TestExtractPostAndComments(t *testing.T) {
 													"id":"reply1",
 													"name":"t1_reply1",
 													"data":{
+														"id":"reply1",
+														"name":"t1_reply1",
 														"author":"replier",
 														"body":"Reply",
+														"score":1,
+														"ups":1,
+														"downs":0,
+														"created":1234567890,
+														"created_utc":1234567890,
+														"parent_id":"t1_comment2",
+														"link_id":"t3_post1",
+														"subreddit":"test",
 														"replies":""
 													}
 												}
@@ -1104,7 +1304,10 @@ func TestExtractPostAndComments(t *testing.T) {
 							{
 								"kind":"more",
 								"id":"more1",
+								"name":"t2_more1",
 								"data":{
+									"id":"more1",
+									"name":"t2_more1",
 									"children":["id1","id2"]
 								}
 							}
@@ -1146,9 +1349,20 @@ func TestExtractPostAndComments(t *testing.T) {
 								"id":"post1",
 								"name":"t3_post1",
 								"data":{
+									"id":"post1",
+									"name":"t3_post1",
 									"author":"postauthor",
 									"title":"Test Post",
-									"url":"http://example.com"
+									"url":"http://example.com",
+									"permalink":"/r/test/comments/post1/test_post/",
+									"subreddit":"test",
+									"score":100,
+									"ups":100,
+									"downs":0,
+									"created":1234567890,
+									"created_utc":1234567890,
+									"upvote_ratio":0.95,
+									"num_comments":0
 								}
 							}
 						]
@@ -1268,8 +1482,18 @@ func TestExtractPostAndComments_EdgeCases(t *testing.T) {
 							"id":"comment1",
 							"name":"t1_comment1",
 							"data":{
+								"id":"comment1",
+								"name":"t1_comment1",
 								"author":"commenter",
 								"body":"Comment",
+								"score":10,
+								"ups":10,
+								"downs":0,
+								"created":1234567890,
+								"created_utc":1234567890,
+								"parent_id":"t3_post1",
+								"link_id":"t3_post1",
+								"subreddit":"test",
 								"replies":""
 							}
 						}
@@ -1410,8 +1634,17 @@ func TestCommentTreeStructure(t *testing.T) {
 		Kind: "t1",
 		Data: json.RawMessage(`{
 			"id": "parent",
+			"name": "t1_parent",
 			"author": "user1",
 			"body": "Parent comment",
+			"score": 100,
+			"ups": 100,
+			"downs": 0,
+			"created": 1234567890,
+			"created_utc": 1234567890,
+			"parent_id": "t3_post1",
+			"link_id": "t3_post1",
+			"subreddit": "test",
 			"replies": {
 				"kind": "Listing",
 				"data": {
@@ -1421,8 +1654,18 @@ func TestCommentTreeStructure(t *testing.T) {
 							"id": "child",
 							"name": "t1_child",
 							"data": {
+								"id": "child",
+								"name": "t1_child",
 								"author": "user2",
 								"body": "Child comment",
+								"score": 50,
+								"ups": 50,
+								"downs": 0,
+								"created": 1234567890,
+								"created_utc": 1234567890,
+								"parent_id": "t1_parent",
+								"link_id": "t3_post1",
+								"subreddit": "test",
 								"replies": {
 									"kind": "Listing",
 									"data": {
@@ -1432,8 +1675,18 @@ func TestCommentTreeStructure(t *testing.T) {
 												"id": "grandchild",
 												"name": "t1_grandchild",
 												"data": {
+													"id": "grandchild",
+													"name": "t1_grandchild",
 													"author": "user3",
 													"body": "Grandchild comment",
+													"score": 10,
+													"ups": 10,
+													"downs": 0,
+													"created": 1234567890,
+													"created_utc": 1234567890,
+													"parent_id": "t1_child",
+													"link_id": "t3_post1",
+													"subreddit": "test",
 													"replies": ""
 												}
 											}
@@ -1447,8 +1700,18 @@ func TestCommentTreeStructure(t *testing.T) {
 							"id": "child2",
 							"name": "t1_child2",
 							"data": {
+								"id": "child2",
+								"name": "t1_child2",
 								"author": "user4",
 								"body": "Second child",
+								"score": 25,
+								"ups": 25,
+								"downs": 0,
+								"created": 1234567890,
+								"created_utc": 1234567890,
+								"parent_id": "t1_parent",
+								"link_id": "t3_post1",
+								"subreddit": "test",
 								"replies": ""
 							}
 						}
@@ -1499,6 +1762,702 @@ func TestCommentTreeStructure(t *testing.T) {
 	}
 }
 
+// TestParsePost_MaliciousData tests that malicious or malformed post data is rejected
+func TestParsePost_MaliciousData(t *testing.T) {
+	parser := NewParser()
+
+	tests := []struct {
+		name        string
+		thing       *types.Thing
+		expectError bool
+		errorText   string
+	}{
+		{
+			name: "uppercase post ID",
+			thing: &types.Thing{
+				Kind: "t3",
+				Data: json.RawMessage(`{
+					"id": "ABC123",
+					"name": "t3_ABC123",
+					"author": "testuser",
+					"title": "Test Post",
+					"url": "http://example.com",
+					"permalink": "/r/test/comments/abc123/test_post/",
+					"subreddit": "test",
+					"score": 100,
+					"ups": 100,
+					"downs": 0,
+					"created": 1234567890,
+					"created_utc": 1234567890,
+					"upvote_ratio": 0.95,
+					"num_comments": 10
+				}`),
+			},
+			expectError: true,
+			errorText:   "ID has invalid format",
+		},
+		{
+			name: "SQL injection in ID",
+			thing: &types.Thing{
+				Kind: "t3",
+				Data: json.RawMessage(`{
+					"id": "abc'; DROP TABLE posts--",
+					"name": "t3_abc123",
+					"author": "testuser",
+					"title": "Test Post",
+					"url": "http://example.com",
+					"permalink": "/r/test/comments/abc123/test_post/",
+					"subreddit": "test",
+					"score": 100,
+					"ups": 100,
+					"downs": 0,
+					"created": 1234567890,
+					"created_utc": 1234567890,
+					"upvote_ratio": 0.95,
+					"num_comments": 10
+				}`),
+			},
+			expectError: true,
+			errorText:   "ID has invalid format",
+		},
+		{
+			name: "invalid subreddit name - too short",
+			thing: &types.Thing{
+				Kind: "t3",
+				Data: json.RawMessage(`{
+					"id": "abc123",
+					"name": "t3_abc123",
+					"author": "testuser",
+					"title": "Test Post",
+					"url": "http://example.com",
+					"permalink": "/r/ab/comments/abc123/test_post/",
+					"subreddit": "ab",
+					"score": 100,
+					"ups": 100,
+					"downs": 0,
+					"created": 1234567890,
+					"created_utc": 1234567890,
+					"upvote_ratio": 0.95,
+					"num_comments": 10
+				}`),
+			},
+			expectError: true,
+			errorText:   "Subreddit has invalid format",
+		},
+		{
+			name: "invalid subreddit name - special chars",
+			thing: &types.Thing{
+				Kind: "t3",
+				Data: json.RawMessage(`{
+					"id": "abc123",
+					"name": "t3_abc123",
+					"author": "testuser",
+					"title": "Test Post",
+					"url": "http://example.com",
+					"permalink": "/r/test$/comments/abc123/test_post/",
+					"subreddit": "test$",
+					"score": 100,
+					"ups": 100,
+					"downs": 0,
+					"created": 1234567890,
+					"created_utc": 1234567890,
+					"upvote_ratio": 0.95,
+					"num_comments": 10
+				}`),
+			},
+			expectError: true,
+			errorText:   "Subreddit has invalid format",
+		},
+		{
+			name: "invalid permalink format",
+			thing: &types.Thing{
+				Kind: "t3",
+				Data: json.RawMessage(`{
+					"id": "abc123",
+					"name": "t3_abc123",
+					"author": "testuser",
+					"title": "Test Post",
+					"url": "http://example.com",
+					"permalink": "/invalid/permalink/format",
+					"subreddit": "test",
+					"score": 100,
+					"ups": 100,
+					"downs": 0,
+					"created": 1234567890,
+					"created_utc": 1234567890,
+					"upvote_ratio": 0.95,
+					"num_comments": 10
+				}`),
+			},
+			expectError: true,
+			errorText:   "Permalink has invalid format",
+		},
+		{
+			name: "negative NumComments",
+			thing: &types.Thing{
+				Kind: "t3",
+				Data: json.RawMessage(`{
+					"id": "abc123",
+					"name": "t3_abc123",
+					"author": "testuser",
+					"title": "Test Post",
+					"url": "http://example.com",
+					"permalink": "/r/test/comments/abc123/test_post/",
+					"subreddit": "test",
+					"score": 100,
+					"ups": 100,
+					"downs": 0,
+					"created": 1234567890,
+					"created_utc": 1234567890,
+					"upvote_ratio": 0.95,
+					"num_comments": -5
+				}`),
+			},
+			expectError: true,
+			errorText:   "NumComments cannot be negative",
+		},
+		{
+			name: "UpvoteRatio out of range - too high",
+			thing: &types.Thing{
+				Kind: "t3",
+				Data: json.RawMessage(`{
+					"id": "abc123",
+					"name": "t3_abc123",
+					"author": "testuser",
+					"title": "Test Post",
+					"url": "http://example.com",
+					"permalink": "/r/test/comments/abc123/test_post/",
+					"subreddit": "test",
+					"score": 100,
+					"ups": 100,
+					"downs": 0,
+					"created": 1234567890,
+					"created_utc": 1234567890,
+					"upvote_ratio": 1.5,
+					"num_comments": 10
+				}`),
+			},
+			expectError: true,
+			errorText:   "UpvoteRatio must be between 0 and 1",
+		},
+		{
+			name: "UpvoteRatio out of range - negative",
+			thing: &types.Thing{
+				Kind: "t3",
+				Data: json.RawMessage(`{
+					"id": "abc123",
+					"name": "t3_abc123",
+					"author": "testuser",
+					"title": "Test Post",
+					"url": "http://example.com",
+					"permalink": "/r/test/comments/abc123/test_post/",
+					"subreddit": "test",
+					"score": 100,
+					"ups": 100,
+					"downs": 0,
+					"created": 1234567890,
+					"created_utc": 1234567890,
+					"upvote_ratio": -0.5,
+					"num_comments": 10
+				}`),
+			},
+			expectError: true,
+			errorText:   "UpvoteRatio must be between 0 and 1",
+		},
+		{
+			name: "future timestamp",
+			thing: &types.Thing{
+				Kind: "t3",
+				Data: json.RawMessage(fmt.Sprintf(`{
+					"id": "abc123",
+					"name": "t3_abc123",
+					"author": "testuser",
+					"title": "Test Post",
+					"url": "http://example.com",
+					"permalink": "/r/test/comments/abc123/test_post/",
+					"subreddit": "test",
+					"score": 100,
+					"ups": 100,
+					"downs": 0,
+					"created": %d,
+					"created_utc": %d,
+					"upvote_ratio": 0.95,
+					"num_comments": 10
+				}`, time.Now().Add(48*time.Hour).Unix(), time.Now().Add(48*time.Hour).Unix())),
+			},
+			expectError: true,
+			errorText:   "CreatedUTC is in the future",
+		},
+		{
+			name: "timestamp before Reddit existed",
+			thing: &types.Thing{
+				Kind: "t3",
+				Data: json.RawMessage(`{
+					"id": "abc123",
+					"name": "t3_abc123",
+					"author": "testuser",
+					"title": "Test Post",
+					"url": "http://example.com",
+					"permalink": "/r/test/comments/abc123/test_post/",
+					"subreddit": "test",
+					"score": 100,
+					"ups": 100,
+					"downs": 0,
+					"created": 946684800,
+					"created_utc": 946684800,
+					"upvote_ratio": 0.95,
+					"num_comments": 10
+				}`),
+			},
+			expectError: true,
+			errorText:   "CreatedUTC is before Reddit existed",
+		},
+		{
+			name: "invalid fullname format",
+			thing: &types.Thing{
+				Kind: "t3",
+				Data: json.RawMessage(`{
+					"id": "abc123",
+					"name": "INVALID_FULLNAME",
+					"author": "testuser",
+					"title": "Test Post",
+					"url": "http://example.com",
+					"permalink": "/r/test/comments/abc123/test_post/",
+					"subreddit": "test",
+					"score": 100,
+					"ups": 100,
+					"downs": 0,
+					"created": 1234567890,
+					"created_utc": 1234567890,
+					"upvote_ratio": 0.95,
+					"num_comments": 10
+				}`),
+			},
+			expectError: true,
+			errorText:   "Name has invalid fullname format",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := parser.ParsePost(context.Background(), tt.thing)
+
+			if tt.expectError {
+				if err == nil {
+					t.Errorf("expected error but got none")
+				} else if tt.errorText != "" && !containsText(err.Error(), tt.errorText) {
+					t.Errorf("expected error containing %q, got %q", tt.errorText, err.Error())
+				}
+				if result != nil {
+					t.Errorf("expected nil result on error, got %v", result)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+				if result == nil {
+					t.Errorf("expected result but got nil")
+				}
+			}
+		})
+	}
+}
+
+// TestParseComment_MaliciousData tests that malicious or malformed comment data is rejected
+func TestParseComment_MaliciousData(t *testing.T) {
+	parser := NewParser()
+
+	tests := []struct {
+		name        string
+		thing       *types.Thing
+		expectError bool
+		errorText   string
+	}{
+		{
+			name: "uppercase comment ID",
+			thing: &types.Thing{
+				Kind: "t1",
+				Data: json.RawMessage(`{
+					"id": "DEF456",
+					"name": "t1_DEF456",
+					"author": "testuser",
+					"body": "Test comment",
+					"parent_id": "t3_abc123",
+					"link_id": "t3_abc123",
+					"subreddit": "test",
+					"score": 10,
+					"ups": 10,
+					"downs": 0,
+					"created": 1234567890,
+					"created_utc": 1234567890,
+					"replies": ""
+				}`),
+			},
+			expectError: true,
+			errorText:   "ID has invalid format",
+		},
+		{
+			name: "invalid ParentID format",
+			thing: &types.Thing{
+				Kind: "t1",
+				Data: json.RawMessage(`{
+					"id": "def456",
+					"name": "t1_def456",
+					"author": "testuser",
+					"body": "Test comment",
+					"parent_id": "INVALID_PARENT",
+					"link_id": "t3_abc123",
+					"subreddit": "test",
+					"score": 10,
+					"ups": 10,
+					"downs": 0,
+					"created": 1234567890,
+					"created_utc": 1234567890,
+					"replies": ""
+				}`),
+			},
+			expectError: true,
+			errorText:   "ParentID has invalid fullname format",
+		},
+		{
+			name: "invalid LinkID format",
+			thing: &types.Thing{
+				Kind: "t1",
+				Data: json.RawMessage(`{
+					"id": "def456",
+					"name": "t1_def456",
+					"author": "testuser",
+					"body": "Test comment",
+					"parent_id": "t3_abc123",
+					"link_id": "invalid_link",
+					"subreddit": "test",
+					"score": 10,
+					"ups": 10,
+					"downs": 0,
+					"created": 1234567890,
+					"created_utc": 1234567890,
+					"replies": ""
+				}`),
+			},
+			expectError: true,
+			errorText:   "LinkID has invalid fullname format",
+		},
+		{
+			name: "future timestamp",
+			thing: &types.Thing{
+				Kind: "t1",
+				Data: json.RawMessage(fmt.Sprintf(`{
+					"id": "def456",
+					"name": "t1_def456",
+					"author": "testuser",
+					"body": "Test comment",
+					"parent_id": "t3_abc123",
+					"link_id": "t3_abc123",
+					"subreddit": "test",
+					"score": 10,
+					"ups": 10,
+					"downs": 0,
+					"created": %d,
+					"created_utc": %d,
+					"replies": ""
+				}`, time.Now().Add(48*time.Hour).Unix(), time.Now().Add(48*time.Hour).Unix())),
+			},
+			expectError: true,
+			errorText:   "CreatedUTC is in the future",
+		},
+		{
+			name: "negative score - should pass (downvoted comments are valid)",
+			thing: &types.Thing{
+				Kind: "t1",
+				Data: json.RawMessage(`{
+					"id": "def456",
+					"name": "t1_def456",
+					"author": "testuser",
+					"body": "Test comment",
+					"parent_id": "t3_abc123",
+					"link_id": "t3_abc123",
+					"subreddit": "test",
+					"score": -50,
+					"ups": -50,
+					"downs": 0,
+					"created": 1234567890,
+					"created_utc": 1234567890,
+					"replies": ""
+				}`),
+			},
+			expectError: false,
+		},
+		{
+			name: "invalid subreddit name",
+			thing: &types.Thing{
+				Kind: "t1",
+				Data: json.RawMessage(`{
+					"id": "def456",
+					"name": "t1_def456",
+					"author": "testuser",
+					"body": "Test comment",
+					"parent_id": "t3_abc123",
+					"link_id": "t3_abc123",
+					"subreddit": "x",
+					"score": 10,
+					"ups": 10,
+					"downs": 0,
+					"created": 1234567890,
+					"created_utc": 1234567890,
+					"replies": ""
+				}`),
+			},
+			expectError: true,
+			errorText:   "Subreddit has invalid format",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := parser.ParseComment(context.Background(), tt.thing, &parseContext{
+				seenIDs: make(map[string]bool),
+			})
+
+			if tt.expectError {
+				if err == nil {
+					t.Errorf("expected error but got none")
+				} else if tt.errorText != "" && !containsText(err.Error(), tt.errorText) {
+					t.Errorf("expected error containing %q, got %q", tt.errorText, err.Error())
+				}
+				if result != nil {
+					t.Errorf("expected nil result on error, got %v", result)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+				if result == nil {
+					t.Errorf("expected result but got nil")
+				}
+			}
+		})
+	}
+}
+
+// TestParseListing_MaliciousData tests that malicious pagination tokens are rejected
+func TestParseListing_MaliciousData(t *testing.T) {
+	parser := NewParser()
+
+	tests := []struct {
+		name        string
+		thing       *types.Thing
+		expectError bool
+		errorText   string
+	}{
+		{
+			name: "invalid AfterFullname - uppercase",
+			thing: &types.Thing{
+				Kind: "Listing",
+				Data: json.RawMessage(`{
+					"after": "T3_ABC123",
+					"before": null,
+					"children": []
+				}`),
+			},
+			expectError: true,
+			errorText:   "invalid AfterFullname from Reddit API",
+		},
+		{
+			name: "invalid AfterFullname - SQL injection",
+			thing: &types.Thing{
+				Kind: "Listing",
+				Data: json.RawMessage(`{
+					"after": "t3_abc'; DROP TABLE--",
+					"before": null,
+					"children": []
+				}`),
+			},
+			expectError: true,
+			errorText:   "invalid AfterFullname from Reddit API",
+		},
+		{
+			name: "invalid BeforeFullname - wrong format",
+			thing: &types.Thing{
+				Kind: "Listing",
+				Data: json.RawMessage(`{
+					"after": null,
+					"before": "invalid_format",
+					"children": []
+				}`),
+			},
+			expectError: true,
+			errorText:   "invalid BeforeFullname from Reddit API",
+		},
+		{
+			name: "valid pagination tokens",
+			thing: &types.Thing{
+				Kind: "Listing",
+				Data: json.RawMessage(`{
+					"after": "t3_abc123",
+					"before": "t3_xyz789",
+					"children": []
+				}`),
+			},
+			expectError: false,
+		},
+		{
+			name: "empty pagination tokens - should pass",
+			thing: &types.Thing{
+				Kind: "Listing",
+				Data: json.RawMessage(`{
+					"after": "",
+					"before": "",
+					"children": []
+				}`),
+			},
+			expectError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := parser.ParseListing(context.Background(), tt.thing)
+
+			if tt.expectError {
+				if err == nil {
+					t.Errorf("expected error but got none")
+				} else if tt.errorText != "" && !containsText(err.Error(), tt.errorText) {
+					t.Errorf("expected error containing %q, got %q", tt.errorText, err.Error())
+				}
+				if result != nil {
+					t.Errorf("expected nil result on error, got %v", result)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+				if result == nil {
+					t.Errorf("expected result but got nil")
+				}
+			}
+		})
+	}
+}
+
+// TestParseSubreddit_MaliciousData tests that malicious subreddit data is rejected
+func TestParseSubreddit_MaliciousData(t *testing.T) {
+	parser := NewParser()
+
+	tests := []struct {
+		name        string
+		thing       *types.Thing
+		expectError bool
+		errorText   string
+	}{
+		{
+			name: "invalid subreddit name - special chars",
+			thing: &types.Thing{
+				Kind: "t5",
+				Data: json.RawMessage(`{
+					"id": "2qh1i",
+					"name": "t5_2qh1i",
+					"display_name": "test$subreddit",
+					"title": "Test Subreddit",
+					"subscribers": 1000,
+					"created": 1234567890,
+					"created_utc": 1234567890
+				}`),
+			},
+			expectError: true,
+			errorText:   "DisplayName has invalid format",
+		},
+		{
+			name: "negative subscriber count",
+			thing: &types.Thing{
+				Kind: "t5",
+				Data: json.RawMessage(`{
+					"id": "2qh1i",
+					"name": "t5_2qh1i",
+					"display_name": "testsubreddit",
+					"title": "Test Subreddit",
+					"subscribers": -100,
+					"created": 1234567890,
+					"created_utc": 1234567890
+				}`),
+			},
+			expectError: true,
+			errorText:   "Subscribers cannot be negative",
+		},
+		{
+			name: "invalid subreddit name - too short",
+			thing: &types.Thing{
+				Kind: "t5",
+				Data: json.RawMessage(`{
+					"id": "2qh1i",
+					"name": "t5_2qh1i",
+					"display_name": "ab",
+					"title": "Test Subreddit",
+					"subscribers": 1000,
+					"created": 1234567890,
+					"created_utc": 1234567890
+				}`),
+			},
+			expectError: true,
+			errorText:   "DisplayName has invalid format",
+		},
+		{
+			name: "valid subreddit",
+			thing: &types.Thing{
+				Kind: "t5",
+				Data: json.RawMessage(`{
+					"id": "2qh1i",
+					"name": "t5_2qh1i",
+					"display_name": "golang",
+					"title": "Go Programming",
+					"subscribers": 150000,
+					"created": 1234567890,
+					"created_utc": 1234567890
+				}`),
+			},
+			expectError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := parser.ParseSubreddit(context.Background(), tt.thing)
+
+			if tt.expectError {
+				if err == nil {
+					t.Errorf("expected error but got none")
+				} else if tt.errorText != "" && !containsText(err.Error(), tt.errorText) {
+					t.Errorf("expected error containing %q, got %q", tt.errorText, err.Error())
+				}
+				if result != nil {
+					t.Errorf("expected nil result on error, got %v", result)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+				if result == nil {
+					t.Errorf("expected result but got nil")
+				}
+			}
+		})
+	}
+}
+
+// containsText is a helper function to check if a string contains a substring
+func containsText(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||
+		(len(s) > 0 && len(substr) > 0 && contains(s, substr)))
+}
+
+func contains(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}
+
 // TestCommentTreeWithMoreIDs verifies that MoreChildrenIDs are properly collected
 // at each level of the tree.
 func TestCommentTreeWithMoreIDs(t *testing.T) {
@@ -1508,8 +2467,17 @@ func TestCommentTreeWithMoreIDs(t *testing.T) {
 		Kind: "t1",
 		Data: json.RawMessage(`{
 			"id": "parent",
+			"name": "t1_parent",
 			"author": "user1",
 			"body": "Parent comment",
+			"score": 100,
+			"ups": 100,
+			"downs": 0,
+			"created": 1234567890,
+			"created_utc": 1234567890,
+			"parent_id": "t3_post1",
+			"link_id": "t3_post1",
+			"subreddit": "test",
 			"replies": {
 				"kind": "Listing",
 				"data": {
@@ -1519,15 +2487,28 @@ func TestCommentTreeWithMoreIDs(t *testing.T) {
 							"id": "child",
 							"name": "t1_child",
 							"data": {
+								"id": "child",
+								"name": "t1_child",
 								"author": "user2",
 								"body": "Child comment",
+								"score": 50,
+								"ups": 50,
+								"downs": 0,
+								"created": 1234567890,
+								"created_utc": 1234567890,
+								"parent_id": "t1_parent",
+								"link_id": "t3_post1",
+								"subreddit": "test",
 								"replies": ""
 							}
 						},
 						{
 							"kind": "more",
 							"id": "more1",
+							"name": "t2_more1",
 							"data": {
+								"id": "more1",
+								"name": "t2_more1",
 								"children": ["id1", "id2", "id3"]
 							}
 						}
