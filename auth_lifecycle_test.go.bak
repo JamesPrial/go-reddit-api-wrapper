@@ -242,9 +242,7 @@ func TestConcurrentTokenRefreshRaceCondition(t *testing.T) {
 			"kind": "t2",
 			"data": map[string]interface{}{
 				"id":   "user123",
-				"name": "t2_user123",
-				"created":     1234567890.0,
-				"created_utc": 1234567890.0,
+				"name": "testuser",
 			},
 		}
 		json.NewEncoder(w).Encode(response)
@@ -386,9 +384,7 @@ func TestAuthenticationFailureRecovery(t *testing.T) {
 			"kind": "t2",
 			"data": map[string]interface{}{
 				"id":   "user123",
-				"name": "t2_user123",
-				"created":     1234567890.0,
-				"created_utc": 1234567890.0,
+				"name": "testuser",
 			},
 		}
 		json.NewEncoder(w).Encode(response)
@@ -526,9 +522,7 @@ func TestTokenCacheInvalidation(t *testing.T) {
 			"kind": "t2",
 			"data": map[string]interface{}{
 				"id":   "user123",
-				"name": "t2_user123",
-				"created":     1234567890.0,
-				"created_utc": 1234567890.0,
+				"name": "testuser",
 			},
 		}
 		json.NewEncoder(w).Encode(response)
@@ -643,9 +637,7 @@ func TestMultiClientAuthBehavior(t *testing.T) {
 			"kind": "t2",
 			"data": map[string]interface{}{
 				"id":   "user123",
-				"name": "t2_user123",
-				"created":     1234567890.0,
-				"created_utc": 1234567890.0,
+				"name": "testuser",
 			},
 		}
 		json.NewEncoder(w).Encode(response)
@@ -785,9 +777,7 @@ func TestAuthSystemClockManipulation(t *testing.T) {
 			"kind": "t2",
 			"data": map[string]interface{}{
 				"id":   "user123",
-				"name": "t2_user123",
-				"created":     1234567890.0,
-				"created_utc": 1234567890.0,
+				"name": "testuser",
 			},
 		}
 		json.NewEncoder(w).Encode(response)
