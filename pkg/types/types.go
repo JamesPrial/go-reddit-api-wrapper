@@ -10,13 +10,27 @@ import (
 type KindPrefix string
 
 const (
-	KindComment   KindPrefix = "t1_"
-	KindAccount   KindPrefix = "t2_"
-	KindPost      KindPrefix = "t3_"
-	KindMessage   KindPrefix = "t4_"
-	KindSubreddit KindPrefix = "t5_"
-	KindAward     KindPrefix = "t6_"
+	KIND_COMMENT   KindPrefix = "t1_"
+	KIND_ACCOUNT   KindPrefix = "t2_"
+	KIND_POST      KindPrefix = "t3_"
+	KIND_MESSAGE   KindPrefix = "t4_"
+	KIND_SUBREDDIT KindPrefix = "t5_"
+	KIND_AWARD     KindPrefix = "t6_"
 )
+
+const PREFIX_LENGTH = 3  // Length of kind prefixes like "t1_"
+const PREFIX_IDX = 2     // Index of '_' in kind prefixes like "t1_" (no magic numbers!!!)
+const ID_MAX_LENGTH = 13 // Max length of Reddit IDs (without prefix)
+
+// IsValidKindPrefix checks if a string is a valid KindPrefix.
+func IsValidKindPrefix(s string) bool {
+	switch KindPrefix(s) {
+	case KIND_COMMENT, KIND_ACCOUNT, KIND_POST, KIND_MESSAGE, KIND_SUBREDDIT, KIND_AWARD:
+		return true
+	default:
+		return false
+	}
+}
 
 // RedditObject defines the common behavior for all Reddit API objects like
 // Posts, Comments, and Subreddits.
@@ -28,7 +42,7 @@ type RedditObject interface {
 // ThingData holds the common fields for Reddit objects.
 // It can be embedded into specific types like Post and Comment.
 type ThingData struct {
-	ID   string `json:"id"`   // ID (without prefix)
+	ID   string `json:"id"`   // ID (without prefix e.g., "abc123")
 	Name string `json:"name"` // Full name (e.g., "t3_abc123")
 }
 
@@ -342,6 +356,8 @@ type Post struct {
 	Stickied            bool            `json:"stickied"`
 	UpvoteRatio         float64         `json:"upvote_ratio"` // Percentage of upvotes (0.0 to 1.0, e.g. 0.95 = 95% upvoted)
 }
+
+const MAX_POST_TITLE_LENGTH = 300 // Reddit enforces a maximum title length of 300 characters
 
 // Comment represents a Reddit comment with all its fields
 type Comment struct {
