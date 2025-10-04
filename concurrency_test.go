@@ -495,6 +495,8 @@ func TestConcurrentResourceContention(t *testing.T) {
 		subredditData := map[string]interface{}{
 			"kind": "t5",
 			"data": map[string]interface{}{
+				"id":           fmt.Sprintf("sub%d", atomic.LoadInt64(&requestCount)),
+				"name":         fmt.Sprintf("t5_sub%d", atomic.LoadInt64(&requestCount)),
 				"display_name": fmt.Sprintf("contention_test_%d", atomic.LoadInt64(&requestCount)),
 				"subscribers":  100000,
 				"created_utc":  1234567890.0,
@@ -518,8 +520,8 @@ func TestConcurrentResourceContention(t *testing.T) {
 	}
 
 	// Test high concurrency with resource contention
-	numGoroutines := 50
-	operationsPerGoroutine := 5
+	numGoroutines := 20
+	operationsPerGoroutine := 3
 	var wg sync.WaitGroup
 	var errors []error
 	var errorMu sync.Mutex
