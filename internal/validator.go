@@ -4,11 +4,13 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
 	pkgerrs "github.com/jamesprial/go-reddit-api-wrapper/pkg/errors"
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
+	"github.com/jamesprial/go-reddit-api-wrapper/pkg/validation"
 )
 
 const (
@@ -45,26 +47,31 @@ func (v *Validator) ValidateSubredditName(name string) error {
 	if name == "" {
 		return &pkgerrs.ConfigError{Field: "subreddit", Message: "subreddit name cannot be empty"}
 	}
-	if len(name) < minSubredditLength {
-		return &pkgerrs.ConfigError{Field: "subreddit", Message: fmt.Sprintf("subreddit name must be at least %d characters", minSubredditLength)}
+
+	// Use regex validator first
+	if !validation.IsValidSubreddit(name) {
+		if len(name) < minSubredditLength {
+			return &pkgerrs.ConfigError{Field: "subreddit", Message: fmt.Sprintf("subreddit name must be at least %d characters", minSubredditLength)}
+		}
+		if len(name) > maxSubredditLength {
+			return &pkgerrs.ConfigError{Field: "subreddit", Message: fmt.Sprintf("subreddit name cannot exceed %d characters", maxSubredditLength)}
+		}
+		return &pkgerrs.ConfigError{Field: "subreddit", Message: "subreddit name contains invalid characters (only letters, numbers, and underscores allowed)"}
 	}
-	if len(name) > maxSubredditLength {
-		return &pkgerrs.ConfigError{Field: "subreddit", Message: fmt.Sprintf("subreddit name cannot exceed %d characters", maxSubredditLength)}
-	}
+
+	// Additional stricter checks beyond regex
 	// Check for Reddit naming constraints
 	firstChar := rune(name[0])
 	if firstChar == '_' || rune(name[len(name)-1]) == '_' {
 		return &pkgerrs.ConfigError{Field: "subreddit", Message: "subreddit name cannot start or end with underscore"}
 	}
-	// Check for valid characters: letters, numbers, underscores only
+
+	// Check for consecutive underscores
 	prevWasUnderscore := false
 	for i, ch := range name {
-		if !(ch >= 'a' && ch <= 'z') && !(ch >= 'A' && ch <= 'Z') && !(ch >= '0' && ch <= '9') && ch != '_' {
-			return &pkgerrs.ConfigError{Field: "subreddit", Message: fmt.Sprintf("subreddit name contains invalid character '%c' at position %d", ch, i)}
-		}
 		if ch == '_' {
 			if prevWasUnderscore {
-				return &pkgerrs.ConfigError{Field: "subreddit", Message: "subreddit name cannot contain consecutive underscores"}
+				return &pkgerrs.ConfigError{Field: "subreddit", Message: fmt.Sprintf("subreddit name cannot contain consecutive underscores at position %d", i)}
 			}
 			prevWasUnderscore = true
 		} else {
@@ -83,6 +90,18 @@ func (v *Validator) ValidatePagination(pagination *types.Pagination) error {
 	// Reddit API doesn't allow both After and Before to be set
 	if pagination.After != "" && pagination.Before != "" {
 		return &pkgerrs.ConfigError{Field: "pagination", Message: "cannot set both After and Before pagination parameters"}
+	}
+	// Validate After token if present
+	if pagination.After != "" {
+		if err := v.ValidatePaginationToken(pagination.After); err != nil {
+			return &pkgerrs.ConfigError{Field: "pagination.After", Message: fmt.Sprintf("invalid pagination token: %v", err)}
+		}
+	}
+	// Validate Before token if present
+	if pagination.Before != "" {
+		if err := v.ValidatePaginationToken(pagination.Before); err != nil {
+			return &pkgerrs.ConfigError{Field: "pagination.Before", Message: fmt.Sprintf("invalid pagination token: %v", err)}
+		}
 	}
 	// Validate limit range
 	if pagination.Limit < 0 {
@@ -153,16 +172,31 @@ func (v *Validator) ValidateLinkID(linkID string) (string, error) {
 				Message: "link ID has t3_ prefix but no content after",
 			}
 		}
+		// Validate full fullname format
+		if !validation.IsValidFullname(linkID) {
+			return "", &pkgerrs.ConfigError{
+				Field:   "LinkID",
+				Message: fmt.Sprintf("link ID has invalid format: %s", linkID),
+			}
+		}
 		return linkID, nil
 	}
 
 	// Check for wrong prefix (e.g., t1_, t5_)
 	if strings.Contains(linkID, "_") && (strings.HasPrefix(linkID, "t1_") ||
 		strings.HasPrefix(linkID, "t2_") || strings.HasPrefix(linkID, "t4_") ||
-		strings.HasPrefix(linkID, "t5_")) {
+		strings.HasPrefix(linkID, "t5_") || strings.HasPrefix(linkID, "t6_")) {
 		return "", &pkgerrs.ConfigError{
 			Field:   "LinkID",
 			Message: fmt.Sprintf("link ID has wrong type prefix, expected t3_ for posts but got: %s", linkID[:3]),
+		}
+	}
+
+	// Validate base36 format before adding prefix
+	if !validation.IsValidBase36(linkID) {
+		return "", &pkgerrs.ConfigError{
+			Field:   "LinkID",
+			Message: fmt.Sprintf("link ID has invalid format (must be base36): %s", linkID),
 		}
 	}
 
@@ -182,14 +216,9 @@ func validateCommentID(id string) error {
 		return fmt.Errorf("comment ID too long (max %d characters)", maxCommentIDLength)
 	}
 
-	// Reddit comment IDs are alphanumeric base36 strings
-	// They should only contain: 0-9, a-z, A-Z
-	for _, char := range id {
-		if !((char >= '0' && char <= '9') ||
-			(char >= 'a' && char <= 'z') ||
-			(char >= 'A' && char <= 'Z')) {
-			return fmt.Errorf("comment ID contains invalid character: %c (only alphanumeric allowed)", char)
-		}
+	// Use base36 validator
+	if !validation.IsValidBase36(id) {
+		return fmt.Errorf("comment ID has invalid format (must be base36: 0-9, a-z)")
 	}
 
 	return nil
@@ -238,4 +267,77 @@ func (v *Validator) ValidateConfig(clientID, clientSecret, userAgent string, htt
 	}
 
 	return httpClient, nil
+}
+
+// ValidatePostID validates a post ID is valid base36 format (without prefix).
+// This is stricter than ValidateLinkID - it does not accept or add prefixes.
+func (v *Validator) ValidatePostID(postID string) error {
+	if postID == "" {
+		return &pkgerrs.ConfigError{
+			Field:   "PostID",
+			Message: "post ID is required",
+		}
+	}
+
+	// Validate base36 format (lowercase alphanumeric only)
+	if !validation.IsValidBase36(postID) {
+		return &pkgerrs.ConfigError{
+			Field:   "PostID",
+			Message: fmt.Sprintf("post ID has invalid format (must be base36: 0-9, a-z): %s", postID),
+		}
+	}
+
+	// Check for reasonable length
+	if len(postID) > maxCommentIDLength {
+		return &pkgerrs.ConfigError{
+			Field:   "PostID",
+			Message: fmt.Sprintf("post ID too long (max %d characters): %s", maxCommentIDLength, postID),
+		}
+	}
+
+	return nil
+}
+
+// ValidatePaginationToken validates that a pagination token (after/before) is a valid Reddit fullname.
+func (v *Validator) ValidatePaginationToken(token string) error {
+	if token == "" {
+		return fmt.Errorf("pagination token cannot be empty")
+	}
+
+	// Validate fullname format (e.g., t3_abc123, t1_def456)
+	if !validation.IsValidFullname(token) {
+		return fmt.Errorf("pagination token has invalid fullname format (expected t[1-6]_[base36]): %s", token)
+	}
+
+	return nil
+}
+
+// ValidateURL validates that a URL is a valid HTTP/HTTPS URL without protocol injection risks.
+func (v *Validator) ValidateURL(urlStr string) error {
+	if urlStr == "" {
+		return fmt.Errorf("URL cannot be empty")
+	}
+
+	// Parse the URL
+	parsedURL, err := url.Parse(urlStr)
+	if err != nil {
+		return fmt.Errorf("invalid URL format: %w", err)
+	}
+
+	// Ensure scheme is http or https only (prevent javascript:, file:, etc.)
+	if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
+		return fmt.Errorf("URL must use http or https scheme, got: %s", parsedURL.Scheme)
+	}
+
+	// Ensure host is present
+	if parsedURL.Host == "" {
+		return fmt.Errorf("URL must have a valid host")
+	}
+
+	// Check for suspicious patterns that could indicate injection
+	if strings.ContainsAny(urlStr, "\r\n") {
+		return fmt.Errorf("URL cannot contain newline characters")
+	}
+
+	return nil
 }

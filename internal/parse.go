@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
+	"github.com/jamesprial/go-reddit-api-wrapper/pkg/validation"
 )
 
 // MaxCommentDepth is the maximum depth of nested comments to prevent stack overflow attacks
@@ -106,6 +107,22 @@ func (p *Parser) ParseListing(ctx context.Context, thing *types.Thing) (*types.L
 		return nil, fmt.Errorf("failed to parse Listing data: %w", err)
 	}
 
+	// Validate pagination tokens
+	if result.AfterFullname != "" && !validation.IsValidFullname(result.AfterFullname) {
+		if p.logger != nil {
+			p.logger.LogAttrs(ctx, slog.LevelWarn, "invalid AfterFullname from Reddit API",
+				slog.String("after", result.AfterFullname))
+		}
+		return nil, fmt.Errorf("invalid AfterFullname from Reddit API: %s", result.AfterFullname)
+	}
+	if result.BeforeFullname != "" && !validation.IsValidFullname(result.BeforeFullname) {
+		if p.logger != nil {
+			p.logger.LogAttrs(ctx, slog.LevelWarn, "invalid BeforeFullname from Reddit API",
+				slog.String("before", result.BeforeFullname))
+		}
+		return nil, fmt.Errorf("invalid BeforeFullname from Reddit API: %s", result.BeforeFullname)
+	}
+
 	return &result, nil
 }
 
@@ -125,6 +142,15 @@ func (p *Parser) ParsePost(ctx context.Context, thing *types.Thing) (*types.Post
 				slog.String("error", err.Error()))
 		}
 		return nil, fmt.Errorf("failed to parse Post data: %w", err)
+	}
+
+	// Validate the parsed post
+	if err := validation.ValidatePost(&result); err != nil {
+		if p.logger != nil {
+			p.logger.LogAttrs(ctx, slog.LevelWarn, "invalid post data from Reddit API",
+				slog.String("error", err.Error()))
+		}
+		return nil, fmt.Errorf("invalid post data from Reddit API: %w", err)
 	}
 
 	return &result, nil
@@ -162,6 +188,15 @@ func (p *Parser) ParseComment(ctx context.Context, thing *types.Thing, pc *parse
 				slog.String("error", err.Error()))
 		}
 		return nil, fmt.Errorf("failed to parse Comment data: %w", err)
+	}
+
+	// Validate the parsed comment
+	if err := validation.ValidateComment(&data.Comment); err != nil {
+		if p.logger != nil {
+			p.logger.LogAttrs(ctx, slog.LevelWarn, "invalid comment data from Reddit API",
+				slog.String("error", err.Error()))
+		}
+		return nil, fmt.Errorf("invalid comment data from Reddit API: %w", err)
 	}
 
 	// Check for infinite loops
@@ -247,6 +282,15 @@ func (p *Parser) ParseSubreddit(ctx context.Context, thing *types.Thing) (*types
 		return nil, fmt.Errorf("failed to parse Subreddit data: %w", err)
 	}
 
+	// Validate the parsed subreddit
+	if err := validation.ValidateSubredditData(&result); err != nil {
+		if p.logger != nil {
+			p.logger.LogAttrs(ctx, slog.LevelWarn, "invalid subreddit data from Reddit API",
+				slog.String("error", err.Error()))
+		}
+		return nil, fmt.Errorf("invalid subreddit data from Reddit API: %w", err)
+	}
+
 	return &result, nil
 }
 
@@ -266,6 +310,15 @@ func (p *Parser) ParseAccount(ctx context.Context, thing *types.Thing) (*types.A
 				slog.String("error", err.Error()))
 		}
 		return nil, fmt.Errorf("failed to parse Account data: %w", err)
+	}
+
+	// Validate the parsed account
+	if err := validation.ValidateAccountData(&result); err != nil {
+		if p.logger != nil {
+			p.logger.LogAttrs(ctx, slog.LevelWarn, "invalid account data from Reddit API",
+				slog.String("error", err.Error()))
+		}
+		return nil, fmt.Errorf("invalid account data from Reddit API: %w", err)
 	}
 
 	return &result, nil
@@ -289,6 +342,15 @@ func (p *Parser) ParseMessage(ctx context.Context, thing *types.Thing) (*types.M
 		return nil, fmt.Errorf("failed to parse Message data: %w", err)
 	}
 
+	// Validate the parsed message
+	if err := validation.ValidateMessageData(&result); err != nil {
+		if p.logger != nil {
+			p.logger.LogAttrs(ctx, slog.LevelWarn, "invalid message data from Reddit API",
+				slog.String("error", err.Error()))
+		}
+		return nil, fmt.Errorf("invalid message data from Reddit API: %w", err)
+	}
+
 	return &result, nil
 }
 
@@ -308,6 +370,15 @@ func (p *Parser) ParseMore(ctx context.Context, thing *types.Thing) (*types.More
 				slog.String("error", err.Error()))
 		}
 		return nil, fmt.Errorf("failed to parse More data: %w", err)
+	}
+
+	// Validate the parsed more data
+	if err := validation.ValidateMoreData(&result); err != nil {
+		if p.logger != nil {
+			p.logger.LogAttrs(ctx, slog.LevelWarn, "invalid more data from Reddit API",
+				slog.String("error", err.Error()))
+		}
+		return nil, fmt.Errorf("invalid more data from Reddit API: %w", err)
 	}
 
 	return &result, nil
