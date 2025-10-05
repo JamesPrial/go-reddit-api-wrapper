@@ -3,6 +3,7 @@ package graw
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -727,11 +728,12 @@ func TestContextCancellationDuringRecovery(t *testing.T) {
 
 	// Try multiple requests with cancellation
 	attempts := 0
-	for {
+	maxAttempts := 10 // Safety limit to prevent infinite loops
+	for attempts < maxAttempts {
 		attempts++
 		_, err := client.GetSubreddit(ctx, "testsub")
 		if err != nil {
-			if err == context.DeadlineExceeded {
+			if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 				t.Logf("Successfully cancelled after %d attempts", attempts)
 				break
 			}
