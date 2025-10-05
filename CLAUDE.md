@@ -6,25 +6,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Go wrapper for the Reddit API providing OAuth2 authentication and a clean interface for common Reddit operations. The library supports both application-only and user authentication modes.
 
+Always use context7 when I need code generation, setup or configuration steps, or
+library/API documentation. This means you should automatically use the Context7 MCP
+tools to resolve library id and get library docs without me having to explicitly ask.
+
 ## Key Commands
 
 ### Testing
-```bash
-# Run all tests
-go test ./...
 
-# Run tests with verbose output
-go test -v ./...
-
-# Run tests with coverage
-go test -cover ./...
-
-# Run benchmarks
-go test -bench=. ./internal
-
-# Run a specific test
-go test -run TestName ./internal
-```
+### USE @agent-go-test-runner ###
 
 ### Building
 ```bash
@@ -61,6 +51,8 @@ go run ./cmd/example
 ```
 
 ## Architecture
+
+### UTILIZE @agent-codebase-navigator WHEN CONTEXT FROM MULTIPLE FILES IS NEEDED ###
 
 ### Package Structure
 - **Main Package (`/`)**: Core Reddit client implementation in `reddit.go`
