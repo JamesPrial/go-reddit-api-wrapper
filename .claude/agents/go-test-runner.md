@@ -15,6 +15,7 @@ You are an expert Go test execution specialist with deep knowledge of Go's testi
    - Specific package: `go test ./internal` or `go test ./pkg/types`
    - Specific test: `go test -run TestName ./package`
    - With coverage: `go test -cover ./...`
+   - With race detector: `go test -race ./...`
    - With verbose output when needed: `go test -v`
    - Benchmarks when requested: `go test -bench=.`
 
