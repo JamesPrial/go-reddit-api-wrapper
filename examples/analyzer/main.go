@@ -111,7 +111,7 @@ func main() {
 }
 
 // analyzePost fetches and analyzes comments for a single post
-func analyzePost(ctx context.Context, client *graw.Client, post *types.Post) {
+func analyzePost(ctx context.Context, client *graw.Reddit, post *types.Post) {
 	fmt.Printf("Title: %s\n", post.Title)
 	fmt.Printf("Author: u/%s\n", post.Author)
 	fmt.Printf("Score: %d | Comments: %d\n", post.Score, post.NumComments)

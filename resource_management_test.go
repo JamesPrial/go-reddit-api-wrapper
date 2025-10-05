@@ -54,7 +54,7 @@ func TestConnectionResourceManagement(t *testing.T) {
 	const numClients = 5
 	const requestsPerClient = 3
 
-	var clients []*Client
+	var clients []*Reddit
 	var httpClients []*http.Client
 
 	// Create multiple clients
@@ -74,8 +74,8 @@ func TestConnectionResourceManagement(t *testing.T) {
 			t.Fatalf("Failed to create internal client %d: %v", i, err)
 		}
 
-		client := &Client{
-			client:    internalClient,
+		client := &Reddit{
+			httpClient:    internalClient,
 			parser:    internal.NewParser(),
 			validator: internal.NewValidator(),
 			auth:      &mockTokenProvider{token: "test_token"},
@@ -89,7 +89,7 @@ func TestConnectionResourceManagement(t *testing.T) {
 	var wg sync.WaitGroup
 	for i, client := range clients {
 		wg.Add(1)
-		go func(clientID int, c *Client) {
+		go func(clientID int, c *Reddit) {
 			defer wg.Done()
 
 			for j := 0; j < requestsPerClient; j++ {
@@ -110,7 +110,7 @@ func TestConnectionResourceManagement(t *testing.T) {
 
 	// Clean up all clients
 	for i := range clients {
-		if closer, ok := clients[i].client.(interface{ Close() error }); ok {
+		if closer, ok := clients[i].httpClient.(interface{ Close() error }); ok {
 			closer.Close()
 		}
 		if transport, ok := httpClients[i].Transport.(*http.Transport); ok {
@@ -126,7 +126,7 @@ func TestConnectionResourceManagement(t *testing.T) {
 
 	t.Logf("Connection resource management test completed:")
 	t.Logf("  Clients created: %d", numClients)
-	t.Logf("  Requests per client: %d", requestsPerClient)
+	t.Logf("  Requests per httpClient: %d", requestsPerClient)
 	t.Logf("  Total requests: %d", requestCount)
 	t.Logf("  All connections cleaned up properly")
 }
@@ -176,11 +176,11 @@ func TestMemoryResourceManagement(t *testing.T) {
 	httpClient := &http.Client{Timeout: 30 * time.Second}
 	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
 	if err != nil {
-		t.Fatalf("Failed to create internal client: %v", err)
+		t.Fatalf("Failed to create internal httpClient: %v", err)
 	}
 
-	client := &Client{
-		client:    internalClient,
+	client := &Reddit{
+		httpClient:    internalClient,
 		parser:    internal.NewParser(),
 		validator: internal.NewValidator(),
 		auth:      &mockTokenProvider{token: "test_token"},
@@ -291,11 +291,11 @@ func TestGoroutineResourceManagement(t *testing.T) {
 	httpClient := &http.Client{Timeout: 30 * time.Second}
 	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
 	if err != nil {
-		t.Fatalf("Failed to create internal client: %v", err)
+		t.Fatalf("Failed to create internal httpClient: %v", err)
 	}
 
-	client := &Client{
-		client:    internalClient,
+	client := &Reddit{
+		httpClient:    internalClient,
 		parser:    internal.NewParser(),
 		validator: internal.NewValidator(),
 		auth:      &mockTokenProvider{token: "test_token"},
@@ -406,11 +406,11 @@ func TestContextResourceManagement(t *testing.T) {
 	httpClient := &http.Client{Timeout: 30 * time.Second}
 	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
 	if err != nil {
-		t.Fatalf("Failed to create internal client: %v", err)
+		t.Fatalf("Failed to create internal httpClient: %v", err)
 	}
 
-	client := &Client{
-		client:    internalClient,
+	client := &Reddit{
+		httpClient:    internalClient,
 		parser:    internal.NewParser(),
 		validator: internal.NewValidator(),
 		auth:      &mockTokenProvider{token: "test_token"},
@@ -482,7 +482,7 @@ func TestFileDescriptorResourceManagement(t *testing.T) {
 
 	// Create multiple HTTP clients to test file descriptor usage
 	const numClients = 10
-	var clients []*Client
+	var clients []*Reddit
 
 	for i := 0; i < numClients; i++ {
 		httpClient := &http.Client{
@@ -500,8 +500,8 @@ func TestFileDescriptorResourceManagement(t *testing.T) {
 			t.Fatalf("Failed to create internal client %d: %v", i, err)
 		}
 
-		client := &Client{
-			client:    internalClient,
+		client := &Reddit{
+			httpClient:    internalClient,
 			parser:    internal.NewParser(),
 			validator: internal.NewValidator(),
 			auth:      &mockTokenProvider{token: "test_token"},
@@ -515,7 +515,7 @@ func TestFileDescriptorResourceManagement(t *testing.T) {
 	var wg sync.WaitGroup
 	for i, client := range clients {
 		wg.Add(1)
-		go func(clientID int, c *Client) {
+		go func(clientID int, c *Reddit) {
 			defer wg.Done()
 
 			for j := 0; j < 3; j++ {
@@ -536,7 +536,7 @@ func TestFileDescriptorResourceManagement(t *testing.T) {
 
 	// Clean up all clients
 	for i, client := range clients {
-		if closer, ok := client.client.(interface{ Close() error }); ok {
+		if closer, ok := client.httpClient.(interface{ Close() error }); ok {
 			closer.Close()
 		}
 		// Note: Transport cleanup handled by client.Close()
@@ -605,11 +605,11 @@ func TestBufferResourceManagement(t *testing.T) {
 	httpClient := &http.Client{Timeout: 30 * time.Second}
 	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
 	if err != nil {
-		t.Fatalf("Failed to create internal client: %v", err)
+		t.Fatalf("Failed to create internal httpClient: %v", err)
 	}
 
-	client := &Client{
-		client:    internalClient,
+	client := &Reddit{
+		httpClient:    internalClient,
 		parser:    internal.NewParser(),
 		validator: internal.NewValidator(),
 		auth:      &mockTokenProvider{token: "test_token"},
@@ -698,7 +698,7 @@ func TestResourceLeakDetection(t *testing.T) {
 	const clientsPerCycle = 5
 
 	for cycle := 0; cycle < numCycles; cycle++ {
-		var clients []*Client
+		var clients []*Reddit
 
 		// Create clients
 		for i := 0; i < clientsPerCycle; i++ {
@@ -716,8 +716,8 @@ func TestResourceLeakDetection(t *testing.T) {
 				t.Fatalf("Failed to create internal client %d-%d: %v", cycle, i, err)
 			}
 
-			client := &Client{
-				client:    internalClient,
+			client := &Reddit{
+				httpClient:    internalClient,
 				parser:    internal.NewParser(),
 				validator: internal.NewValidator(),
 				auth:      &mockTokenProvider{token: "test_token"},
@@ -731,7 +731,7 @@ func TestResourceLeakDetection(t *testing.T) {
 
 		for i, client := range clients {
 			wg.Add(1)
-			go func(clientID int, c *Client) {
+			go func(clientID int, c *Reddit) {
 				defer wg.Done()
 
 				for j := 0; j < 2; j++ {
@@ -752,7 +752,7 @@ func TestResourceLeakDetection(t *testing.T) {
 
 		// Clean up clients
 		for i := range clients {
-			if closer, ok := clients[i].client.(interface{ Close() error }); ok {
+			if closer, ok := clients[i].httpClient.(interface{ Close() error }); ok {
 				closer.Close()
 			}
 			// Note: Transport cleanup handled by client.Close()

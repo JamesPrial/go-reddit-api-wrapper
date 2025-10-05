@@ -192,7 +192,7 @@ go run ./examples/analyzer/main.go
 
 ```go
 // Monitor r/golang for new posts every 60 seconds
-func monitorSubreddit(ctx context.Context, client *graw.Client, subreddit string) {
+func monitorSubreddit(ctx context.Context, client *graw.Reddit, subreddit string) {
     var lastSeen string
     ticker := time.NewTicker(60 * time.Second)
     defer ticker.Stop()
@@ -231,7 +231,7 @@ func monitorSubreddit(ctx context.Context, client *graw.Client, subreddit string
 
 ```go
 // Fetch comments from a post and analyze them
-func analyzePostComments(ctx context.Context, client *graw.Client, subreddit, postID string) {
+func analyzePostComments(ctx context.Context, client *graw.Reddit, subreddit, postID string) {
     // Get all comments for the post
     resp, err := client.GetComments(ctx, &types.CommentsRequest{
         Subreddit:  subreddit,
@@ -273,7 +273,7 @@ func analyzePostComments(ctx context.Context, client *graw.Client, subreddit, po
 
 ```go
 // Get top posts from multiple pages
-func getTopPosts(ctx context.Context, client *graw.Client, subreddit string, count int) []*types.Post {
+func getTopPosts(ctx context.Context, client *graw.Reddit, subreddit string, count int) []*types.Post {
     var allPosts []*types.Post
     after := ""
 
@@ -309,7 +309,7 @@ func getTopPosts(ctx context.Context, client *graw.Client, subreddit string, cou
 
 ```go
 // Fetch hot posts from multiple subreddits concurrently
-func getMultiSubredditPosts(ctx context.Context, client *graw.Client, subreddits []string) map[string][]*types.Post {
+func getMultiSubredditPosts(ctx context.Context, client *graw.Reddit, subreddits []string) map[string][]*types.Post {
     results := make(map[string][]*types.Post)
     var mu sync.Mutex
     var wg sync.WaitGroup
@@ -397,7 +397,7 @@ func printTree(node *CommentNode, depth int) {
 ### 6. Error Handling Best Practices
 
 ```go
-func robustFetch(ctx context.Context, client *graw.Client, subreddit string) {
+func robustFetch(ctx context.Context, client *graw.Reddit, subreddit string) {
     resp, err := client.GetHot(ctx, &types.PostsRequest{
         Subreddit:  subreddit,
         Pagination: types.Pagination{Limit: 25},

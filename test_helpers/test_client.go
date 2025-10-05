@@ -12,7 +12,7 @@ import (
 
 // TestClient provides a wrapper around the Reddit client for testing
 type TestClient struct {
-	*graw.Client
+	*graw.Reddit
 	mockServer *RedditMockServer
 	config     MockClientConfig
 	mu         sync.RWMutex
@@ -50,7 +50,7 @@ func NewTestClient(config *MockClientConfig) *TestClient {
 	}
 
 	return &TestClient{
-		Client:     client,
+		Reddit:     client,
 		mockServer: mockServer,
 		config:     *config,
 	}

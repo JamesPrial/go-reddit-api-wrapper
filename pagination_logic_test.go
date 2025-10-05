@@ -100,11 +100,11 @@ func TestPaginationForwardNavigation(t *testing.T) {
 	httpClient := &http.Client{Timeout: 30 * time.Second}
 	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
 	if err != nil {
-		t.Fatalf("Failed to create internal client: %v", err)
+		t.Fatalf("Failed to create internal httpClient: %v", err)
 	}
 
-	client := &Client{
-		client:    internalClient,
+	client := &Reddit{
+		httpClient:    internalClient,
 		parser:    internal.NewParser(),
 		validator: internal.NewValidator(),
 		auth:      &mockTokenProvider{token: "test_token"},
@@ -249,11 +249,11 @@ func TestPaginationBackwardNavigation(t *testing.T) {
 	httpClient := &http.Client{Timeout: 30 * time.Second}
 	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
 	if err != nil {
-		t.Fatalf("Failed to create internal client: %v", err)
+		t.Fatalf("Failed to create internal httpClient: %v", err)
 	}
 
-	client := &Client{
-		client:    internalClient,
+	client := &Reddit{
+		httpClient:    internalClient,
 		parser:    internal.NewParser(),
 		validator: internal.NewValidator(),
 		auth:      &mockTokenProvider{token: "test_token"},
@@ -381,11 +381,11 @@ func TestPaginationLimitBehavior(t *testing.T) {
 	httpClient := &http.Client{Timeout: 30 * time.Second}
 	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
 	if err != nil {
-		t.Fatalf("Failed to create internal client: %v", err)
+		t.Fatalf("Failed to create internal httpClient: %v", err)
 	}
 
-	client := &Client{
-		client:    internalClient,
+	client := &Reddit{
+		httpClient:    internalClient,
 		parser:    internal.NewParser(),
 		validator: internal.NewValidator(),
 		auth:      &mockTokenProvider{token: "test_token"},
@@ -461,11 +461,11 @@ func TestPaginationEmptyResults(t *testing.T) {
 	httpClient := &http.Client{Timeout: 30 * time.Second}
 	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
 	if err != nil {
-		t.Fatalf("Failed to create internal client: %v", err)
+		t.Fatalf("Failed to create internal httpClient: %v", err)
 	}
 
-	client := &Client{
-		client:    internalClient,
+	client := &Reddit{
+		httpClient:    internalClient,
 		parser:    internal.NewParser(),
 		validator: internal.NewValidator(),
 		auth:      &mockTokenProvider{token: "test_token"},
@@ -541,11 +541,11 @@ func TestPaginationInvalidParameters(t *testing.T) {
 	httpClient := &http.Client{Timeout: 30 * time.Second}
 	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
 	if err != nil {
-		t.Fatalf("Failed to create internal client: %v", err)
+		t.Fatalf("Failed to create internal httpClient: %v", err)
 	}
 
-	client := &Client{
-		client:    internalClient,
+	client := &Reddit{
+		httpClient:    internalClient,
 		parser:    internal.NewParser(),
 		validator: internal.NewValidator(),
 		auth:      &mockTokenProvider{token: "test_token"},
@@ -643,11 +643,11 @@ func TestPaginationConsistency(t *testing.T) {
 	httpClient := &http.Client{Timeout: 30 * time.Second}
 	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
 	if err != nil {
-		t.Fatalf("Failed to create internal client: %v", err)
+		t.Fatalf("Failed to create internal httpClient: %v", err)
 	}
 
-	client := &Client{
-		client:    internalClient,
+	client := &Reddit{
+		httpClient:    internalClient,
 		parser:    internal.NewParser(),
 		validator: internal.NewValidator(),
 		auth:      &mockTokenProvider{token: "test_token"},
@@ -784,11 +784,11 @@ func TestPaginationWithComments(t *testing.T) {
 	httpClient := &http.Client{Timeout: 30 * time.Second}
 	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
 	if err != nil {
-		t.Fatalf("Failed to create internal client: %v", err)
+		t.Fatalf("Failed to create internal httpClient: %v", err)
 	}
 
-	client := &Client{
-		client:    internalClient,
+	client := &Reddit{
+		httpClient:    internalClient,
 		parser:    internal.NewParser(),
 		validator: internal.NewValidator(),
 		auth:      &mockTokenProvider{token: "test_token"},

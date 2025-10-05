@@ -64,7 +64,7 @@ go run ./cmd/example
 
 ### Package Structure
 - **Main Package (`/`)**: Core Reddit client implementation in `reddit.go`
-  - `Client` struct: Main client with OAuth token management
+  - `Reddit` struct: Main client with OAuth token management
   - `Config` struct: Client configuration including auth credentials and customization
   - Public API methods: `GetHot`, `GetNew`, `GetComments`, etc.
 

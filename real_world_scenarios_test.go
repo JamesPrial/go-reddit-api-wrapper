@@ -149,11 +149,11 @@ func TestRedditAPIClientUsage(t *testing.T) {
 	httpClient := &http.Client{Timeout: 30 * time.Second}
 	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
 	if err != nil {
-		t.Fatalf("Failed to create internal client: %v", err)
+		t.Fatalf("Failed to create internal httpClient: %v", err)
 	}
 
-	client := &Client{
-		client:    internalClient,
+	client := &Reddit{
+		httpClient:    internalClient,
 		parser:    internal.NewParser(),
 		validator: internal.NewValidator(),
 		auth:      &mockTokenProvider{token: "test_token"},
@@ -378,11 +378,11 @@ func TestErrorHandlingInRealWorld(t *testing.T) {
 	httpClient := &http.Client{Timeout: 500 * time.Millisecond}
 	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
 	if err != nil {
-		t.Fatalf("Failed to create internal client: %v", err)
+		t.Fatalf("Failed to create internal httpClient: %v", err)
 	}
 
-	client := &Client{
-		client:    internalClient,
+	client := &Reddit{
+		httpClient:    internalClient,
 		parser:    internal.NewParser(),
 		validator: internal.NewValidator(),
 		auth:      &mockTokenProvider{token: "test_token"},
@@ -493,11 +493,11 @@ func TestConcurrentRealWorldUsage(t *testing.T) {
 	httpClient := &http.Client{Timeout: 30 * time.Second}
 	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
 	if err != nil {
-		t.Fatalf("Failed to create internal client: %v", err)
+		t.Fatalf("Failed to create internal httpClient: %v", err)
 	}
 
-	client := &Client{
-		client:    internalClient,
+	client := &Reddit{
+		httpClient:    internalClient,
 		parser:    internal.NewParser(),
 		validator: internal.NewValidator(),
 		auth:      &mockTokenProvider{token: "test_token"},
@@ -621,11 +621,11 @@ func TestLongRunningOperations(t *testing.T) {
 	httpClient := &http.Client{Timeout: 30 * time.Second}
 	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
 	if err != nil {
-		t.Fatalf("Failed to create internal client: %v", err)
+		t.Fatalf("Failed to create internal httpClient: %v", err)
 	}
 
-	client := &Client{
-		client:    internalClient,
+	client := &Reddit{
+		httpClient:    internalClient,
 		parser:    internal.NewParser(),
 		validator: internal.NewValidator(),
 		auth:      &mockTokenProvider{token: "test_token"},

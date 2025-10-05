@@ -85,7 +85,7 @@ func main() {
 }
 
 // monitorSubreddit polls a subreddit for new posts at regular intervals
-func monitorSubreddit(ctx context.Context, client *graw.Client, subreddit string) error {
+func monitorSubreddit(ctx context.Context, client *graw.Reddit, subreddit string) error {
 	// Track the last seen post to avoid duplicates
 	seenPosts := make(map[string]bool)
 	ticker := time.NewTicker(pollInterval * time.Second)
@@ -111,7 +111,7 @@ func monitorSubreddit(ctx context.Context, client *graw.Client, subreddit string
 }
 
 // fetchAndProcessNewPosts retrieves new posts and processes them
-func fetchAndProcessNewPosts(ctx context.Context, client *graw.Client, subreddit string, seenPosts map[string]bool) error {
+func fetchAndProcessNewPosts(ctx context.Context, client *graw.Reddit, subreddit string, seenPosts map[string]bool) error {
 	resp, err := client.GetNew(ctx, &types.PostsRequest{
 		Subreddit:  subreddit,
 		Pagination: types.Pagination{Limit: fetchLimit},

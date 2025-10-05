@@ -61,11 +61,11 @@ func TestNetworkTimeoutRecovery(t *testing.T) {
 	httpClient := &http.Client{Timeout: 500 * time.Millisecond}
 	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
 	if err != nil {
-		t.Fatalf("Failed to create internal client: %v", err)
+		t.Fatalf("Failed to create internal httpClient: %v", err)
 	}
 
-	client := &Client{
-		client:    internalClient,
+	client := &Reddit{
+		httpClient:    internalClient,
 		parser:    internal.NewParser(),
 		validator: internal.NewValidator(),
 		auth:      &mockTokenProvider{token: "test_token"},
@@ -87,11 +87,11 @@ func TestNetworkTimeoutRecovery(t *testing.T) {
 	httpClient2 := &http.Client{Timeout: 5 * time.Second}
 	internalClient2, err := internal.NewClient(httpClient2, server.URL, "test/1.0", nil)
 	if err != nil {
-		t.Fatalf("Failed to create recovery client: %v", err)
+		t.Fatalf("Failed to create recovery httpClient: %v", err)
 	}
 
-	recoveryClient := &Client{
-		client:    internalClient2,
+	recoveryClient := &Reddit{
+		httpClient:    internalClient2,
 		parser:    internal.NewParser(),
 		validator: internal.NewValidator(),
 		auth:      &mockTokenProvider{token: "test_token"},
@@ -134,11 +134,11 @@ func TestConnectionRefusedRecovery(t *testing.T) {
 	httpClient := &http.Client{Timeout: 5 * time.Second}
 	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
 	if err != nil {
-		t.Fatalf("Failed to create internal client: %v", err)
+		t.Fatalf("Failed to create internal httpClient: %v", err)
 	}
 
-	client := &Client{
-		client:    internalClient,
+	client := &Reddit{
+		httpClient:    internalClient,
 		parser:    internal.NewParser(),
 		validator: internal.NewValidator(),
 		auth:      &mockTokenProvider{token: "test_token"},
@@ -179,11 +179,11 @@ func TestConnectionRefusedRecovery(t *testing.T) {
 	recoveryHttpClient := &http.Client{Timeout: 5 * time.Second}
 	recoveryInternalClient, err := internal.NewClient(recoveryHttpClient, recoveryServer.URL, "test/1.0", nil)
 	if err != nil {
-		t.Fatalf("Failed to create recovery internal client: %v", err)
+		t.Fatalf("Failed to create recovery internal httpClient: %v", err)
 	}
 
-	recoveryClient := &Client{
-		client:    recoveryInternalClient,
+	recoveryClient := &Reddit{
+		httpClient:    recoveryInternalClient,
 		parser:    internal.NewParser(),
 		validator: internal.NewValidator(),
 		auth:      &mockTokenProvider{token: "test_token"},
@@ -208,11 +208,11 @@ func TestDNSFailureRecovery(t *testing.T) {
 	httpClient := &http.Client{Timeout: 5 * time.Second}
 	internalClient, err := internal.NewClient(httpClient, "http://non-existent-domain-for-testing.invalid", "test/1.0", nil)
 	if err != nil {
-		t.Fatalf("Failed to create internal client: %v", err)
+		t.Fatalf("Failed to create internal httpClient: %v", err)
 	}
 
-	client := &Client{
-		client:    internalClient,
+	client := &Reddit{
+		httpClient:    internalClient,
 		parser:    internal.NewParser(),
 		validator: internal.NewValidator(),
 		auth:      &mockTokenProvider{token: "test_token"},
@@ -251,11 +251,11 @@ func TestDNSFailureRecovery(t *testing.T) {
 	recoveryHttpClient := &http.Client{Timeout: 5 * time.Second}
 	recoveryInternalClient, err := internal.NewClient(recoveryHttpClient, server.URL, "test/1.0", nil)
 	if err != nil {
-		t.Fatalf("Failed to create recovery internal client: %v", err)
+		t.Fatalf("Failed to create recovery internal httpClient: %v", err)
 	}
 
-	recoveryClient := &Client{
-		client:    recoveryInternalClient,
+	recoveryClient := &Reddit{
+		httpClient:    recoveryInternalClient,
 		parser:    internal.NewParser(),
 		validator: internal.NewValidator(),
 		auth:      &mockTokenProvider{token: "test_token"},
@@ -312,11 +312,11 @@ func TestHTTP5xxErrorRecovery(t *testing.T) {
 	httpClient := &http.Client{Timeout: 5 * time.Second}
 	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
 	if err != nil {
-		t.Fatalf("Failed to create internal client: %v", err)
+		t.Fatalf("Failed to create internal httpClient: %v", err)
 	}
 
-	client := &Client{
-		client:    internalClient,
+	client := &Reddit{
+		httpClient:    internalClient,
 		parser:    internal.NewParser(),
 		validator: internal.NewValidator(),
 		auth:      &mockTokenProvider{token: "test_token"},
@@ -395,11 +395,11 @@ func TestHTTP429RateLimitRecovery(t *testing.T) {
 	httpClient := &http.Client{Timeout: 5 * time.Second}
 	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
 	if err != nil {
-		t.Fatalf("Failed to create internal client: %v", err)
+		t.Fatalf("Failed to create internal httpClient: %v", err)
 	}
 
-	client := &Client{
-		client:    internalClient,
+	client := &Reddit{
+		httpClient:    internalClient,
 		parser:    internal.NewParser(),
 		validator: internal.NewValidator(),
 		auth:      &mockTokenProvider{token: "test_token"},
@@ -479,11 +479,11 @@ func TestPartialResponseRecovery(t *testing.T) {
 	httpClient := &http.Client{Timeout: 5 * time.Second}
 	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
 	if err != nil {
-		t.Fatalf("Failed to create internal client: %v", err)
+		t.Fatalf("Failed to create internal httpClient: %v", err)
 	}
 
-	client := &Client{
-		client:    internalClient,
+	client := &Reddit{
+		httpClient:    internalClient,
 		parser:    internal.NewParser(),
 		validator: internal.NewValidator(),
 		auth:      &mockTokenProvider{token: "test_token"},
@@ -560,11 +560,11 @@ func TestIntermittentNetworkFailure(t *testing.T) {
 	httpClient := &http.Client{Timeout: 5 * time.Second}
 	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
 	if err != nil {
-		t.Fatalf("Failed to create internal client: %v", err)
+		t.Fatalf("Failed to create internal httpClient: %v", err)
 	}
 
-	client := &Client{
-		client:    internalClient,
+	client := &Reddit{
+		httpClient:    internalClient,
 		parser:    internal.NewParser(),
 		validator: internal.NewValidator(),
 		auth:      &mockTokenProvider{token: "test_token"},
@@ -646,11 +646,11 @@ func TestNetworkRecoveryWithRetry(t *testing.T) {
 	httpClient := &http.Client{Timeout: 5 * time.Second}
 	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
 	if err != nil {
-		t.Fatalf("Failed to create internal client: %v", err)
+		t.Fatalf("Failed to create internal httpClient: %v", err)
 	}
 
-	client := &Client{
-		client:    internalClient,
+	client := &Reddit{
+		httpClient:    internalClient,
 		parser:    internal.NewParser(),
 		validator: internal.NewValidator(),
 		auth:      &mockTokenProvider{token: "test_token"},
@@ -711,11 +711,11 @@ func TestContextCancellationDuringRecovery(t *testing.T) {
 	httpClient := &http.Client{Timeout: 5 * time.Second}
 	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
 	if err != nil {
-		t.Fatalf("Failed to create internal client: %v", err)
+		t.Fatalf("Failed to create internal httpClient: %v", err)
 	}
 
-	client := &Client{
-		client:    internalClient,
+	client := &Reddit{
+		httpClient:    internalClient,
 		parser:    internal.NewParser(),
 		validator: internal.NewValidator(),
 		auth:      &mockTokenProvider{token: "test_token"},

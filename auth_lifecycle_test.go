@@ -649,7 +649,7 @@ func TestMultiClientAuthBehavior(t *testing.T) {
 
 		// Create multiple clients with same credentials
 		numClients := 5
-		clients := make([]*Client, numClients)
+		clients := make([]*Reddit, numClients)
 
 		for i := 0; i < numClients; i++ {
 			config := &Config{
@@ -677,7 +677,7 @@ func TestMultiClientAuthBehavior(t *testing.T) {
 
 		for i, client := range clients {
 			wg.Add(1)
-			go func(clientID int, c *Client) {
+			go func(clientID int, c *Reddit) {
 				defer wg.Done()
 
 				_, err := c.Me(context.Background())

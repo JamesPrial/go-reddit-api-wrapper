@@ -73,13 +73,13 @@ func (m *mockTokenProvider) GetToken(ctx context.Context) (string, error) {
 	return m.token, nil
 }
 
-func newTestClient(httpClient HTTPClient, auth TokenProvider) *Client {
+func newTestClient(httpClient HTTPClient, auth TokenProvider) *Reddit {
 	if auth == nil {
 		auth = &mockTokenProvider{token: "test_token"}
 	}
-	return &Client{
-		client: httpClient,
-		auth:   auth,
+	return &Reddit{
+		httpClient: httpClient,
+		auth:       auth,
 		config: &Config{
 			UserAgent: "test/1.0",
 			BaseURL:   "https://oauth.reddit.com/",
@@ -1711,7 +1711,7 @@ func TestClient_addAuthHeaders(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client := &Client{
+			client := &Reddit{
 				auth: tt.auth,
 			}
 

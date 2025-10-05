@@ -21,7 +21,7 @@ import (
 //
 // Run with: go test -tags=integration -v
 
-func getTestClient(t *testing.T) *Client {
+func getTestClient(t *testing.T) *Reddit {
 	t.Helper()
 
 	clientID := os.Getenv("REDDIT_CLIENT_ID")
@@ -43,7 +43,7 @@ func getTestClient(t *testing.T) *Client {
 
 	client, err := NewClient(config)
 	if err != nil {
-		t.Fatalf("Failed to create client: %v", err)
+		t.Fatalf("Failed to create httpClient: %v", err)
 	}
 
 	return client

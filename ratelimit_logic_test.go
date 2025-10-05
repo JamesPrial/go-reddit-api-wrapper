@@ -66,11 +66,11 @@ func TestProactiveRateLimitingBehavior(t *testing.T) {
 
 	internalClient, err := internal.NewClientWithRateLimit(httpClient, server.URL, "test/1.0", nil, rateLimitConfig)
 	if err != nil {
-		t.Fatalf("Failed to create internal client: %v", err)
+		t.Fatalf("Failed to create internal httpClient: %v", err)
 	}
 
-	client := &Client{
-		client:    internalClient,
+	client := &Reddit{
+		httpClient:    internalClient,
 		parser:    internal.NewParser(),
 		validator: internal.NewValidator(),
 		auth:      &mockTokenProvider{token: "test_token"},
@@ -182,11 +182,11 @@ func TestRateLimitRecoveryPatterns(t *testing.T) {
 
 	internalClient, err := internal.NewClientWithRateLimit(httpClient, server.URL, "test/1.0", nil, rateLimitConfig)
 	if err != nil {
-		t.Fatalf("Failed to create internal client: %v", err)
+		t.Fatalf("Failed to create internal httpClient: %v", err)
 	}
 
-	client := &Client{
-		client:    internalClient,
+	client := &Reddit{
+		httpClient:    internalClient,
 		parser:    internal.NewParser(),
 		validator: internal.NewValidator(),
 		auth:      &mockTokenProvider{token: "test_token"},
@@ -274,11 +274,11 @@ func TestBurstCapacityHandling(t *testing.T) {
 
 	internalClient, err := internal.NewClientWithRateLimit(httpClient, server.URL, "test/1.0", nil, rateLimitConfig)
 	if err != nil {
-		t.Fatalf("Failed to create internal client: %v", err)
+		t.Fatalf("Failed to create internal httpClient: %v", err)
 	}
 
-	client := &Client{
-		client:    internalClient,
+	client := &Reddit{
+		httpClient:    internalClient,
 		parser:    internal.NewParser(),
 		validator: internal.NewValidator(),
 		auth:      &mockTokenProvider{token: "test_token"},
@@ -410,11 +410,11 @@ func TestMalformedRateLimitHeaders(t *testing.T) {
 
 	internalClient, err := internal.NewClientWithRateLimit(httpClient, server.URL, "test/1.0", nil, rateLimitConfig)
 	if err != nil {
-		t.Fatalf("Failed to create internal client: %v", err)
+		t.Fatalf("Failed to create internal httpClient: %v", err)
 	}
 
-	client := &Client{
-		client:    internalClient,
+	client := &Reddit{
+		httpClient:    internalClient,
 		parser:    internal.NewParser(),
 		validator: internal.NewValidator(),
 		auth:      &mockTokenProvider{token: "test_token"},
@@ -486,11 +486,11 @@ func TestConcurrentRateLimiting(t *testing.T) {
 
 	internalClient, err := internal.NewClientWithRateLimit(httpClient, server.URL, "test/1.0", nil, rateLimitConfig)
 	if err != nil {
-		t.Fatalf("Failed to create internal client: %v", err)
+		t.Fatalf("Failed to create internal httpClient: %v", err)
 	}
 
-	client := &Client{
-		client:    internalClient,
+	client := &Reddit{
+		httpClient:    internalClient,
 		parser:    internal.NewParser(),
 		validator: internal.NewValidator(),
 		auth:      &mockTokenProvider{token: "test_token"},
@@ -617,11 +617,11 @@ func TestRateLimitEdgeCases(t *testing.T) {
 
 	internalClient, err := internal.NewClientWithRateLimit(httpClient, server.URL, "test/1.0", nil, rateLimitConfig)
 	if err != nil {
-		t.Fatalf("Failed to create internal client: %v", err)
+		t.Fatalf("Failed to create internal httpClient: %v", err)
 	}
 
-	client := &Client{
-		client:    internalClient,
+	client := &Reddit{
+		httpClient:    internalClient,
 		parser:    internal.NewParser(),
 		validator: internal.NewValidator(),
 		auth:      &mockTokenProvider{token: "test_token"},

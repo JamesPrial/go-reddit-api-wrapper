@@ -139,7 +139,7 @@
 //
 // Fetching Specific Number of Items:
 //
-//	func fetchNPosts(client *graw.Client, ctx context.Context, subreddit string, n int) ([]*types.Post, error) {
+//	func fetchNPosts(client *graw.Reddit, ctx context.Context, subreddit string, n int) ([]*types.Post, error) {
 //		var allPosts []*types.Post
 //		req := &types.PostsRequest{
 //			Subreddit: subreddit,

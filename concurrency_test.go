@@ -72,7 +72,7 @@ func TestConcurrentClientUsage(t *testing.T) {
 
 	// Create multiple clients
 	numClients := 5
-	clients := make([]*Client, numClients)
+	clients := make([]*Reddit, numClients)
 
 	for i := 0; i < numClients; i++ {
 		httpClient := &http.Client{Timeout: 30 * time.Second}
@@ -81,8 +81,8 @@ func TestConcurrentClientUsage(t *testing.T) {
 			t.Fatalf("Failed to create internal client %d: %v", i, err)
 		}
 
-		clients[i] = &Client{
-			client:    internalClient,
+		clients[i] = &Reddit{
+			httpClient:    internalClient,
 			parser:    internal.NewParser(),
 			validator: internal.NewValidator(),
 			auth:      &mockTokenProvider{token: "test_token"},
@@ -97,7 +97,7 @@ func TestConcurrentClientUsage(t *testing.T) {
 	// Each client performs multiple operations
 	for clientIdx, client := range clients {
 		wg.Add(1)
-		go func(idx int, c *Client) {
+		go func(idx int, c *Reddit) {
 			defer wg.Done()
 
 			// Perform subreddit discovery
@@ -213,11 +213,11 @@ func TestConcurrentSameClientOperations(t *testing.T) {
 	httpClient := &http.Client{Timeout: 30 * time.Second}
 	internalClient, err := internal.NewClient(httpClient, server.URL, "concurrent_test_agent/1.0", nil)
 	if err != nil {
-		t.Fatalf("Failed to create internal client: %v", err)
+		t.Fatalf("Failed to create internal httpClient: %v", err)
 	}
 
-	client := &Client{
-		client:    internalClient,
+	client := &Reddit{
+		httpClient:    internalClient,
 		parser:    internal.NewParser(),
 		validator: internal.NewValidator(),
 		auth:      &mockTokenProvider{token: "test_token"},
@@ -333,11 +333,11 @@ func TestConcurrentRateLimitingBehavior(t *testing.T) {
 	httpClient := &http.Client{Timeout: 30 * time.Second}
 	internalClient, err := internal.NewClient(httpClient, server.URL, "ratelimit_test_agent/1.0", nil)
 	if err != nil {
-		t.Fatalf("Failed to create internal client: %v", err)
+		t.Fatalf("Failed to create internal httpClient: %v", err)
 	}
 
-	client := &Client{
-		client:    internalClient,
+	client := &Reddit{
+		httpClient:    internalClient,
 		parser:    internal.NewParser(),
 		validator: internal.NewValidator(),
 		auth:      &mockTokenProvider{token: "test_token"},
@@ -418,11 +418,11 @@ func TestConcurrentContextCancellation(t *testing.T) {
 	httpClient := &http.Client{Timeout: 30 * time.Second}
 	internalClient, err := internal.NewClient(httpClient, server.URL, "cancellation_test_agent/1.0", nil)
 	if err != nil {
-		t.Fatalf("Failed to create internal client: %v", err)
+		t.Fatalf("Failed to create internal httpClient: %v", err)
 	}
 
-	client := &Client{
-		client:    internalClient,
+	client := &Reddit{
+		httpClient:    internalClient,
 		parser:    internal.NewParser(),
 		validator: internal.NewValidator(),
 		auth:      &mockTokenProvider{token: "test_token"},
@@ -507,11 +507,11 @@ func TestConcurrentResourceContention(t *testing.T) {
 	httpClient := &http.Client{Timeout: 30 * time.Second}
 	internalClient, err := internal.NewClient(httpClient, server.URL, "contention_test_agent/1.0", nil)
 	if err != nil {
-		t.Fatalf("Failed to create internal client: %v", err)
+		t.Fatalf("Failed to create internal httpClient: %v", err)
 	}
 
-	client := &Client{
-		client:    internalClient,
+	client := &Reddit{
+		httpClient:    internalClient,
 		parser:    internal.NewParser(),
 		validator: internal.NewValidator(),
 		auth:      &mockTokenProvider{token: "test_token"},
@@ -663,11 +663,11 @@ func TestConcurrentMixedOperations(t *testing.T) {
 	httpClient := &http.Client{Timeout: 30 * time.Second}
 	internalClient, err := internal.NewClient(httpClient, server.URL, "mixed_operations_test_agent/1.0", nil)
 	if err != nil {
-		t.Fatalf("Failed to create internal client: %v", err)
+		t.Fatalf("Failed to create internal httpClient: %v", err)
 	}
 
-	client := &Client{
-		client:    internalClient,
+	client := &Reddit{
+		httpClient:    internalClient,
 		parser:    internal.NewParser(),
 		validator: internal.NewValidator(),
 		auth:      &mockTokenProvider{token: "test_token"},
