@@ -18,6 +18,7 @@ import (
 func TestTokenRefreshTimingEdgeCases(t *testing.T) {
 	var requestCount int64
 	var tokenExpiry int64
+	var currentTokenLifespan time.Duration // Used to communicate expected lifespan to mock server
 	var mu sync.Mutex
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -42,7 +43,19 @@ func TestTokenRefreshTimingEdgeCases(t *testing.T) {
 			switch grantType {
 			case "client_credentials":
 				// Initial token or refresh
-				expiry := time.Now().Add(1 * time.Hour).Unix()
+				mu.Lock()
+				lifespan := currentTokenLifespan
+				mu.Unlock()
+
+				// Use the test case's expected lifespan
+				expiresInSeconds := int(lifespan.Seconds())
+				if expiresInSeconds == 0 {
+					// Default to 1 hour if not set
+					expiresInSeconds = 3600
+					lifespan = 1 * time.Hour
+				}
+
+				expiry := time.Now().Add(lifespan).Unix()
 				mu.Lock()
 				tokenExpiry = expiry
 				mu.Unlock()
@@ -50,7 +63,7 @@ func TestTokenRefreshTimingEdgeCases(t *testing.T) {
 				response = map[string]interface{}{
 					"access_token":  "test_token_" + strconv.FormatInt(currentExpiry, 10),
 					"token_type":    "bearer",
-					"expires_in":    3600,
+					"expires_in":    expiresInSeconds,
 					"scope":         "read",
 					"refresh_token": "refresh_token_" + strconv.FormatInt(currentExpiry, 10),
 				}
@@ -114,15 +127,15 @@ func TestTokenRefreshTimingEdgeCases(t *testing.T) {
 		}{
 			{
 				name:          "FreshToken",
-				tokenLifespan: 1 * time.Hour,
-				requestDelay:  1 * time.Minute,
+				tokenLifespan: 10 * time.Second,
+				requestDelay:  100 * time.Millisecond,
 				expectRefresh: false,
 				description:   "Token should not refresh when fresh",
 			},
 			{
 				name:          "NearExpiry",
-				tokenLifespan: 2 * time.Minute,
-				requestDelay:  1 * time.Minute,
+				tokenLifespan: 2 * time.Second,
+				requestDelay:  1500 * time.Millisecond,
 				expectRefresh: true,
 				description:   "Token should refresh when near expiry",
 			},
@@ -149,6 +162,12 @@ func TestTokenRefreshTimingEdgeCases(t *testing.T) {
 				mu.Lock()
 				tokenExpiry = 0
 				mu.Unlock()
+
+				// Set token lifespan for this test case
+				mu.Lock()
+				currentTokenLifespan = tc.tokenLifespan
+				mu.Unlock()
+
 
 				// Create client with custom token lifespan
 				config := &Config{

@@ -12,6 +12,40 @@ import (
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 )
 
+// Helper function to create complete mock post data
+func createMockPost(id, title, author string, score int, created float64) map[string]interface{} {
+	return map[string]interface{}{
+		"kind": "t3",
+		"data": map[string]interface{}{
+			"id":            id,
+			"name":          "t3_" + id,
+			"title":         title,
+			"score":         score,
+			"ups":           score,
+			"downs":         0,
+			"author":        author,
+			"subreddit":     "testsub",
+			"subreddit_id":  "t5_testsub",
+			"created":       created,
+			"created_utc":   created,
+			"num_comments":  5,
+			"url":           "https://reddit.com/r/testsub/comments/" + id,
+			"permalink":     "/r/testsub/comments/" + id + "/test_post/",
+			"upvote_ratio":  0.95,
+			"is_self":       false,
+			"selftext":      "",
+			"domain":        "example.com",
+			"over_18":       false,
+			"thumbnail":     "",
+			"clicked":       false,
+			"hidden":        false,
+			"saved":         false,
+			"locked":        false,
+			"stickied":      false,
+		},
+	}
+}
+
 // TestPaginationForwardNavigation tests forward pagination through multiple pages
 func TestPaginationForwardNavigation(t *testing.T) {
 	var requestCount int
@@ -35,16 +69,37 @@ func TestPaginationForwardNavigation(t *testing.T) {
 		if after == "" {
 			// First page
 			for i := 1; i <= 5; i++ {
+				postID := "post" + string(rune('a'+i))
+				score := 100 + i*10
+				created := 1609459200.0 + float64(i*3600)
 				posts = append(posts, map[string]interface{}{
 					"kind": "t3",
 					"data": map[string]interface{}{
-						"id":           "post" + string(rune('a'+i)),
-						"title":        "Test Post " + string(rune('A'+i)),
-						"score":        100 + i*10,
-						"author":       "user" + string(rune('1'+i)),
-						"subreddit":    "testsub",
-						"created_utc":  1609459200.0 + float64(i*3600),
-						"num_comments": 5 + i,
+						"id":            postID,
+						"name":          "t3_" + postID,
+						"title":         "Test Post " + string(rune('A'+i)),
+						"score":         score,
+						"ups":           score,
+						"downs":         0,
+						"author":        "user" + string(rune('1'+i)),
+						"subreddit":     "testsub",
+						"subreddit_id":  "t5_testsub",
+						"created":       created,
+						"created_utc":   created,
+						"num_comments":  5 + i,
+						"url":           "https://reddit.com/r/testsub/comments/" + postID,
+						"permalink":     "/r/testsub/comments/" + postID + "/test_post/",
+						"upvote_ratio":  0.95,
+						"is_self":       false,
+						"selftext":      "",
+						"domain":        "example.com",
+						"over_18":       false,
+						"thumbnail":     "",
+						"clicked":       false,
+						"hidden":        false,
+						"saved":         false,
+						"locked":        false,
+						"stickied":      false,
 					},
 				})
 			}
@@ -52,16 +107,37 @@ func TestPaginationForwardNavigation(t *testing.T) {
 		} else if after == "t3_poste" {
 			// Second page
 			for i := 6; i <= 10; i++ {
+				postID := "post" + string(rune('a'+i))
+				score := 100 + i*10
+				created := 1609459200.0 + float64(i*3600)
 				posts = append(posts, map[string]interface{}{
 					"kind": "t3",
 					"data": map[string]interface{}{
-						"id":           "post" + string(rune('a'+i)),
-						"title":        "Test Post " + string(rune('A'+i)),
-						"score":        100 + i*10,
-						"author":       "user" + string(rune('1'+i)),
-						"subreddit":    "testsub",
-						"created_utc":  1609459200.0 + float64(i*3600),
-						"num_comments": 5 + i,
+						"id":            postID,
+						"name":          "t3_" + postID,
+						"title":         "Test Post " + string(rune('A'+i)),
+						"score":         score,
+						"ups":           score,
+						"downs":         0,
+						"author":        "user" + string(rune('1'+i)),
+						"subreddit":     "testsub",
+						"subreddit_id":  "t5_testsub",
+						"created":       created,
+						"created_utc":   created,
+						"num_comments":  5 + i,
+						"url":           "https://reddit.com/r/testsub/comments/" + postID,
+						"permalink":     "/r/testsub/comments/" + postID + "/test_post/",
+						"upvote_ratio":  0.95,
+						"is_self":       false,
+						"selftext":      "",
+						"domain":        "example.com",
+						"over_18":       false,
+						"thumbnail":     "",
+						"clicked":       false,
+						"hidden":        false,
+						"saved":         false,
+						"locked":        false,
+						"stickied":      false,
 					},
 				})
 			}
@@ -69,16 +145,37 @@ func TestPaginationForwardNavigation(t *testing.T) {
 		} else if after == "t3_postj" {
 			// Third page (last)
 			for i := 11; i <= 12; i++ {
+				postID := "post" + string(rune('a'+i))
+				score := 100 + i*10
+				created := 1609459200.0 + float64(i*3600)
 				posts = append(posts, map[string]interface{}{
 					"kind": "t3",
 					"data": map[string]interface{}{
-						"id":           "post" + string(rune('a'+i)),
-						"title":        "Test Post " + string(rune('A'+i)),
-						"score":        100 + i*10,
-						"author":       "user" + string(rune('1'+i)),
-						"subreddit":    "testsub",
-						"created_utc":  1609459200.0 + float64(i*3600),
-						"num_comments": 5 + i,
+						"id":            postID,
+						"name":          "t3_" + postID,
+						"title":         "Test Post " + string(rune('A'+i)),
+						"score":         score,
+						"ups":           score,
+						"downs":         0,
+						"author":        "user" + string(rune('1'+i)),
+						"subreddit":     "testsub",
+						"subreddit_id":  "t5_testsub",
+						"created":       created,
+						"created_utc":   created,
+						"num_comments":  5 + i,
+						"url":           "https://reddit.com/r/testsub/comments/" + postID,
+						"permalink":     "/r/testsub/comments/" + postID + "/test_post/",
+						"upvote_ratio":  0.95,
+						"is_self":       false,
+						"selftext":      "",
+						"domain":        "example.com",
+						"over_18":       false,
+						"thumbnail":     "",
+						"clicked":       false,
+						"hidden":        false,
+						"saved":         false,
+						"locked":        false,
+						"stickied":      false,
 					},
 				})
 			}
@@ -190,45 +287,30 @@ func TestPaginationBackwardNavigation(t *testing.T) {
 		if before == "" && after == "" {
 			// Middle page (starting point)
 			for i := 6; i <= 10; i++ {
-				posts = append(posts, map[string]interface{}{
-					"kind": "t3",
-					"data": map[string]interface{}{
-						"id":     "post" + string(rune('a'+i)),
-						"title":  "Test Post " + string(rune('A'+i)),
-						"score":  100 + i*10,
-						"author": "user" + string(rune('1'+i)),
-					},
-				})
+				postID := "post" + string(rune('a'+i))
+				score := 100 + i*10
+				created := 1609459200.0 + float64(i*3600)
+				posts = append(posts, createMockPost(postID, "Test Post "+string(rune('A'+i)), "user"+string(rune('1'+i)), score, created))
 			}
 			nextAfter = "t3_postj"
 			nextBefore = "t3_poste"
 		} else if before == "t3_poste" && after == "" {
 			// Previous page
 			for i := 1; i <= 5; i++ {
-				posts = append(posts, map[string]interface{}{
-					"kind": "t3",
-					"data": map[string]interface{}{
-						"id":     "post" + string(rune('a'+i)),
-						"title":  "Test Post " + string(rune('A'+i)),
-						"score":  100 + i*10,
-						"author": "user" + string(rune('1'+i)),
-					},
-				})
+				postID := "post" + string(rune('a'+i))
+				score := 100 + i*10
+				created := 1609459200.0 + float64(i*3600)
+				posts = append(posts, createMockPost(postID, "Test Post "+string(rune('A'+i)), "user"+string(rune('1'+i)), score, created))
 			}
 			nextAfter = "t3_poste"
 			nextBefore = ""
 		} else if before == "" && after == "t3_postj" {
 			// Next page
 			for i := 11; i <= 15; i++ {
-				posts = append(posts, map[string]interface{}{
-					"kind": "t3",
-					"data": map[string]interface{}{
-						"id":     "post" + string(rune('a'+i)),
-						"title":  "Test Post " + string(rune('A'+i)),
-						"score":  100 + i*10,
-						"author": "user" + string(rune('1'+i)),
-					},
-				})
+				postID := "post" + string(rune('a'+i))
+				score := 100 + i*10
+				created := 1609459200.0 + float64(i*3600)
+				posts = append(posts, createMockPost(postID, "Test Post "+string(rune('A'+i)), "user"+string(rune('1'+i)), score, created))
 			}
 			nextAfter = ""
 			nextBefore = "t3_postj"
@@ -355,15 +437,10 @@ func TestPaginationLimitBehavior(t *testing.T) {
 
 		posts := make([]map[string]interface{}, postCount)
 		for i := 0; i < postCount; i++ {
-			posts[i] = map[string]interface{}{
-				"kind": "t3",
-				"data": map[string]interface{}{
-					"id":     "post" + string(rune('a'+i)),
-					"title":  "Test Post " + string(rune('A'+i)),
-					"score":  100 + i*10,
-					"author": "user" + string(rune('1'+i)),
-				},
-			}
+			postID := "post" + string(rune('a'+i))
+			score := 100 + i*10
+			created := 1609459200.0 + float64(i*3600)
+			posts[i] = createMockPost(postID, "Test Post "+string(rune('A'+i)), "user"+string(rune('1'+i)), score, created)
 		}
 
 		listingData := map[string]interface{}{
@@ -515,15 +592,7 @@ func TestPaginationInvalidParameters(t *testing.T) {
 
 		// Return normal response for valid requests
 		posts := []map[string]interface{}{
-			{
-				"kind": "t3",
-				"data": map[string]interface{}{
-					"id":     "post1",
-					"title":  "Test Post",
-					"score":  100,
-					"author": "testuser",
-				},
-			},
+			createMockPost("post1", "Test Post", "testuser", 100, 1609459200.0),
 		}
 
 		listingData := map[string]interface{}{
@@ -562,8 +631,8 @@ func TestPaginationInvalidParameters(t *testing.T) {
 		{"Valid after", "t3_post1", "", false},
 		{"Valid before", "", "t3_post1", false},
 		{"Both after and before", "t3_post1", "t3_post2", true},
-		{"Invalid after format", "invalid", "", false},  // Server should handle this
-		{"Invalid before format", "", "invalid", false}, // Server should handle this
+		{"Invalid after format", "invalid", "", true},  // Client-side validation rejects this
+		{"Invalid before format", "", "invalid", true}, // Client-side validation rejects this
 	}
 
 	for _, tc := range testCases {
@@ -608,22 +677,14 @@ func TestPaginationConsistency(t *testing.T) {
 
 		// Always return the same pagination tokens for consistency
 		posts := []map[string]interface{}{
-			{
-				"kind": "t3",
-				"data": map[string]interface{}{
-					"id":     "post1",
-					"title":  "Test Post",
-					"score":  100,
-					"author": "testuser",
-				},
-			},
+			createMockPost("post1", "Test Post", "testuser", 100, 1609459200.0),
 		}
 
 		var nextAfter string
 		if after == "" {
-			nextAfter = "t3_consistent_token"
-		} else if after == "t3_consistent_token" {
-			nextAfter = "t3_next_consistent_token"
+			nextAfter = "t3_token1abc"
+		} else if after == "t3_token1abc" {
+			nextAfter = "t3_token2xyz"
 		} else {
 			nextAfter = ""
 		}
@@ -728,14 +789,7 @@ func TestPaginationWithComments(t *testing.T) {
 		}
 
 		// Create nested comment structure
-		postData := map[string]interface{}{
-			"kind": "t3",
-			"data": map[string]interface{}{
-				"id":    "post1",
-				"title": "Test Post for Comments",
-				"score": 100,
-			},
-		}
+		postData := createMockPost("post1", "Test Post for Comments", "testauthor", 100, 1609459200.0)
 
 		comments := make([]map[string]interface{}, 0)
 		commentCount := 0
@@ -746,16 +800,27 @@ func TestPaginationWithComments(t *testing.T) {
 		}
 
 		for i := 0; i < commentCount; i++ {
+			commentID := "comment" + string(rune('1'+i))
+			score := 10 + i
+			created := 1609459200.0 + float64(i*3600)
 			comments = append(comments, map[string]interface{}{
 				"kind": "t1",
 				"data": map[string]interface{}{
-					"id":        "comment" + string(rune('1'+i)),
-					"body":      "Test comment " + string(rune('1'+i)),
-					"score":     10 + i,
-					"author":    "user" + string(rune('1'+i)),
-					"link_id":   "t3_post1",
-					"parent_id": "t3_post1",
-					"replies":   map[string]interface{}{"kind": "Listing", "data": map[string]interface{}{"children": []interface{}{}}},
+					"id":           commentID,
+					"name":         "t1_" + commentID,
+					"body":         "Test comment " + string(rune('1'+i)),
+					"body_html":    "<p>Test comment " + string(rune('1'+i)) + "</p>",
+					"score":        score,
+					"ups":          score,
+					"downs":        0,
+					"author":       "user" + string(rune('1'+i)),
+					"subreddit":    "testsub",
+					"subreddit_id": "t5_testsub",
+					"link_id":      "t3_post1",
+					"parent_id":    "t3_post1",
+					"created":      created,
+					"created_utc":  created,
+					"replies":      map[string]interface{}{"kind": "Listing", "data": map[string]interface{}{"children": []interface{}{}}},
 				},
 			})
 		}

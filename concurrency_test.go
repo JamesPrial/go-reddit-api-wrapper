@@ -597,14 +597,38 @@ func TestConcurrentMixedOperations(t *testing.T) {
 			json.NewEncoder(w).Encode(subredditData)
 
 		case strings.Contains(r.URL.Path, "/r/mixed_test_sub/hot.json"):
+			postID := fmt.Sprintf("mixedpost%d", atomic.LoadInt64(&requestCount))
+			score := 100
+			created := 1609459200.0
 			posts := []map[string]interface{}{
 				{
 					"kind": "t3",
 					"data": map[string]interface{}{
-						"id":           fmt.Sprintf("mixed_post_%d", atomic.LoadInt64(&requestCount)),
-						"title":        fmt.Sprintf("Mixed Post %d", atomic.LoadInt64(&requestCount)),
-						"score":        100,
-						"num_comments": 50,
+						"id":            postID,
+						"name":          "t3_" + postID,
+						"title":         fmt.Sprintf("Mixed Post %d", atomic.LoadInt64(&requestCount)),
+						"score":         score,
+						"ups":           score,
+						"downs":         0,
+						"author":        "testuser",
+						"subreddit":     "mixed_test_sub",
+						"subreddit_id":  "t5_mixed",
+						"created":       created,
+						"created_utc":   created,
+						"num_comments":  50,
+						"url":           "https://reddit.com/r/mixed_test_sub/comments/" + postID,
+						"permalink":     "/r/mixed_test_sub/comments/" + postID + "/mixed_post/",
+						"upvote_ratio":  0.95,
+						"is_self":       false,
+						"selftext":      "",
+						"domain":        "example.com",
+						"over_18":       false,
+						"thumbnail":     "",
+						"clicked":       false,
+						"hidden":        false,
+						"saved":         false,
+						"locked":        false,
+						"stickied":      false,
 					},
 				},
 			}
@@ -616,23 +640,62 @@ func TestConcurrentMixedOperations(t *testing.T) {
 			}
 			json.NewEncoder(w).Encode(listingData)
 
-		case strings.Contains(r.URL.Path, "/r/mixed_test_sub/comments/mixed_post_1.json"):
+		case strings.Contains(r.URL.Path, "/r/mixed_test_sub/comments/mixedpost1.json"):
+			postID := "mixedpost1"
+			score := 100
+			created := 1609459200.0
 			postData := map[string]interface{}{
 				"kind": "t3",
 				"data": map[string]interface{}{
-					"id":    "mixed_post_1",
-					"title": "Mixed Post 1",
-					"score": 100,
+					"id":            postID,
+					"name":          "t3_" + postID,
+					"title":         "Mixed Post 1",
+					"score":         score,
+					"ups":           score,
+					"downs":         0,
+					"author":        "testuser",
+					"subreddit":     "mixed_test_sub",
+					"subreddit_id":  "t5_mixed",
+					"created":       created,
+					"created_utc":   created,
+					"num_comments":  50,
+					"url":           "https://reddit.com/r/mixed_test_sub/comments/" + postID,
+					"permalink":     "/r/mixed_test_sub/comments/" + postID + "/mixed_post/",
+					"upvote_ratio":  0.95,
+					"is_self":       false,
+					"selftext":      "",
+					"domain":        "example.com",
+					"over_18":       false,
+					"thumbnail":     "",
+					"clicked":       false,
+					"hidden":        false,
+					"saved":         false,
+					"locked":        false,
+					"stickied":      false,
 				},
 			}
 
+			commentID := fmt.Sprintf("mixedcomment%d", atomic.LoadInt64(&requestCount))
+			commentScore := 10
 			comments := []map[string]interface{}{
 				{
 					"kind": "t1",
 					"data": map[string]interface{}{
-						"id":    fmt.Sprintf("mixed_comment_%d", atomic.LoadInt64(&requestCount)),
-						"body":  fmt.Sprintf("Mixed Comment %d", atomic.LoadInt64(&requestCount)),
-						"score": 10,
+						"id":           commentID,
+						"name":         "t1_" + commentID,
+						"body":         fmt.Sprintf("Mixed Comment %d", atomic.LoadInt64(&requestCount)),
+						"body_html":    fmt.Sprintf("<p>Mixed Comment %d</p>", atomic.LoadInt64(&requestCount)),
+						"score":        commentScore,
+						"ups":          commentScore,
+						"downs":        0,
+						"author":       "testuser",
+						"subreddit":    "mixed_test_sub",
+						"subreddit_id": "t5_mixed",
+						"link_id":      "t3_mixedpost1",
+						"parent_id":    "t3_mixedpost1",
+						"created":      created,
+						"created_utc":  created,
+						"replies":      map[string]interface{}{"kind": "Listing", "data": map[string]interface{}{"children": []interface{}{}}},
 					},
 				},
 			}
@@ -728,7 +791,7 @@ func TestConcurrentMixedOperations(t *testing.T) {
 			defer wg.Done()
 			_, err := client.GetComments(context.Background(), &types.CommentsRequest{
 				Subreddit: "mixed_test_sub",
-				PostID:    "mixed_post_1",
+				PostID:    "mixedpost1",
 				Pagination: types.Pagination{
 					Limit: 5,
 				},
