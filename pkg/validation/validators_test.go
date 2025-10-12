@@ -195,7 +195,7 @@ func TestValidateVotable(t *testing.T) {
 		},
 		{
 			name:    "valid negative score",
-			data:    &types.Votable{Score: -50, Ups: -50, Downs: 0},
+			data:    &types.Votable{Score: -50, Ups: 0, Downs: 0},
 			wantErr: false,
 		},
 		{
@@ -204,8 +204,13 @@ func TestValidateVotable(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:    "ups != score",
+			name:    "ups differ from score",
 			data:    &types.Votable{Score: 100, Ups: 90, Downs: 0},
+			wantErr: false,
+		},
+		{
+			name:    "negative ups",
+			data:    &types.Votable{Score: 100, Ups: -1, Downs: 0},
 			wantErr: true,
 		},
 		{
@@ -284,15 +289,15 @@ func TestValidateCreated(t *testing.T) {
 func TestValidatePost(t *testing.T) {
 	now := float64(time.Now().Unix())
 	validPost := &types.Post{
-		ThingData: types.ThingData{ID: "abc123", Name: "t3_abc123"},
-		Votable:   types.Votable{Score: 100, Ups: 100, Downs: 0},
-		Created:   types.Created{Created: now, CreatedUTC: now},
-		Title:     "Test Post",
-		Author:    "testuser",
-		Subreddit: "golang",
+		ThingData:   types.ThingData{ID: "abc123", Name: "t3_abc123"},
+		Votable:     types.Votable{Score: 100, Ups: 100, Downs: 0},
+		Created:     types.Created{Created: now, CreatedUTC: now},
+		Title:       "Test Post",
+		Author:      "testuser",
+		Subreddit:   "golang",
 		SubredditID: "t5_2rcjn",
-		Permalink: "/r/golang/comments/abc123/test_post/",
-		URL:       "https://reddit.com/r/golang/comments/abc123/test_post/",
+		Permalink:   "/r/golang/comments/abc123/test_post/",
+		URL:         "https://reddit.com/r/golang/comments/abc123/test_post/",
 		UpvoteRatio: 0.95,
 		NumComments: 10,
 	}
@@ -348,6 +353,15 @@ func TestValidatePost(t *testing.T) {
 			}(),
 			wantErr: true,
 		},
+		{
+			name: "minimal fields allowed",
+			post: &types.Post{
+				ThingData: types.ThingData{ID: "abc123"},
+				Votable:   types.Votable{Score: 10, Ups: 0, Downs: 0},
+				Title:     "Test",
+			},
+			wantErr: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -363,15 +377,15 @@ func TestValidatePost(t *testing.T) {
 func TestValidateComment(t *testing.T) {
 	now := float64(time.Now().Unix())
 	validComment := &types.Comment{
-		ThingData: types.ThingData{ID: "def456", Name: "t1_def456"},
-		Votable:   types.Votable{Score: 50, Ups: 50, Downs: 0},
-		Created:   types.Created{Created: now, CreatedUTC: now},
-		Body:      "Test comment",
-		Author:    "testuser",
-		Subreddit: "golang",
+		ThingData:   types.ThingData{ID: "def456", Name: "t1_def456"},
+		Votable:     types.Votable{Score: 50, Ups: 50, Downs: 0},
+		Created:     types.Created{Created: now, CreatedUTC: now},
+		Body:        "Test comment",
+		Author:      "testuser",
+		Subreddit:   "golang",
 		SubredditID: "t5_2rcjn",
-		ParentID:  "t3_abc123",
-		LinkID:    "t3_abc123",
+		ParentID:    "t3_abc123",
+		LinkID:      "t3_abc123",
 	}
 
 	tests := []struct {

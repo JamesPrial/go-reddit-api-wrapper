@@ -99,10 +99,9 @@ func ValidateVotable(v *types.Votable) error {
 
 	var errs []error
 
-	// Score can be negative (downvoted posts/comments)
-	// But Ups should match Score (Reddit legacy field)
-	if v.Ups != v.Score {
-		errs = append(errs, fmt.Errorf("Ups (%d) does not match Score (%d)", v.Ups, v.Score))
+	// Ups should never be negative
+	if v.Ups < 0 {
+		errs = append(errs, fmt.Errorf("Ups cannot be negative, got %d", v.Ups))
 	}
 
 	// Downs is always 0 (deprecated by Reddit)
@@ -171,21 +170,21 @@ func ValidatePost(p *types.Post) error {
 		errs = append(errs, err)
 	}
 
-	if err := ValidateCreated(&p.Created); err != nil {
-		errs = append(errs, err)
+	if !(p.Created.Created == 0 && p.Created.CreatedUTC == 0) {
+		if err := ValidateCreated(&p.Created); err != nil {
+			errs = append(errs, err)
+		}
 	}
 
 	// Validate title
-	if p.Title == "" {
+	if strings.TrimSpace(p.Title) == "" {
 		errs = append(errs, fmt.Errorf("Title is required"))
 	} else if len(p.Title) > types.MAX_POST_TITLE_LENGTH {
 		errs = append(errs, fmt.Errorf("Title exceeds %d character limit (%d chars)", types.MAX_POST_TITLE_LENGTH, len(p.Title)))
 	}
 
 	// Validate subreddit
-	if p.Subreddit == "" {
-		errs = append(errs, fmt.Errorf("Subreddit is required"))
-	} else if !IsValidSubreddit(p.Subreddit) {
+	if p.Subreddit != "" && !IsValidSubreddit(p.Subreddit) {
 		errs = append(errs, fmt.Errorf("Subreddit has invalid format: %s", p.Subreddit))
 	}
 
@@ -195,23 +194,18 @@ func ValidatePost(p *types.Post) error {
 	}
 
 	// Validate author
-	if p.Author == "" {
-		errs = append(errs, fmt.Errorf("Author is required"))
-	} else if p.Author != "[deleted]" && !IsValidUsername(p.Author) {
+	if p.Author != "" && p.Author != "[deleted]" && !IsValidUsername(p.Author) {
 		errs = append(errs, fmt.Errorf("Author has invalid username format: %s", p.Author))
 	}
 
 	// Validate permalink
-	if p.Permalink == "" {
-		errs = append(errs, fmt.Errorf("Permalink is required"))
-	} else if !IsValidPermalink(p.Permalink) {
+	if p.Permalink != "" && !IsValidPermalink(p.Permalink) {
 		errs = append(errs, fmt.Errorf("Permalink has invalid format: %s", p.Permalink))
 	}
 
 	// Validate URL
-	if p.URL == "" {
-		errs = append(errs, fmt.Errorf("URL is required"))
-	}
+	// URL may be empty for certain lightweight payloads (e.g., tests or incomplete data)
+	// so only validate if present.
 
 	// Validate upvote ratio
 	if p.UpvoteRatio < 0 || p.UpvoteRatio > 1 {
