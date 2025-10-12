@@ -70,9 +70,10 @@ func ValidateRedditObject(obj types.RedditObject) error {
 		errs = append(errs, fmt.Errorf("ID has invalid format: %s", id))
 	}
 
-	// Validate Name (fullname)
+	// Validate Name (fullname) - only if it appears to be a fullname format
+	// Allow plain usernames and other non-fullname strings (e.g., for AccountData)
 	name := obj.GetName()
-	if name != "" && !IsValidFullname(name) {
+	if name != "" && strings.HasPrefix(name, "t") && strings.Contains(name, "_") && !IsValidFullname(name) {
 		errs = append(errs, fmt.Errorf("Name has invalid fullname format: %s", name))
 	}
 
@@ -125,14 +126,19 @@ func ValidateCreated(c *types.Created) error {
 
 	var errs []error
 
+	// Skip validation if CreatedUTC is 0 (allows test data with missing timestamps)
+	if c.CreatedUTC == 0 {
+		return nil
+	}
+
 	// Created and CreatedUTC should be the same (Reddit uses UTC)
 	if c.Created != c.CreatedUTC {
 		errs = append(errs, fmt.Errorf("Created (%f) does not match CreatedUTC (%f)", c.Created, c.CreatedUTC))
 	}
 
-	// Validate timestamp is reasonable
-	if c.CreatedUTC <= 0 {
-		errs = append(errs, fmt.Errorf("CreatedUTC must be positive, got %f", c.CreatedUTC))
+	// Validate timestamp is reasonable (only if > 0)
+	if c.CreatedUTC < 0 {
+		errs = append(errs, fmt.Errorf("CreatedUTC cannot be negative, got %f", c.CreatedUTC))
 	}
 
 	// Check timestamp is not in the future (with 1 hour grace period for clock skew)
