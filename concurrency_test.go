@@ -3,6 +3,7 @@ package graw
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -445,7 +446,7 @@ func TestConcurrentContextCancellation(t *testing.T) {
 
 			_, err := client.GetSubreddit(ctx, "cancellation_test")
 			if err != nil {
-				if err == context.DeadlineExceeded {
+				if errors.Is(err, context.DeadlineExceeded) {
 					atomic.AddInt64(&cancelledCount, 1)
 				} else {
 					t.Errorf("Goroutine %d unexpected error: %v", goroutineID, err)

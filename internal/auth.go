@@ -220,21 +220,24 @@ func (a *Authenticator) GetToken(ctx context.Context) (string, error) {
 		}
 	}
 
-	// Cache the token with expiry - atomic store
-	// Use 90% of the expiry time to ensure we refresh before it actually expires
-	// Minimum 10 seconds to handle edge cases, but never exceed actual token lifetime
+	// Cache the token with tiered expiry thresholds based on token lifetime
+	// This ensures tokens refresh proactively before they actually expire
 	actualExpiry := time.Duration(tokenResp.ExpiresIn) * time.Second
-	expiryDuration := time.Duration(float64(tokenResp.ExpiresIn) * 0.9 * float64(time.Second))
+	var cacheRatio float64
 
-	// Set a minimum cache duration, but never exceed the token's actual expiry
-	minCacheDuration := 10 * time.Second
-	if minCacheDuration > actualExpiry {
-		// For very short-lived tokens, use the actual expiry
-		expiryDuration = actualExpiry
-	} else if expiryDuration < minCacheDuration {
-		// For tokens with reasonable expiry, use the minimum
-		expiryDuration = minCacheDuration
+	// Tiered thresholds for different token lifetimes:
+	if actualExpiry > 60*time.Second {
+		// Long-lived tokens (>60s): 80% threshold (refresh with 20% lifetime remaining)
+		cacheRatio = 0.80
+	} else if actualExpiry >= 10*time.Second {
+		// Medium-lived tokens (10-60s): 50% threshold (refresh at half-life)
+		cacheRatio = 0.50
+	} else {
+		// Very short-lived tokens (<10s): 90% threshold (minimal margin)
+		cacheRatio = 0.90
 	}
+
+	expiryDuration := time.Duration(float64(actualExpiry) * cacheRatio)
 
 	a.cachedToken.Store(&tokenCache{
 		token:  tokenResp.AccessToken,
@@ -244,6 +247,13 @@ func (a *Authenticator) GetToken(ctx context.Context) (string, error) {
 	a.logAuthSuccess(ctx, duration, tokenResp)
 
 	return tokenResp.AccessToken, nil
+}
+
+// InvalidateToken clears the cached token, forcing a fresh token fetch on next GetToken call
+func (a *Authenticator) InvalidateToken() {
+	a.tokenMu.Lock()
+	defer a.tokenMu.Unlock()
+	a.cachedToken.Store(nil)
 }
 
 func (a *Authenticator) logAuthRequest(ctx context.Context) {

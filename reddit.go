@@ -160,6 +160,10 @@ type TokenProvider interface {
 	// GetToken returns a valid access token for making authenticated requests.
 	// It should handle token refresh automatically if the token is expired.
 	GetToken(ctx context.Context) (string, error)
+
+	// InvalidateToken clears any cached token, forcing a fresh token fetch on next GetToken call.
+	// This is useful when a token has been revoked or is known to be invalid.
+	InvalidateToken()
 }
 
 // HTTPClient defines the behavior required from the internal HTTP client.
@@ -402,7 +406,22 @@ func (r *Reddit) Me(ctx context.Context) (*types.AccountData, error) {
 	var result types.Thing
 	err = r.httpClient.Do(req, &result)
 	if err != nil {
-		return nil, wrapDoError(err, "get user info", MeURL)
+		// Check if this is a 401 error, invalidate token and retry once
+		if r.handleAuthError(err) {
+			// Token invalidated, recreate request with fresh token
+			req, err = r.httpClient.NewRequest(ctx, http.MethodGet, MeURL, nil)
+			if err != nil {
+				return nil, &pkgerrs.RequestError{Operation: "create request", URL: MeURL, Err: err}
+			}
+			if err := r.addAuthHeaders(ctx, req); err != nil {
+				return nil, &pkgerrs.AuthError{Message: "failed to add auth headers on retry", Err: err}
+			}
+			// Retry the request
+			err = r.httpClient.Do(req, &result)
+		}
+		if err != nil {
+			return nil, wrapDoError(err, "get user info", MeURL)
+		}
 	}
 
 	// Parse the account data
@@ -457,7 +476,22 @@ func (r *Reddit) GetSubreddit(ctx context.Context, name string) (*types.Subreddi
 	var result types.Thing
 	err = r.httpClient.Do(req, &result)
 	if err != nil {
-		return nil, wrapDoError(err, "get subreddit", SubPrefixURL+name+"/about")
+		// Check if this is a 401 error, invalidate token and retry once
+		if r.handleAuthError(err) {
+			// Token invalidated, recreate request with fresh token
+			req, err = r.httpClient.NewRequest(ctx, http.MethodGet, path, nil)
+			if err != nil {
+				return nil, &pkgerrs.RequestError{Operation: "create request", URL: path, Err: err}
+			}
+			if err := r.addAuthHeaders(ctx, req); err != nil {
+				return nil, &pkgerrs.AuthError{Message: "failed to add auth headers on retry", Err: err}
+			}
+			// Retry the request
+			err = r.httpClient.Do(req, &result)
+		}
+		if err != nil {
+			return nil, wrapDoError(err, "get subreddit", SubPrefixURL+name+"/about")
+		}
 	}
 
 	// Parse the subreddit data
@@ -932,6 +966,26 @@ func (r *Reddit) addAuthHeaders(ctx context.Context, req *http.Request) error {
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	return nil
+}
+
+// handleAuthError detects 401 Unauthorized errors and invalidates the cached token.
+// Returns true if the error was a 401 and the token was invalidated, signaling that a retry may succeed.
+// Returns false if the error was not auth-related or if retry is not recommended.
+func (r *Reddit) handleAuthError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	// Check if this is a 401 Unauthorized error
+	if apiErr, ok := mapAPIError(err); ok {
+		if apiErr.StatusCode == http.StatusUnauthorized {
+			// Token is invalid, clear the cache
+			r.auth.InvalidateToken()
+			return true
+		}
+	}
+
+	return false
 }
 
 func mapAPIError(err error) (*pkgerrs.APIError, bool) {

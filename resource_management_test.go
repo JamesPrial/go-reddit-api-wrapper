@@ -3,6 +3,7 @@ package graw
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -427,7 +428,7 @@ func TestContextResourceManagement(t *testing.T) {
 
 		_, err := client.GetHot(ctx, nil)
 		if err != nil {
-			if err == context.DeadlineExceeded {
+			if errors.Is(err, context.DeadlineExceeded) {
 				successfulCancellations++
 			}
 		}
