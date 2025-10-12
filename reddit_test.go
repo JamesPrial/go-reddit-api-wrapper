@@ -73,6 +73,10 @@ func (m *mockTokenProvider) GetToken(ctx context.Context) (string, error) {
 	return m.token, nil
 }
 
+func (m *mockTokenProvider) InvalidateToken() {
+	// No-op for mock
+}
+
 func newTestClient(httpClient HTTPClient, auth TokenProvider) *Reddit {
 	if auth == nil {
 		auth = &mockTokenProvider{token: "test_token"}
