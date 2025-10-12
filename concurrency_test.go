@@ -37,8 +37,12 @@ func TestConcurrentClientUsage(t *testing.T) {
 			subredditData := map[string]interface{}{
 				"kind": "t5",
 				"data": map[string]interface{}{
+					"id":           "2qh1i",
+					"name":         "t5_2qh1i",
 					"display_name": "testsubreddit",
+					"title":        "Test Subreddit",
 					"subscribers":  100000,
+					"created":      1234567890.0,
 					"created_utc":  1234567890.0,
 				},
 			}
@@ -177,8 +181,12 @@ func TestConcurrentSameClientOperations(t *testing.T) {
 			subredditData := map[string]interface{}{
 				"kind": "t5",
 				"data": map[string]interface{}{
+					"id":           "2qh1i",
+					"name":         "t5_2qh1i",
 					"display_name": "concurrent_test",
+					"title":        "Concurrent Test Subreddit",
 					"subscribers":  100000,
+					"created":      1234567890.0,
 					"created_utc":  1234567890.0,
 				},
 			}
@@ -307,7 +315,7 @@ func TestConcurrentRateLimitingBehavior(t *testing.T) {
 		if timeSinceLastRequest < 50*time.Millisecond && atomic.LoadInt64(&requestCount) > 1 {
 			atomic.AddInt64(&rateLimitHits, 1)
 			w.Header().Set("X-RateLimit-Remaining", "0")
-			w.Header().Set("X-RateLimit-Reset", fmt.Sprintf("%d", time.Now().Add(1*time.Second).Unix()))
+			w.Header().Set("X-RateLimit-Reset", "1") // 1 second remaining
 			w.WriteHeader(http.StatusTooManyRequests)
 			mu.Unlock()
 			return
@@ -316,14 +324,18 @@ func TestConcurrentRateLimitingBehavior(t *testing.T) {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("X-RateLimit-Remaining", "100")
-		w.Header().Set("X-RateLimit-Reset", fmt.Sprintf("%d", time.Now().Add(1*time.Hour).Unix()))
+		w.Header().Set("X-RateLimit-Reset", "3600") // 1 hour = 3600 seconds remaining
 		w.WriteHeader(http.StatusOK)
 
 		subredditData := map[string]interface{}{
 			"kind": "t5",
 			"data": map[string]interface{}{
+				"id":           "2qh1i",
+				"name":         "t5_2qh1i",
 				"display_name": fmt.Sprintf("ratelimit_test_%d", atomic.LoadInt64(&requestCount)),
+				"title":        "Rate Limit Test Subreddit",
 				"subscribers":  100000,
+				"created":      1234567890.0,
 				"created_utc":  1234567890.0,
 			},
 		}
@@ -407,8 +419,12 @@ func TestConcurrentContextCancellation(t *testing.T) {
 		subredditData := map[string]interface{}{
 			"kind": "t5",
 			"data": map[string]interface{}{
+				"id":           "2qh1i",
+				"name":         "t5_2qh1i",
 				"display_name": fmt.Sprintf("cancellation_test_%d", atomic.LoadInt64(&requestCount)),
+				"title":        "Cancellation Test Subreddit",
 				"subscribers":  100000,
+				"created":      1234567890.0,
 				"created_utc":  1234567890.0,
 			},
 		}
@@ -496,8 +512,12 @@ func TestConcurrentResourceContention(t *testing.T) {
 		subredditData := map[string]interface{}{
 			"kind": "t5",
 			"data": map[string]interface{}{
+				"id":           "2qh1i",
+				"name":         "t5_2qh1i",
 				"display_name": fmt.Sprintf("contention_test_%d", atomic.LoadInt64(&requestCount)),
+				"title":        "Resource Contention Test Subreddit",
 				"subscribers":  100000,
+				"created":      1234567890.0,
 				"created_utc":  1234567890.0,
 			},
 		}
@@ -589,8 +609,12 @@ func TestConcurrentMixedOperations(t *testing.T) {
 			subredditData := map[string]interface{}{
 				"kind": "t5",
 				"data": map[string]interface{}{
+					"id":           "2qh1i",
+					"name":         "t5_2qh1i",
 					"display_name": fmt.Sprintf("mixed_test_sub_%d", atomic.LoadInt64(&requestCount)),
+					"title":        "Mixed Test Subreddit",
 					"subscribers":  100000,
+					"created":      1234567890.0,
 					"created_utc":  1234567890.0,
 				},
 			}
