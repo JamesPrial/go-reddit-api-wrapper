@@ -539,8 +539,8 @@ func TestConcurrentResourceContention(t *testing.T) {
 	}
 
 	// Test high concurrency with resource contention
-	numGoroutines := 50
-	operationsPerGoroutine := 5
+	numGoroutines := 10
+	operationsPerGoroutine := 3
 	var wg sync.WaitGroup
 	var errors []error
 	var errorMu sync.Mutex

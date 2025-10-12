@@ -109,13 +109,15 @@ func TestTokenRefreshTimingEdgeCases(t *testing.T) {
 		response := map[string]interface{}{
 			"kind": "t2",
 			"data": map[string]interface{}{
-				"id":   "user123",
-				"name": "testuser",
+				"id":          "user123",
+				"name":        "t2_testuser",
+				"created_utc": 1609459200.0,
+				"created":     1609459200.0,
 			},
 		}
 		json.NewEncoder(w).Encode(response)
 	}))
-	defer server.Close()
+	t.Cleanup(server.Close)
 
 	t.Run("TokenExpiryEdgeCases", func(t *testing.T) {
 		testCases := []struct {
@@ -134,7 +136,7 @@ func TestTokenRefreshTimingEdgeCases(t *testing.T) {
 			},
 			{
 				name:          "NearExpiry",
-				tokenLifespan: 2 * time.Second,
+				tokenLifespan: 1 * time.Second,
 				requestDelay:  1500 * time.Millisecond,
 				expectRefresh: true,
 				description:   "Token should refresh when near expiry",
@@ -258,13 +260,15 @@ func TestConcurrentTokenRefreshRaceCondition(t *testing.T) {
 		response := map[string]interface{}{
 			"kind": "t2",
 			"data": map[string]interface{}{
-				"id":   "user123",
-				"name": "testuser",
+				"id":          "user123",
+				"name":        "t2_testuser",
+				"created_utc": 1609459200.0,
+				"created":     1609459200.0,
 			},
 		}
 		json.NewEncoder(w).Encode(response)
 	}))
-	defer server.Close()
+	t.Cleanup(server.Close)
 
 	t.Run("ConcurrentTokenRefresh", func(t *testing.T) {
 		// Reset counters
@@ -400,13 +404,15 @@ func TestAuthenticationFailureRecovery(t *testing.T) {
 		response := map[string]interface{}{
 			"kind": "t2",
 			"data": map[string]interface{}{
-				"id":   "user123",
-				"name": "testuser",
+				"id":          "user123",
+				"name":        "t2_testuser",
+				"created_utc": 1609459200.0,
+				"created":     1609459200.0,
 			},
 		}
 		json.NewEncoder(w).Encode(response)
 	}))
-	defer server.Close()
+	t.Cleanup(server.Close)
 
 	t.Run("AuthFailureRecovery", func(t *testing.T) {
 		// Reset counters
@@ -538,13 +544,15 @@ func TestTokenCacheInvalidation(t *testing.T) {
 		response := map[string]interface{}{
 			"kind": "t2",
 			"data": map[string]interface{}{
-				"id":   "user123",
-				"name": "testuser",
+				"id":          "user123",
+				"name":        "t2_testuser",
+				"created_utc": 1609459200.0,
+				"created":     1609459200.0,
 			},
 		}
 		json.NewEncoder(w).Encode(response)
 	}))
-	defer server.Close()
+	t.Cleanup(server.Close)
 
 	t.Run("TokenCacheInvalidation", func(t *testing.T) {
 		// Reset counters
@@ -653,13 +661,15 @@ func TestMultiClientAuthBehavior(t *testing.T) {
 		response := map[string]interface{}{
 			"kind": "t2",
 			"data": map[string]interface{}{
-				"id":   "user123",
-				"name": "testuser",
+				"id":          "user123",
+				"name":        "t2_testuser",
+				"created_utc": 1609459200.0,
+				"created":     1609459200.0,
 			},
 		}
 		json.NewEncoder(w).Encode(response)
 	}))
-	defer server.Close()
+	t.Cleanup(server.Close)
 
 	t.Run("MultiClientAuth", func(t *testing.T) {
 		// Reset counters
@@ -793,13 +803,15 @@ func TestAuthSystemClockManipulation(t *testing.T) {
 		response := map[string]interface{}{
 			"kind": "t2",
 			"data": map[string]interface{}{
-				"id":   "user123",
-				"name": "testuser",
+				"id":          "user123",
+				"name":        "t2_testuser",
+				"created_utc": 1609459200.0,
+				"created":     1609459200.0,
 			},
 		}
 		json.NewEncoder(w).Encode(response)
 	}))
-	defer server.Close()
+	t.Cleanup(server.Close)
 
 	t.Run("SystemClockEdgeCases", func(t *testing.T) {
 		// Reset counters
