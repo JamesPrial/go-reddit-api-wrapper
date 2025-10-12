@@ -38,6 +38,7 @@ import (
     "os"
 
     graw "github.com/jamesprial/go-reddit-api-wrapper"
+    "github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 )
 
 func main() {
@@ -397,6 +398,17 @@ func printTree(node *CommentNode, depth int) {
 ### 6. Error Handling Best Practices
 
 ```go
+import (
+    "context"
+    "errors"
+    "log"
+    "time"
+
+    graw "github.com/jamesprial/go-reddit-api-wrapper"
+    pkgerrs "github.com/jamesprial/go-reddit-api-wrapper/pkg/errors"
+    "github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
+)
+
 func robustFetch(ctx context.Context, client *graw.Reddit, subreddit string) {
     resp, err := client.GetHot(ctx, &types.PostsRequest{
         Subreddit:  subreddit,
@@ -405,23 +417,26 @@ func robustFetch(ctx context.Context, client *graw.Reddit, subreddit string) {
 
     if err != nil {
         // Handle specific error types
-        switch e := err.(type) {
-        case *graw.AuthError:
-            log.Printf("Authentication failed: %s", e.Message)
+        var authErr *pkgerrs.AuthError
+        var reqErr *pkgerrs.RequestError
+        var parseErr *pkgerrs.ParseError
+        var apiErr *pkgerrs.APIError
+
+        switch {
+        case errors.As(err, &authErr):
+            log.Printf("Authentication failed: %s", authErr.Message)
             // Maybe refresh credentials or notify user
 
-        case *graw.RequestError:
-            // Check if it's a rate limit issue
-            if apiErr, ok := e.Err.(*internal.APIError); ok {
-                if apiErr.StatusCode == 429 {
-                    log.Printf("Rate limited. Waiting before retry...")
-                    time.Sleep(60 * time.Second)
-                    // Retry the request
-                }
+        case errors.As(err, &reqErr):
+            // Check if the underlying error is an API error
+            if errors.As(reqErr.Err, &apiErr) && apiErr.StatusCode == 429 {
+                log.Printf("Rate limited. Waiting before retry...")
+                time.Sleep(60 * time.Second)
+                // Retry the request
             }
 
-        case *graw.ParseError:
-            log.Printf("Failed to parse response: %v", e.Err)
+        case errors.As(err, &parseErr):
+            log.Printf("Failed to parse response: %v", parseErr.Err)
             // Maybe log the raw response for debugging
 
         default:
@@ -441,30 +456,42 @@ For complete working examples, see the `examples/` directory.
 
 ## Error Handling
 
-The library provides structured error handling through specific error types:
+The library provides structured error handling through specific error types in the `pkg/errors` package:
 
-- `ConfigError` - Configuration and validation errors
-- `AuthError` - Authentication and authorization errors
-- `StateError` - Client state errors (e.g., not connected)
-- `RequestError` - HTTP request creation/execution errors
-- `ParseError` - JSON parsing and response structure errors
-- `APIError` - Errors returned by Reddit's API
+- `errors.ConfigError` - Configuration and validation errors
+- `errors.AuthError` - Authentication and authorization errors
+- `errors.StateError` - Client state errors (e.g., not connected)
+- `errors.RequestError` - HTTP request creation/execution errors
+- `errors.ParseError` - JSON parsing and response structure errors
+- `errors.APIError` - Errors returned by Reddit's API
 
 ```go
+import (
+    "errors"
+    pkgerrs "github.com/jamesprial/go-reddit-api-wrapper/pkg/errors"
+)
+
 if err != nil {
-    switch e := err.(type) {
-    case *graw.ConfigError:
-        fmt.Printf("Configuration error: %s\n", e.Message)
-    case *graw.AuthError:
-        fmt.Printf("Authentication error: %s\n", e.Message)
-    case *graw.RequestError:
-        fmt.Printf("Request error for %s: %v\n", e.URL, e.Err)
-    case *graw.ParseError:
-        fmt.Printf("Failed to parse %s: %v\n", e.Operation, e.Err)
-    case *graw.APIError:
-        fmt.Printf("Reddit API error [%s]: %s\n", e.ErrorCode, e.Message)
-    case *graw.StateError:
-        fmt.Printf("Client state error: %s\n", e.Message)
+    var configErr *pkgerrs.ConfigError
+    var authErr *pkgerrs.AuthError
+    var reqErr *pkgerrs.RequestError
+    var parseErr *pkgerrs.ParseError
+    var apiErr *pkgerrs.APIError
+    var stateErr *pkgerrs.StateError
+
+    switch {
+    case errors.As(err, &configErr):
+        fmt.Printf("Configuration error: %s\n", configErr.Message)
+    case errors.As(err, &authErr):
+        fmt.Printf("Authentication error: %s\n", authErr.Message)
+    case errors.As(err, &reqErr):
+        fmt.Printf("Request error for %s: %v\n", reqErr.URL, reqErr.Err)
+    case errors.As(err, &parseErr):
+        fmt.Printf("Failed to parse %s: %v\n", parseErr.Operation, parseErr.Err)
+    case errors.As(err, &apiErr):
+        fmt.Printf("Reddit API error [%s]: %s\n", apiErr.ErrorCode, apiErr.Message)
+    case errors.As(err, &stateErr):
+        fmt.Printf("Client state error: %s\n", stateErr.Message)
     default:
         fmt.Printf("Unexpected error: %v\n", err)
     }
