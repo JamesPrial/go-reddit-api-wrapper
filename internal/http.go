@@ -73,12 +73,6 @@ func putBuffer(buf *bytes.Buffer) {
 	// Don't return oversized buffers to the pool to prevent memory bloat
 	if cap > maxBufferSize {
 		atomic.AddInt64(&bufferPoolStats.discarded, 1)
-
-		// For very large buffers, consider shrinking them before discarding
-		if cap > 1024*1024 { // 1MB
-			// Reset to a reasonable size to help GC
-			*buf = *bytes.NewBuffer(make([]byte, 0, initialBufferSize))
-		}
 		return
 	}
 

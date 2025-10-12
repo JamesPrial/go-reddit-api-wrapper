@@ -721,6 +721,17 @@ func (r *Reddit) GetCommentsMultiple(ctx context.Context, requests []*types.Comm
 	// Launch goroutines for parallel fetching with worker pool
 	for i, req := range requests {
 		go func(index int, req *types.CommentsRequest) {
+			// Panic recovery to ensure a result is always sent, preventing deadlock
+			defer func() {
+				if r := recover(); r != nil {
+					resultChan <- result{
+						index:    index,
+						response: nil,
+						err:      fmt.Errorf("panic in GetComments: %v", r),
+					}
+				}
+			}()
+
 			// Acquire semaphore slot (blocks if pool is full)
 			select {
 			case semaphore <- struct{}{}:
@@ -761,9 +772,18 @@ func (r *Reddit) GetCommentsMultiple(ctx context.Context, requests []*types.Comm
 				firstError = ctx.Err()
 			}
 			// Drain remaining results to prevent goroutine leaks
+			// Use a timeout to avoid blocking forever if a goroutine fails to send
 			remaining := len(requests) - collected
+			drainTimer := time.NewTimer(5 * time.Second)
+			defer drainTimer.Stop()
+
 			for j := 0; j < remaining; j++ {
-				<-resultChan
+				select {
+				case <-resultChan:
+					// Successfully received result
+				case <-drainTimer.C:
+					return results, fmt.Errorf("timeout draining results after context cancellation: %w", firstError)
+				}
 			}
 			return results, firstError
 		}

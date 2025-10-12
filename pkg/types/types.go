@@ -109,7 +109,7 @@ func (e *Edited) UnmarshalJSON(data []byte) error {
 		return nil
 	}
 
-	// Handle boolean cases
+	// Handle boolean cases (both quoted and unquoted)
 	if bytes.Equal(data, []byte("true")) || bytes.Equal(data, []byte("\"true\"")) {
 		e.IsEdited = true
 		e.Timestamp = 0
@@ -120,21 +120,6 @@ func (e *Edited) UnmarshalJSON(data []byte) error {
 		e.IsEdited = false
 		e.Timestamp = 0
 		return nil
-	}
-
-	// Handle quoted boolean strings
-	if len(data) >= 2 && data[0] == '"' && data[len(data)-1] == '"' {
-		unquoted := data[1 : len(data)-1]
-		if bytes.Equal(unquoted, []byte("true")) {
-			e.IsEdited = true
-			e.Timestamp = 0
-			return nil
-		}
-		if bytes.Equal(unquoted, []byte("false")) {
-			e.IsEdited = false
-			e.Timestamp = 0
-			return nil
-		}
 	}
 
 	// Handle numeric timestamp
