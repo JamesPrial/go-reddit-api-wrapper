@@ -124,8 +124,12 @@ func TestConnectionRefusedRecovery(t *testing.T) {
 		subredditData := map[string]interface{}{
 			"kind": "t5",
 			"data": map[string]interface{}{
+				"id":           "testsubid",
+				"name":         "t5_testsubid",
 				"display_name": "testsub",
 				"subscribers":  100000,
+				"created_utc":  1609459200.0,
+				"created":      1609459200.0,
 			},
 		}
 		json.NewEncoder(w).Encode(subredditData)
@@ -168,8 +172,12 @@ func TestConnectionRefusedRecovery(t *testing.T) {
 		subredditData := map[string]interface{}{
 			"kind": "t5",
 			"data": map[string]interface{}{
+				"id":           "testsubid",
+				"name":         "t5_testsubid",
 				"display_name": "testsub",
 				"subscribers":  100000,
+				"created_utc":  1609459200.0,
+				"created":      1609459200.0,
 			},
 		}
 		json.NewEncoder(w).Encode(subredditData)
@@ -240,8 +248,12 @@ func TestDNSFailureRecovery(t *testing.T) {
 		subredditData := map[string]interface{}{
 			"kind": "t5",
 			"data": map[string]interface{}{
+				"id":           "testsubid",
+				"name":         "t5_testsubid",
 				"display_name": "testsub",
 				"subscribers":  100000,
+				"created_utc":  1609459200.0,
+				"created":      1609459200.0,
 			},
 		}
 		json.NewEncoder(w).Encode(subredditData)

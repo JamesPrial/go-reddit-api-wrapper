@@ -68,7 +68,7 @@ func TestPaginationForwardNavigation(t *testing.T) {
 
 		if after == "" {
 			// First page
-			for i := 1; i <= 5; i++ {
+			for i := 0; i < 5; i++ {
 				postID := "post" + string(rune('a'+i))
 				score := 100 + i*10
 				created := 1609459200.0 + float64(i*3600)
@@ -106,7 +106,7 @@ func TestPaginationForwardNavigation(t *testing.T) {
 			nextAfter = "t3_poste"
 		} else if after == "t3_poste" {
 			// Second page
-			for i := 6; i <= 10; i++ {
+			for i := 5; i < 10; i++ {
 				postID := "post" + string(rune('a'+i))
 				score := 100 + i*10
 				created := 1609459200.0 + float64(i*3600)
@@ -144,7 +144,7 @@ func TestPaginationForwardNavigation(t *testing.T) {
 			nextAfter = "t3_postj"
 		} else if after == "t3_postj" {
 			// Third page (last)
-			for i := 11; i <= 12; i++ {
+			for i := 10; i < 12; i++ {
 				postID := "post" + string(rune('a'+i))
 				score := 100 + i*10
 				created := 1609459200.0 + float64(i*3600)
@@ -286,7 +286,7 @@ func TestPaginationBackwardNavigation(t *testing.T) {
 
 		if before == "" && after == "" {
 			// Middle page (starting point)
-			for i := 6; i <= 10; i++ {
+			for i := 5; i < 10; i++ {
 				postID := "post" + string(rune('a'+i))
 				score := 100 + i*10
 				created := 1609459200.0 + float64(i*3600)
@@ -296,7 +296,7 @@ func TestPaginationBackwardNavigation(t *testing.T) {
 			nextBefore = "t3_poste"
 		} else if before == "t3_poste" && after == "" {
 			// Previous page
-			for i := 1; i <= 5; i++ {
+			for i := 0; i < 5; i++ {
 				postID := "post" + string(rune('a'+i))
 				score := 100 + i*10
 				created := 1609459200.0 + float64(i*3600)
@@ -306,7 +306,7 @@ func TestPaginationBackwardNavigation(t *testing.T) {
 			nextBefore = ""
 		} else if before == "" && after == "t3_postj" {
 			// Next page
-			for i := 11; i <= 15; i++ {
+			for i := 10; i < 15; i++ {
 				postID := "post" + string(rune('a'+i))
 				score := 100 + i*10
 				created := 1609459200.0 + float64(i*3600)
@@ -800,7 +800,7 @@ func TestPaginationWithComments(t *testing.T) {
 		}
 
 		for i := 0; i < commentCount; i++ {
-			commentID := "comment" + string(rune('1'+i))
+			commentID := "comment" + string(rune('0'+i))
 			score := 10 + i
 			created := 1609459200.0 + float64(i*3600)
 			comments = append(comments, map[string]interface{}{
