@@ -249,7 +249,7 @@ func TestVeryLargeResponse(t *testing.T) {
 	duration := time.Since(start)
 
 	testutil.AssertNoError(t, err)
-	testutil.AssertPostCount(t, resp, 100)
+	testutil.AssertPostCount(t, resp, 1000)
 
 	// Verify some data was parsed correctly
 	if resp.Posts[0].Title == "" {
