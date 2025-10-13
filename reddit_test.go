@@ -301,9 +301,9 @@ func TestNewClientWithContext_InvalidAuthURL(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error but got none")
 	}
-	var authErr *pkgerrs.AuthError
-	if !errors.As(err, &authErr) {
-		t.Fatalf("expected AuthError, got %T", err)
+	var configErr *pkgerrs.ConfigError
+	if !errors.As(err, &configErr) {
+		t.Fatalf("expected ConfigError, got %T", err)
 	}
 }
 
@@ -391,7 +391,7 @@ func TestClient_Me(t *testing.T) {
 			setupMock: func() HTTPClient {
 				return &mockHTTPClient{
 					doFunc: func(req *http.Request, v *types.Thing) error {
-						accountData := `{"id":"abc123","name":"testuser","link_karma":100,"comment_karma":50}`
+						accountData := `{"id":"abc123","name":"t2_abc123","link_karma":100,"comment_karma":50,"created_utc":1609459200.0,"created":1609459200.0}`
 						*v = types.Thing{
 							Kind: "t2",
 							Data: json.RawMessage(accountData),
@@ -639,10 +639,22 @@ func TestClient_GetHot(t *testing.T) {
 					doFunc: func(req *http.Request, v *types.Thing) error {
 						children := make([]json.RawMessage, 3)
 						for i := range children {
+							postID := "post" + string(rune('1'+i))
 							postData := map[string]interface{}{
-								"id":    "post" + string(rune('1'+i)),
-								"title": "Test Post",
-								"score": 100,
+								"id":           postID,
+								"title":        "Test Post",
+								"score":        100,
+								"ups":          100,
+								"downs":        0,
+								"name":         "t3_" + postID,
+								"created_utc":  1609459200.0,
+								"created":      1609459200.0,
+								"permalink":    "/r/golang/comments/" + postID + "/test_post/",
+								"subreddit":    "golang",
+								"author":       "testuser",
+								"url":          "https://reddit.com/r/golang/",
+								"num_comments": 0,
+								"upvote_ratio": 0.95,
 							}
 							data, _ := json.Marshal(postData)
 							child := map[string]interface{}{
@@ -878,7 +890,7 @@ func TestClient_GetComments(t *testing.T) {
 				return &mockHTTPClient{
 					doThingArrayFunc: func(req *http.Request) ([]*types.Thing, error) {
 						// Post listing
-						postData := `{"id":"abc123","title":"Test Post","score":100}`
+						postData := `{"id":"abc123","title":"Test Post","score":100,"name":"t3_abc123","created_utc":1609459200.0,"created":1609459200.0,"permalink":"/r/golang/comments/abc123/test_post/","subreddit":"golang","author":"testuser","url":"https://reddit.com/r/golang/"}`
 						postChild := map[string]interface{}{
 							"kind": "t3",
 							"data": json.RawMessage(postData),
@@ -890,7 +902,7 @@ func TestClient_GetComments(t *testing.T) {
 						postListingData, _ := json.Marshal(postListing)
 
 						// Comments listing
-						commentData := `{"id":"com1","body":"Test comment","author":"user1","link_id":"t3_abc123","parent_id":"t3_abc123"}`
+						commentData := `{"id":"com1","body":"Test comment","author":"user1","link_id":"t3_abc123","parent_id":"t3_abc123","name":"t1_com1","created_utc":1609459200.0,"created":1609459200.0,"permalink":"/r/golang/comments/abc123/test_post/com1/","subreddit":"golang","score":10,"ups":10,"downs":0}`
 						commentChild := map[string]interface{}{
 							"kind": "t1",
 							"data": json.RawMessage(commentData),
@@ -925,9 +937,20 @@ func TestClient_GetComments(t *testing.T) {
 								map[string]interface{}{
 									"kind": "t3",
 									"data": map[string]interface{}{
-										"id":    "abc123",
-										"title": "Test Post",
-										"score": 100,
+										"id":           "abc123",
+										"name":         "t3_abc123",
+										"title":        "Test Post",
+										"author":       "testuser",
+										"subreddit":    "golang",
+										"permalink":    "/r/golang/comments/abc123/test_post/",
+										"url":          "https://reddit.com/r/golang/",
+										"score":        100,
+										"ups":          100,
+										"downs":        0,
+										"created_utc":  1609459200.0,
+										"created":      1609459200.0,
+										"num_comments": 1,
+										"upvote_ratio": 0.95,
 									},
 								},
 							},
@@ -938,11 +961,19 @@ func TestClient_GetComments(t *testing.T) {
 								map[string]interface{}{
 									"kind": "t1",
 									"data": map[string]interface{}{
-										"id":        "c_nested",
-										"body":      "Test comment",
-										"author":    "user1",
-										"link_id":   "t3_abc123",
-										"parent_id": "t3_abc123",
+										"id":          "c_nested",
+										"body":        "Test comment",
+										"author":      "user1",
+										"link_id":     "t3_abc123",
+										"parent_id":   "t3_abc123",
+										"name":        "t1_c_nested",
+										"created_utc": 1609459200.0,
+										"created":     1609459200.0,
+										"permalink":   "/r/golang/comments/abc123/test_post/c_nested/",
+										"subreddit":   "golang",
+										"score":       10,
+										"ups":         10,
+										"downs":       0,
 										"replies": map[string]interface{}{
 											"kind": "Listing",
 											"data": map[string]interface{}{
@@ -950,6 +981,8 @@ func TestClient_GetComments(t *testing.T) {
 													map[string]interface{}{
 														"kind": "more",
 														"data": map[string]interface{}{
+															"id":       "moreid1",
+															"name":     "t1_moreid1",
 															"children": []string{"more1", "more2"},
 														},
 													},
@@ -1322,8 +1355,8 @@ func TestClient_GetMoreComments(t *testing.T) {
 			setupMock: func() HTTPClient {
 				return &mockHTTPClient{
 					doMoreChildrenFunc: func(req *http.Request) ([]*types.Thing, error) {
-						comment1 := `{"id":"comment1","body":"First comment","author":"user1","link_id":"t3_abc123","parent_id":"t3_abc123"}`
-						comment2 := `{"id":"comment2","body":"Second comment","author":"user2","link_id":"t3_abc123","parent_id":"t3_abc123"}`
+						comment1 := `{"id":"comment1","body":"First comment","author":"user1","link_id":"t3_abc123","parent_id":"t3_abc123","name":"t1_comment1","created_utc":1609459200.0,"created":1609459200.0,"permalink":"/r/golang/comments/abc123/test_post/comment1/","subreddit":"golang","score":5,"ups":5,"downs":0}`
+						comment2 := `{"id":"comment2","body":"Second comment","author":"user2","link_id":"t3_abc123","parent_id":"t3_abc123","name":"t1_comment2","created_utc":1609459200.0,"created":1609459200.0,"permalink":"/r/golang/comments/abc123/test_post/comment2/","subreddit":"golang","score":3,"ups":3,"downs":0}`
 						return []*types.Thing{
 							{Kind: "t1", Data: json.RawMessage(comment1)},
 							{Kind: "t1", Data: json.RawMessage(comment2)},

@@ -38,8 +38,12 @@ func TestNetworkTimeoutRecovery(t *testing.T) {
 			subredditData := map[string]interface{}{
 				"kind": "t5",
 				"data": map[string]interface{}{
+					"id":           "testsubid",
+					"name":         "t5_testsubid",
 					"display_name": "testsub",
 					"subscribers":  100000,
+					"created_utc":  1609459200.0,
+					"created":      1609459200.0,
 				},
 			}
 			json.NewEncoder(w).Encode(subredditData)
@@ -49,8 +53,12 @@ func TestNetworkTimeoutRecovery(t *testing.T) {
 			subredditData := map[string]interface{}{
 				"kind": "t5",
 				"data": map[string]interface{}{
+					"id":           "testsubid",
+					"name":         "t5_testsubid",
 					"display_name": "testsub",
 					"subscribers":  100000,
+					"created_utc":  1609459200.0,
+					"created":      1609459200.0,
 				},
 			}
 			json.NewEncoder(w).Encode(subredditData)
@@ -313,8 +321,12 @@ func TestHTTP5xxErrorRecovery(t *testing.T) {
 			subredditData := map[string]interface{}{
 				"kind": "t5",
 				"data": map[string]interface{}{
+					"id":           "testsubid",
+					"name":         "t5_testsubid",
 					"display_name": "testsub",
 					"subscribers":  100000,
+					"created_utc":  1609459200.0,
+					"created":      1609459200.0,
 				},
 			}
 			json.NewEncoder(w).Encode(subredditData)
@@ -396,8 +408,12 @@ func TestHTTP429RateLimitRecovery(t *testing.T) {
 			subredditData := map[string]interface{}{
 				"kind": "t5",
 				"data": map[string]interface{}{
+					"id":           "testsubid",
+					"name":         "t5_testsubid",
 					"display_name": "testsub",
 					"subscribers":  100000,
+					"created_utc":  1609459200.0,
+					"created":      1609459200.0,
 				},
 			}
 			json.NewEncoder(w).Encode(subredditData)
@@ -480,8 +496,12 @@ func TestPartialResponseRecovery(t *testing.T) {
 			subredditData := map[string]interface{}{
 				"kind": "t5",
 				"data": map[string]interface{}{
+					"id":           "testsubid",
+					"name":         "t5_testsubid",
 					"display_name": "testsub",
 					"subscribers":  100000,
+					"created_utc":  1609459200.0,
+					"created":      1609459200.0,
 				},
 			}
 			json.NewEncoder(w).Encode(subredditData)
@@ -561,8 +581,12 @@ func TestIntermittentNetworkFailure(t *testing.T) {
 			subredditData := map[string]interface{}{
 				"kind": "t5",
 				"data": map[string]interface{}{
+					"id":           "testsubid",
+					"name":         "t5_testsubid",
 					"display_name": "testsub",
 					"subscribers":  100000,
+					"created_utc":  1609459200.0,
+					"created":      1609459200.0,
 				},
 			}
 			json.NewEncoder(w).Encode(subredditData)
@@ -647,8 +671,12 @@ func TestNetworkRecoveryWithRetry(t *testing.T) {
 			subredditData := map[string]interface{}{
 				"kind": "t5",
 				"data": map[string]interface{}{
+					"id":           "testsubid",
+					"name":         "t5_testsubid",
 					"display_name": "testsub",
 					"subscribers":  100000,
+					"created_utc":  1609459200.0,
+					"created":      1609459200.0,
 				},
 			}
 			json.NewEncoder(w).Encode(subredditData)
