@@ -12,69 +12,63 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jamesprial/go-reddit-api-wrapper/internal/testutil"
 	pkgerrs "github.com/jamesprial/go-reddit-api-wrapper/pkg/errors"
 )
 
-// mockResponse defines the response from the mock server.
-type mockResponse struct {
-	statusCode int
-	body       string
+// oauthServerConfig holds configuration for the mock OAuth server.
+type oauthServerConfig struct {
+	expectedClientID     string
+	expectedClientSecret string
+	username             string
+	password             string
+	grantType            string
+	statusCode           int
+	responseBody         string
 }
 
-// mockAuthServer is a mock HTTP server for testing the authenticator.
-type mockAuthServer struct {
-	t            *testing.T
-	mockResponse *mockResponse
-	grantType    string
-	expectedUser string
-	expectedPass string
-	username     string
-	password     string
-}
-
-// ServeHTTP handles incoming requests to the mock server.
-func (s *mockAuthServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		s.t.Errorf("expected POST request, got %s", r.Method)
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		return
-	}
-
-	user, pass, ok := r.BasicAuth()
-	if !ok || user != s.expectedUser || pass != s.expectedPass {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusUnauthorized)
-		fmt.Fprint(w, `{"error": "invalid_client"}`)
-		return
-	}
-
-	if err := r.ParseForm(); err != nil {
-		s.t.Fatalf("failed to parse form: %v", err)
-	}
-	if r.Form.Get("grant_type") != s.grantType {
-		s.t.Errorf("expected grant_type %q, got %q", s.grantType, r.Form.Get("grant_type"))
-	}
-
-	// Validate username and password if they are expected
-	if s.username != "" {
-		if r.Form.Get("username") != s.username {
-			s.t.Errorf("expected username %q, got %q", s.username, r.Form.Get("username"))
+// mockOAuthServer creates a simple OAuth token endpoint server for auth testing.
+// This is separate from testutil.MockServer since it handles OAuth-specific endpoints.
+func mockOAuthServer(t *testing.T, config *oauthServerConfig) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("expected POST request, got %s", r.Method)
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
 		}
-	}
-	if s.password != "" {
-		if r.Form.Get("password") != s.password {
-			s.t.Errorf("expected password %q, got %q", s.password, r.Form.Get("password"))
+
+		// Check basic auth
+		user, pass, ok := r.BasicAuth()
+		if !ok || user != config.expectedClientID || pass != config.expectedClientSecret {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			fmt.Fprint(w, `{"error": "invalid_client"}`)
+			return
 		}
-	}
 
-	if s.mockResponse == nil {
-		s.t.Error("mockResponse is nil but auth succeeded, this is likely a test setup error")
-		w.WriteHeader(http.StatusInternalServerError)
-		return
-	}
+		// Parse form data
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("failed to parse form: %v", err)
+		}
 
-	w.WriteHeader(s.mockResponse.statusCode)
-	fmt.Fprint(w, s.mockResponse.body)
+		// Validate grant type
+		if r.Form.Get("grant_type") != config.grantType {
+			t.Errorf("expected grant_type %q, got %q", config.grantType, r.Form.Get("grant_type"))
+		}
+
+		// Validate username/password if provided
+		if config.username != "" && r.Form.Get("username") != config.username {
+			t.Errorf("expected username %q, got %q", config.username, r.Form.Get("username"))
+		}
+		if config.password != "" && r.Form.Get("password") != config.password {
+			t.Errorf("expected password %q, got %q", config.password, r.Form.Get("password"))
+		}
+
+		// Return configured response
+		w.WriteHeader(config.statusCode)
+		fmt.Fprint(w, config.responseBody)
+	}))
 }
 
 func TestNewAuthenticator(t *testing.T) {
@@ -82,23 +76,24 @@ func TestNewAuthenticator(t *testing.T) {
 
 	customClient := &http.Client{}
 
-	testCases := []struct {
-		name       string
-		httpClient *http.Client
-		baseURL    string
-		username   string
-		password   string
-		grantType  string
-		wantErr    bool
-		checkFunc  func(t *testing.T, a *Authenticator, err error)
+	tests := []struct {
+		name      string
+		client    *http.Client
+		baseURL   string
+		username  string
+		password  string
+		grantType string
+		wantErr   bool
+		checkFunc func(t *testing.T, a *Authenticator, err error)
 	}{
 		{
-			name:       "success with nil client",
-			httpClient: nil,
-			baseURL:    "https://www.reddit.com/",
-			grantType:  "password",
-			wantErr:    false,
+			name:      "success with nil client uses default",
+			client:    nil,
+			baseURL:   "https://www.reddit.com/",
+			grantType: "password",
+			wantErr:   false,
 			checkFunc: func(t *testing.T, a *Authenticator, err error) {
+				t.Helper()
 				if a.client != http.DefaultClient {
 					t.Error("expected client to be http.DefaultClient")
 				}
@@ -109,23 +104,25 @@ func TestNewAuthenticator(t *testing.T) {
 			},
 		},
 		{
-			name:       "success with custom client",
-			httpClient: customClient,
-			baseURL:    "https://www.reddit.com/",
-			grantType:  "password",
-			wantErr:    false,
+			name:      "success with custom client",
+			client:    customClient,
+			baseURL:   "https://www.reddit.com/",
+			grantType: "password",
+			wantErr:   false,
 			checkFunc: func(t *testing.T, a *Authenticator, err error) {
+				t.Helper()
 				if a.client != customClient {
 					t.Error("expected client to be the custom client")
 				}
 			},
 		},
 		{
-			name:      "success with base url missing trailing slash",
+			name:      "adds trailing slash to base URL",
 			baseURL:   "https://www.reddit.com",
 			grantType: "password",
 			wantErr:   false,
 			checkFunc: func(t *testing.T, a *Authenticator, err error) {
+				t.Helper()
 				if a.BaseURL.String() != "https://www.reddit.com/" {
 					t.Errorf("expected base URL to have trailing slash, got %q", a.BaseURL.String())
 				}
@@ -135,28 +132,26 @@ func TestNewAuthenticator(t *testing.T) {
 				}
 			},
 		},
-
 		{
-			name:      "error with invalid base url",
+			name:      "error with invalid base URL",
 			baseURL:   "::invalid-url",
 			grantType: "password",
 			wantErr:   true,
 			checkFunc: func(t *testing.T, a *Authenticator, err error) {
+				t.Helper()
 				var authErr *pkgerrs.AuthError
-				if !errors.As(err, &authErr) {
-					t.Errorf("expected AuthError, got %T", err)
-				}
+				testutil.AssertErrorType(t, err, &authErr)
 			},
 		},
 		{
-			name:      "success with username and password",
+			name:      "stores username and password for user auth",
 			baseURL:   "https://www.reddit.com/",
 			username:  "testuser",
 			password:  "testpass",
 			grantType: "password",
 			wantErr:   false,
 			checkFunc: func(t *testing.T, a *Authenticator, err error) {
-				// Check that form data contains username and password
+				t.Helper()
 				if a.formData.Get("username") != "testuser" {
 					t.Errorf("expected username 'testuser', got %q", a.formData.Get("username"))
 				}
@@ -169,13 +164,12 @@ func TestNewAuthenticator(t *testing.T) {
 			},
 		},
 		{
-			name:    "success with empty username and password",
-			baseURL: "https://www.reddit.com/",
-
+			name:      "client credentials with no username/password",
+			baseURL:   "https://www.reddit.com/",
 			grantType: "client_credentials",
 			wantErr:   false,
 			checkFunc: func(t *testing.T, a *Authenticator, err error) {
-				// Check that form data does not contain username and password when empty
+				t.Helper()
 				if a.formData.Get("username") != "" {
 					t.Errorf("expected empty username, got %q", a.formData.Get("username"))
 				}
@@ -189,17 +183,29 @@ func TestNewAuthenticator(t *testing.T) {
 		},
 	}
 
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			a, err := NewAuthenticator(tc.httpClient, tc.username, tc.password, "id", "secret", "agent", tc.baseURL, tc.grantType, nil)
+			a, err := NewAuthenticator(
+				tt.client,
+				tt.username,
+				tt.password,
+				"id",
+				"secret",
+				"agent",
+				tt.baseURL,
+				tt.grantType,
+				nil,
+			)
 
-			if (err != nil) != tc.wantErr {
-				t.Fatalf("NewAuthenticator() error = %v, wantErr %v", err, tc.wantErr)
+			if tt.wantErr {
+				testutil.AssertError(t, err)
+			} else {
+				testutil.AssertNoError(t, err)
 			}
 
-			if tc.checkFunc != nil {
-				tc.checkFunc(t, a, err)
+			if tt.checkFunc != nil {
+				tt.checkFunc(t, a, err)
 			}
 		})
 	}
@@ -208,37 +214,35 @@ func TestNewAuthenticator(t *testing.T) {
 func TestAuthenticator_GetToken(t *testing.T) {
 	t.Parallel()
 
-	testCases := []struct {
-		name         string
-		clientID     string
-		clientSecret string
-		username     string
-		password     string
-		// expectedClientID and expectedClientSecret are for the mock server to expect.
+	tests := []struct {
+		name                 string
+		clientID             string
+		clientSecret         string
+		username             string
+		password             string
 		expectedClientID     string
 		expectedClientSecret string
-		mockResponse         *mockResponse
-		serverDown           bool
 		grantType            string
+		statusCode           int
+		responseBody         string
+		serverDown           bool
 		expectedToken        string
 		wantErr              bool
 		checkErr             func(t *testing.T, err error)
 		logger               *slog.Logger
 	}{
 		{
-			name:                 "success",
+			name:                 "success with valid credentials",
 			clientID:             "test-id",
 			clientSecret:         "test-secret",
 			expectedClientID:     "test-id",
 			expectedClientSecret: "test-secret",
-			mockResponse: &mockResponse{
-				statusCode: http.StatusOK,
-				body:       `{"access_token": "test-token", "token_type": "bearer", "expires_in": 3600, "scope": "*"}`,
-			},
-			grantType:     "password",
-			expectedToken: "test-token",
-			wantErr:       false,
-			logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
+			grantType:            "password",
+			statusCode:           http.StatusOK,
+			responseBody:         `{"access_token": "test-token", "token_type": "bearer", "expires_in": 3600, "scope": "*"}`,
+			expectedToken:        "test-token",
+			wantErr:              false,
+			logger:               slog.New(slog.NewTextHandler(io.Discard, nil)),
 		},
 		{
 			name:                 "success with username and password",
@@ -248,62 +252,53 @@ func TestAuthenticator_GetToken(t *testing.T) {
 			password:             "reddit_pass",
 			expectedClientID:     "test-id",
 			expectedClientSecret: "test-secret",
-			mockResponse: &mockResponse{
-				statusCode: http.StatusOK,
-				body:       `{"access_token": "user-token", "token_type": "bearer", "expires_in": 3600, "scope": "*"}`,
-			},
-			grantType:     "password",
-			expectedToken: "user-token",
-			wantErr:       false,
+			grantType:            "password",
+			statusCode:           http.StatusOK,
+			responseBody:         `{"access_token": "user-token", "token_type": "bearer", "expires_in": 3600, "scope": "*"}`,
+			expectedToken:        "user-token",
+			wantErr:              false,
 		},
 		{
-			name:                 "invalid credentials",
+			name:                 "invalid credentials return auth error",
 			clientID:             "wrong-id",
 			clientSecret:         "wrong-secret",
 			expectedClientID:     "correct-id",
 			expectedClientSecret: "correct-secret",
-			mockResponse:         nil, // Not used as auth fails
 			grantType:            "password",
+			statusCode:           0, // Not used - auth fails before response
 			wantErr:              true,
 			checkErr: func(t *testing.T, err error) {
+				t.Helper()
 				var authErr *pkgerrs.AuthError
-				if !errors.As(err, &authErr) {
-					t.Fatalf("expected AuthError, got %T", err)
-				}
+				testutil.AssertErrorType(t, err, &authErr)
 				if authErr.StatusCode != http.StatusUnauthorized {
 					t.Errorf("expected status code %d, got %d", http.StatusUnauthorized, authErr.StatusCode)
 				}
-				if authErr.Body != `{"error": "invalid_client"}` {
-					t.Errorf("unexpected body in error: %q", authErr.Body)
-				}
+				testutil.AssertStringContains(t, authErr.Body, "invalid_client")
 			},
 		},
 		{
-			name:                 "api error",
+			name:                 "API error with 401 status",
 			clientID:             "test-id",
 			clientSecret:         "test-secret",
 			expectedClientID:     "test-id",
 			expectedClientSecret: "test-secret",
-			mockResponse: &mockResponse{
-				statusCode: http.StatusUnauthorized,
-				body:       `{"error": "unauthorized"}`,
-			},
-			wantErr: true,
+			grantType:            "password",
+			statusCode:           http.StatusUnauthorized,
+			responseBody:         `{"error": "unauthorized"}`,
+			wantErr:              true,
 			checkErr: func(t *testing.T, err error) {
+				t.Helper()
 				var authErr *pkgerrs.AuthError
-				if !errors.As(err, &authErr) {
-					t.Fatalf("expected AuthError, got %T", err)
-				}
+				testutil.AssertErrorType(t, err, &authErr)
 				if authErr.StatusCode != http.StatusUnauthorized {
 					t.Errorf("expected status code %d, got %d", http.StatusUnauthorized, authErr.StatusCode)
 				}
-				if authErr.Body != `{"error": "unauthorized"}` {
-					t.Errorf("unexpected body in error: %q", authErr.Body)
-				}
+				testutil.AssertStringContains(t, authErr.Body, "unauthorized")
 			},
 		},
 		{
-			name:                 "network error",
+			name:                 "network error when server down",
 			clientID:             "test-id",
 			clientSecret:         "test-secret",
 			expectedClientID:     "test-id",
@@ -311,31 +306,28 @@ func TestAuthenticator_GetToken(t *testing.T) {
 			serverDown:           true,
 			wantErr:              true,
 			checkErr: func(t *testing.T, err error) {
+				t.Helper()
 				var authErr *pkgerrs.AuthError
-				if !errors.As(err, &authErr) {
-					t.Fatalf("expected AuthError, got %T", err)
-				}
+				testutil.AssertErrorType(t, err, &authErr)
 				if authErr.Err == nil {
 					t.Error("expected underlying network error, but was nil")
 				}
 			},
 		},
 		{
-			name:                 "bad json response",
+			name:                 "bad JSON response",
 			clientID:             "test-id",
 			clientSecret:         "test-secret",
 			expectedClientID:     "test-id",
 			expectedClientSecret: "test-secret",
-			mockResponse: &mockResponse{
-				statusCode: http.StatusOK,
-				body:       `{not-json}`,
-			},
-			wantErr: true,
+			grantType:            "password",
+			statusCode:           http.StatusOK,
+			responseBody:         `{not-json}`,
+			wantErr:              true,
 			checkErr: func(t *testing.T, err error) {
+				t.Helper()
 				var authErr *pkgerrs.AuthError
-				if !errors.As(err, &authErr) {
-					t.Fatalf("expected AuthError, got %T", err)
-				}
+				testutil.AssertErrorType(t, err, &authErr)
 				var jsonErr *json.SyntaxError
 				if !errors.As(err, &jsonErr) {
 					t.Errorf("expected underlying error to be json.SyntaxError, got %T", errors.Unwrap(err))
@@ -348,151 +340,137 @@ func TestAuthenticator_GetToken(t *testing.T) {
 			clientSecret:         "test-secret",
 			expectedClientID:     "test-id",
 			expectedClientSecret: "test-secret",
-			mockResponse: &mockResponse{
-				statusCode: http.StatusOK,
-				body:       `{"access_token": "", "token_type": "bearer"}`,
-			},
-			wantErr: true,
+			grantType:            "password",
+			statusCode:           http.StatusOK,
+			responseBody:         `{"access_token": "", "token_type": "bearer"}`,
+			wantErr:              true,
 			checkErr: func(t *testing.T, err error) {
+				t.Helper()
 				var authErr *pkgerrs.AuthError
-				if !errors.As(err, &authErr) {
-					t.Fatalf("expected AuthError, got %T", err)
-				}
-				if !strings.Contains(authErr.Err.Error(), "access token was empty") {
-					t.Errorf("expected error about empty access token, got %v", authErr.Err)
-				}
+				testutil.AssertErrorType(t, err, &authErr)
+				testutil.AssertStringContains(t, err.Error(), "access token was empty")
 			},
 		},
 		{
-			name:                 "negative expires_in",
+			name:                 "negative expires_in value",
 			clientID:             "test-id",
 			clientSecret:         "test-secret",
 			expectedClientID:     "test-id",
 			expectedClientSecret: "test-secret",
-			mockResponse: &mockResponse{
-				statusCode: http.StatusOK,
-				body:       `{"access_token": "tok", "token_type": "bearer", "expires_in": -10}`,
-			},
-			wantErr: true,
+			grantType:            "password",
+			statusCode:           http.StatusOK,
+			responseBody:         `{"access_token": "tok", "token_type": "bearer", "expires_in": -10}`,
+			wantErr:              true,
 			checkErr: func(t *testing.T, err error) {
+				t.Helper()
 				var authErr *pkgerrs.AuthError
-				if !errors.As(err, &authErr) {
-					t.Fatalf("expected AuthError, got %T", err)
-				}
-				if !strings.Contains(authErr.Err.Error(), "cannot be negative") {
-					t.Errorf("expected negative expires message, got %v", authErr.Err)
-				}
+				testutil.AssertErrorType(t, err, &authErr)
+				testutil.AssertStringContains(t, err.Error(), "cannot be negative")
 			},
 		},
 		{
-			name:                 "expires_in exceeds maximum",
+			name:                 "expires_in exceeds maximum allowed",
 			clientID:             "test-id",
 			clientSecret:         "test-secret",
 			expectedClientID:     "test-id",
 			expectedClientSecret: "test-secret",
-			mockResponse: &mockResponse{
-				statusCode: http.StatusOK,
-				body:       fmt.Sprintf(`{"access_token": "tok", "token_type": "bearer", "expires_in": %d}`, 400*24*60*60),
-			},
-			wantErr: true,
+			grantType:            "password",
+			statusCode:           http.StatusOK,
+			responseBody:         fmt.Sprintf(`{"access_token": "tok", "token_type": "bearer", "expires_in": %d}`, 400*24*60*60),
+			wantErr:              true,
 			checkErr: func(t *testing.T, err error) {
+				t.Helper()
 				var authErr *pkgerrs.AuthError
-				if !errors.As(err, &authErr) {
-					t.Fatalf("expected AuthError, got %T", err)
-				}
-				if !strings.Contains(authErr.Err.Error(), "exceeds maximum") {
-					t.Errorf("expected exceeds maximum message, got %v", authErr.Err)
-				}
+				testutil.AssertErrorType(t, err, &authErr)
+				testutil.AssertStringContains(t, err.Error(), "exceeds maximum")
 			},
 		},
 		{
-			name:                 "response body too large",
+			name:                 "response body exceeds max size",
 			clientID:             "test-id",
 			clientSecret:         "test-secret",
 			expectedClientID:     "test-id",
 			expectedClientSecret: "test-secret",
-			mockResponse: &mockResponse{
-				statusCode: http.StatusOK,
-				body:       strings.Repeat("a", maxResponseBodySize+1),
-			},
-			wantErr: true,
+			grantType:            "password",
+			statusCode:           http.StatusOK,
+			responseBody:         strings.Repeat("a", maxResponseBodySize+1),
+			wantErr:              true,
 			checkErr: func(t *testing.T, err error) {
+				t.Helper()
 				var authErr *pkgerrs.AuthError
-				if !errors.As(err, &authErr) {
-					t.Fatalf("expected AuthError, got %T", err)
-				}
-				if !strings.Contains(authErr.Err.Error(), "exceeded max size") {
-					t.Errorf("expected max size error, got %v", authErr.Err)
-				}
+				testutil.AssertErrorType(t, err, &authErr)
+				testutil.AssertStringContains(t, err.Error(), "exceeded max size")
 			},
 		},
 	}
 
-	for _, tc := range testCases {
-		tc := tc // capture range variable
-		t.Run(tc.name, func(t *testing.T) {
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			mockServerHandler := &mockAuthServer{
-				t:            t,
-				mockResponse: tc.mockResponse,
-				grantType:    tc.grantType,
-				expectedUser: tc.expectedClientID,
-				expectedPass: tc.expectedClientSecret,
-				username:     tc.username,
-				password:     tc.password,
+			config := &oauthServerConfig{
+				expectedClientID:     tt.expectedClientID,
+				expectedClientSecret: tt.expectedClientSecret,
+				username:             tt.username,
+				password:             tt.password,
+				grantType:            tt.grantType,
+				statusCode:           tt.statusCode,
+				responseBody:         tt.responseBody,
 			}
 
-			server := httptest.NewServer(mockServerHandler)
-
+			server := mockOAuthServer(t, config)
 			serverURL := server.URL
-			if tc.serverDown {
+			if tt.serverDown {
 				server.Close()
 			} else {
 				defer server.Close()
 			}
 
-			a, err := NewAuthenticator(server.Client(), tc.username, tc.password, tc.clientID, tc.clientSecret, "test-agent", serverURL, tc.grantType, tc.logger)
-			if err != nil {
-				t.Fatalf("failed to create authenticator: %v", err)
-			}
+			a, err := NewAuthenticator(
+				server.Client(),
+				tt.username,
+				tt.password,
+				tt.clientID,
+				tt.clientSecret,
+				"test-agent",
+				serverURL,
+				tt.grantType,
+				tt.logger,
+			)
+			testutil.AssertNoError(t, err)
 
 			token, err := a.GetToken(context.Background())
 
-			if (err != nil) != tc.wantErr {
-				t.Fatalf("GetToken() error = %v, wantErr %v", err, tc.wantErr)
-			}
-
-			if !tc.wantErr {
-				if token != tc.expectedToken {
-					t.Errorf("GetToken() token = %q, want %q", token, tc.expectedToken)
+			if tt.wantErr {
+				testutil.AssertError(t, err)
+				if tt.checkErr != nil {
+					tt.checkErr(t, err)
 				}
-			}
-
-			if tc.wantErr && tc.checkErr != nil {
-				tc.checkErr(t, err)
+			} else {
+				testutil.AssertNoError(t, err)
+				if token != tt.expectedToken {
+					t.Errorf("GetToken() token = %q, want %q", token, tt.expectedToken)
+				}
 			}
 		})
 	}
 
 	t.Run("context cancellation", func(t *testing.T) {
+		t.Parallel()
+
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			t.Error("server should not have been called")
 		}))
 		defer server.Close()
 
 		a, err := NewAuthenticator(http.DefaultClient, "", "", "id", "secret", "agent", server.URL, "creds", nil)
-		if err != nil {
-			t.Fatalf("failed to create authenticator: %v", err)
-		}
+		testutil.AssertNoError(t, err)
 
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel() // Cancel context immediately
 
 		_, err = a.GetToken(ctx)
-		if err == nil {
-			t.Fatal("expected an error for canceled context, got nil")
-		}
+		testutil.AssertError(t, err)
 
 		if !errors.Is(err, context.Canceled) {
 			t.Errorf("expected error to be or wrap context.Canceled, got %v", err)
@@ -505,53 +483,53 @@ func TestAuthError_Error(t *testing.T) {
 
 	testErr := errors.New("underlying error")
 
-	testCases := []struct {
+	tests := []struct {
 		name     string
 		err      pkgerrs.AuthError
 		expected string
 	}{
 		{
-			name:     "full error",
+			name:     "full error with status, body, and underlying error",
 			err:      pkgerrs.AuthError{StatusCode: 401, Body: `{"error":"invalid"}`, Err: testErr},
 			expected: `auth error: status code 401, body: "{\"error\":\"invalid\"}", err: underlying error`,
 		},
 		{
-			name:     "status and body",
+			name:     "status and body only",
 			err:      pkgerrs.AuthError{StatusCode: 400, Body: "bad request"},
 			expected: `auth error: status code 400, body: "bad request"`,
 		},
 		{
-			name:     "status and err",
+			name:     "status and underlying error",
 			err:      pkgerrs.AuthError{StatusCode: 500, Err: testErr},
 			expected: `auth error: status code 500, err: underlying error`,
 		},
 		{
-			name:     "only status",
+			name:     "status code only",
 			err:      pkgerrs.AuthError{StatusCode: 404},
 			expected: "auth error: status code 404",
 		},
 		{
-			name:     "only body",
+			name:     "body only",
 			err:      pkgerrs.AuthError{Body: "some body"},
 			expected: `auth error, body: "some body"`,
 		},
 		{
-			name:     "only err",
+			name:     "underlying error only",
 			err:      pkgerrs.AuthError{Err: testErr},
 			expected: "auth error, err: underlying error",
 		},
 		{
-			name:     "empty error",
+			name:     "empty error with no fields",
 			err:      pkgerrs.AuthError{},
 			expected: "auth error",
 		},
 	}
 
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			if got := tc.err.Error(); got != tc.expected {
-				t.Errorf("Error() = %q, want %q", got, tc.expected)
+			if got := tt.err.Error(); got != tt.expected {
+				t.Errorf("Error() = %q, want %q", got, tt.expected)
 			}
 		})
 	}
@@ -560,24 +538,32 @@ func TestAuthError_Error(t *testing.T) {
 func TestAuthError_Unwrap(t *testing.T) {
 	t.Parallel()
 
-	baseErr := io.EOF
-	authErr := &pkgerrs.AuthError{Err: fmt.Errorf("wrapped: %w", baseErr)}
+	t.Run("unwraps nested error correctly", func(t *testing.T) {
+		t.Parallel()
 
-	if !errors.Is(authErr, baseErr) {
-		t.Errorf("errors.Is failed, expected to find %v in %v", baseErr, authErr)
-	}
+		baseErr := io.EOF
+		authErr := &pkgerrs.AuthError{Err: fmt.Errorf("wrapped: %w", baseErr)}
 
-	unwrapped := errors.Unwrap(authErr)
-	if unwrapped == nil {
-		t.Fatal("Unwrap() returned nil")
-	}
+		if !errors.Is(authErr, baseErr) {
+			t.Errorf("errors.Is failed, expected to find %v in %v", baseErr, authErr)
+		}
 
-	if !errors.Is(unwrapped, baseErr) {
-		t.Errorf("unwrapped error is not the base error")
-	}
+		unwrapped := errors.Unwrap(authErr)
+		if unwrapped == nil {
+			t.Fatal("Unwrap() returned nil")
+		}
 
-	emptyErr := &pkgerrs.AuthError{}
-	if errors.Unwrap(emptyErr) != nil {
-		t.Error("Unwrap should return nil for an error with no inner Err")
-	}
+		if !errors.Is(unwrapped, baseErr) {
+			t.Errorf("unwrapped error is not the base error")
+		}
+	})
+
+	t.Run("returns nil for error with no inner Err", func(t *testing.T) {
+		t.Parallel()
+
+		emptyErr := &pkgerrs.AuthError{}
+		if errors.Unwrap(emptyErr) != nil {
+			t.Error("Unwrap should return nil for an error with no inner Err")
+		}
+	})
 }
