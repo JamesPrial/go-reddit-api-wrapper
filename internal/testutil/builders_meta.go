@@ -285,7 +285,7 @@ type MoreBuilder struct {
 // NewMore creates a new MoreBuilder with default values.
 // Default values:
 //   - ID: "more123"
-//   - Name: "t1_more123"
+//   - Name: "more_more123"
 //   - Children: empty slice
 func NewMore() *MoreBuilder {
 	id := "more123"
@@ -293,18 +293,18 @@ func NewMore() *MoreBuilder {
 		data: &types.MoreData{
 			ThingData: types.ThingData{
 				ID:   id,
-				Name: "t1_" + id,
+				Name: "more_" + id,
 			},
 			Children: []string{},
 		},
 	}
 }
 
-// WithID sets the More object's ID and automatically updates the Name field to "t1_" + id.
-// Note: Reddit uses "t1_" prefix for more objects even though they represent comment continuations.
+// WithID sets the More object's ID and automatically updates the Name field to "more_" + id.
+// Note: Reddit uses "more_" prefix for more continuation objects in API responses.
 func (b *MoreBuilder) WithID(id string) *MoreBuilder {
 	b.data.ID = id
-	b.data.Name = "t1_" + id
+	b.data.Name = "more_" + id
 	return b
 }
 
