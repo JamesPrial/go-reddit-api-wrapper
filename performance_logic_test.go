@@ -34,12 +34,20 @@ func TestMemoryUsageEfficiency(t *testing.T) {
 				"kind": "t3",
 				"data": map[string]interface{}{
 					"id":           fmt.Sprintf("post_%d", i),
+					"name":         fmt.Sprintf("t3_post_%d", i),
 					"title":        fmt.Sprintf("Test Post %d with some content", i),
 					"score":        100 + i,
 					"author":       fmt.Sprintf("user_%d", i),
 					"selftext":     fmt.Sprintf("This is test content for post %d. ", i),
+					"created":      1609459200.0 + float64(i),
 					"created_utc":  1609459200.0 + float64(i),
 					"num_comments": i + 1,
+					"permalink":    fmt.Sprintf("/r/testsubreddit/comments/post_%d/test_post/", i),
+					"subreddit":    "testsubreddit",
+					"url":          "https://reddit.com/r/testsubreddit/",
+					"ups":          100 + i,
+					"downs":        0,
+					"upvote_ratio": 0.95,
 				},
 			}
 		}
@@ -63,10 +71,10 @@ func TestMemoryUsageEfficiency(t *testing.T) {
 	}
 
 	client := &Reddit{
-		httpClient:    internalClient,
-		parser:    internal.NewParser(),
-		validator: internal.NewValidator(),
-		auth:      &mockTokenProvider{token: "test_token"},
+		httpClient: internalClient,
+		parser:     internal.NewParser(),
+		validator:  internal.NewValidator(),
+		auth:       &mockTokenProvider{token: "test_token"},
 	}
 
 	ctx := context.Background()
@@ -93,8 +101,13 @@ func TestMemoryUsageEfficiency(t *testing.T) {
 	runtime.GC()
 	runtime.ReadMemStats(&m2)
 
-	// Calculate memory usage
-	memUsed := m2.Alloc - m1.Alloc
+	// Calculate memory usage (handle potential GC causing decrease)
+	var memUsed uint64
+	if m2.Alloc > m1.Alloc {
+		memUsed = m2.Alloc - m1.Alloc
+	} else {
+		memUsed = 0 // Memory decreased due to GC
+	}
 	memPerRequest := memUsed / iterations
 
 	t.Logf("Memory efficiency test:")
@@ -132,11 +145,20 @@ func TestConcurrentPerformance(t *testing.T) {
 		postData := map[string]interface{}{
 			"kind": "t3",
 			"data": map[string]interface{}{
-				"id":      "test_post",
-				"title":   "Test Post",
-				"score":   100,
-				"author":  "testuser",
-				"created_utc": 1609459200.0,
+				"id":           "test_post",
+				"name":         "t3_test_post",
+				"title":        "Test Post",
+				"score":        100,
+				"author":       "testuser",
+				"created":      1609459200.0,
+				"created_utc":  1609459200.0,
+				"num_comments": 10,
+				"permalink":    "/r/testsubreddit/comments/test_post/test_post/",
+				"subreddit":    "testsubreddit",
+				"url":          "https://reddit.com/r/testsubreddit/",
+				"ups":          100,
+				"downs":        0,
+				"upvote_ratio": 0.95,
 			},
 		}
 
@@ -159,10 +181,10 @@ func TestConcurrentPerformance(t *testing.T) {
 	}
 
 	client := &Reddit{
-		httpClient:    internalClient,
-		parser:    internal.NewParser(),
-		validator: internal.NewValidator(),
-		auth:      &mockTokenProvider{token: "test_token"},
+		httpClient: internalClient,
+		parser:     internal.NewParser(),
+		validator:  internal.NewValidator(),
+		auth:       &mockTokenProvider{token: "test_token"},
 	}
 
 	ctx := context.Background()
@@ -178,7 +200,7 @@ func TestConcurrentPerformance(t *testing.T) {
 		wg.Add(1)
 		go func(goroutineID int) {
 			defer wg.Done()
-			
+
 			for j := 0; j < requestsPerGoroutine; j++ {
 				resp, err := client.GetHot(ctx, nil)
 				if err != nil {
@@ -226,12 +248,20 @@ func TestParsingPerformance(t *testing.T) {
 			"kind": "t3",
 			"data": map[string]interface{}{
 				"id":           fmt.Sprintf("post_%d", i),
+				"name":         fmt.Sprintf("t3_post_%d", i),
 				"title":        fmt.Sprintf("Test Post %d with a reasonably long title", i),
 				"score":        100 + i,
 				"author":       fmt.Sprintf("user_%d", i),
 				"selftext":     fmt.Sprintf("This is test content for post %d. It has some length to make parsing more realistic. ", i),
+				"created":      1609459200.0 + float64(i),
 				"created_utc":  1609459200.0 + float64(i),
 				"num_comments": i + 1,
+				"permalink":    fmt.Sprintf("/r/testsubreddit/comments/post_%d/test_post/", i),
+				"subreddit":    "testsubreddit",
+				"url":          "https://reddit.com/r/testsubreddit/",
+				"ups":          100 + i,
+				"downs":        0,
+				"upvote_ratio": 0.95,
 				"over_18":      false,
 				"stickied":     false,
 			},
@@ -266,10 +296,10 @@ func TestParsingPerformance(t *testing.T) {
 	}
 
 	client := &Reddit{
-		httpClient:    internalClient,
-		parser:    internal.NewParser(),
-		validator: internal.NewValidator(),
-		auth:      &mockTokenProvider{token: "test_token"},
+		httpClient: internalClient,
+		parser:     internal.NewParser(),
+		validator:  internal.NewValidator(),
+		auth:       &mockTokenProvider{token: "test_token"},
 	}
 
 	ctx := context.Background()
@@ -327,11 +357,20 @@ func TestConnectionPooling(t *testing.T) {
 		postData := map[string]interface{}{
 			"kind": "t3",
 			"data": map[string]interface{}{
-				"id":      "test_post",
-				"title":   "Test Post",
-				"score":   100,
-				"author":  "testuser",
-				"created_utc": 1609459200.0,
+				"id":           "test_post",
+				"name":         "t3_test_post",
+				"title":        "Test Post",
+				"score":        100,
+				"author":       "testuser",
+				"created":      1609459200.0,
+				"created_utc":  1609459200.0,
+				"num_comments": 10,
+				"permalink":    "/r/testsubreddit/comments/test_post/test_post/",
+				"subreddit":    "testsubreddit",
+				"url":          "https://reddit.com/r/testsubreddit/",
+				"ups":          100,
+				"downs":        0,
+				"upvote_ratio": 0.95,
 			},
 		}
 
@@ -363,10 +402,10 @@ func TestConnectionPooling(t *testing.T) {
 	}
 
 	client := &Reddit{
-		httpClient:    internalClient,
-		parser:    internal.NewParser(),
-		validator: internal.NewValidator(),
-		auth:      &mockTokenProvider{token: "test_token"},
+		httpClient: internalClient,
+		parser:     internal.NewParser(),
+		validator:  internal.NewValidator(),
+		auth:       &mockTokenProvider{token: "test_token"},
 	}
 
 	ctx := context.Background()
@@ -423,11 +462,20 @@ func TestGoroutineScalability(t *testing.T) {
 		postData := map[string]interface{}{
 			"kind": "t3",
 			"data": map[string]interface{}{
-				"id":      "test_post",
-				"title":   "Test Post",
-				"score":   100,
-				"author":  "testuser",
-				"created_utc": 1609459200.0,
+				"id":           "test_post",
+				"name":         "t3_test_post",
+				"title":        "Test Post",
+				"score":        100,
+				"author":       "testuser",
+				"created":      1609459200.0,
+				"created_utc":  1609459200.0,
+				"num_comments": 10,
+				"permalink":    "/r/testsubreddit/comments/test_post/test_post/",
+				"subreddit":    "testsubreddit",
+				"url":          "https://reddit.com/r/testsubreddit/",
+				"ups":          100,
+				"downs":        0,
+				"upvote_ratio": 0.95,
 			},
 		}
 
@@ -450,10 +498,10 @@ func TestGoroutineScalability(t *testing.T) {
 	}
 
 	client := &Reddit{
-		httpClient:    internalClient,
-		parser:    internal.NewParser(),
-		validator: internal.NewValidator(),
-		auth:      &mockTokenProvider{token: "test_token"},
+		httpClient: internalClient,
+		parser:     internal.NewParser(),
+		validator:  internal.NewValidator(),
+		auth:       &mockTokenProvider{token: "test_token"},
 	}
 
 	ctx := context.Background()
@@ -473,7 +521,7 @@ func TestGoroutineScalability(t *testing.T) {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				
+
 				for j := 0; j < requestsPerGoroutine; j++ {
 					resp, err := client.GetHot(ctx, nil)
 					if err != nil {
@@ -521,11 +569,20 @@ func TestMemoryLeakDetection(t *testing.T) {
 		postData := map[string]interface{}{
 			"kind": "t3",
 			"data": map[string]interface{}{
-				"id":      "test_post",
-				"title":   "Test Post",
-				"score":   100,
-				"author":  "testuser",
-				"created_utc": 1609459200.0,
+				"id":           "test_post",
+				"name":         "t3_test_post",
+				"title":        "Test Post",
+				"score":        100,
+				"author":       "testuser",
+				"created":      1609459200.0,
+				"created_utc":  1609459200.0,
+				"num_comments": 10,
+				"permalink":    "/r/testsubreddit/comments/test_post/test_post/",
+				"subreddit":    "testsubreddit",
+				"url":          "https://reddit.com/r/testsubreddit/",
+				"ups":          100,
+				"downs":        0,
+				"upvote_ratio": 0.95,
 			},
 		}
 
@@ -548,10 +605,10 @@ func TestMemoryLeakDetection(t *testing.T) {
 	}
 
 	client := &Reddit{
-		httpClient:    internalClient,
-		parser:    internal.NewParser(),
-		validator: internal.NewValidator(),
-		auth:      &mockTokenProvider{token: "test_token"},
+		httpClient: internalClient,
+		parser:     internal.NewParser(),
+		validator:  internal.NewValidator(),
+		auth:       &mockTokenProvider{token: "test_token"},
 	}
 
 	ctx := context.Background()
@@ -631,12 +688,20 @@ func TestCPUUsageEfficiency(t *testing.T) {
 				"kind": "t3",
 				"data": map[string]interface{}{
 					"id":           fmt.Sprintf("post_%d", i),
+					"name":         fmt.Sprintf("t3_post_%d", i),
 					"title":        fmt.Sprintf("Test Post %d", i),
 					"score":        100 + i,
 					"author":       fmt.Sprintf("user_%d", i),
 					"selftext":     fmt.Sprintf("Content for post %d", i),
+					"created":      1609459200.0 + float64(i),
 					"created_utc":  1609459200.0 + float64(i),
 					"num_comments": i + 1,
+					"permalink":    fmt.Sprintf("/r/testsubreddit/comments/post_%d/test_post/", i),
+					"subreddit":    "testsubreddit",
+					"url":          "https://reddit.com/r/testsubreddit/",
+					"ups":          100 + i,
+					"downs":        0,
+					"upvote_ratio": 0.95,
 				},
 			}
 		}
@@ -660,10 +725,10 @@ func TestCPUUsageEfficiency(t *testing.T) {
 	}
 
 	client := &Reddit{
-		httpClient:    internalClient,
-		parser:    internal.NewParser(),
-		validator: internal.NewValidator(),
-		auth:      &mockTokenProvider{token: "test_token"},
+		httpClient: internalClient,
+		parser:     internal.NewParser(),
+		validator:  internal.NewValidator(),
+		auth:       &mockTokenProvider{token: "test_token"},
 	}
 
 	ctx := context.Background()
