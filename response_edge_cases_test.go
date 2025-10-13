@@ -294,7 +294,7 @@ func TestUnicodeAndSpecialCharacters(t *testing.T) {
 
 	// Verify unicode characters are preserved
 	if result.DisplayName != "unicode_test" {
-		t.Errorf("Expected '测试🚀', got: %s", result.DisplayName)
+		t.Errorf("Expected 'unicode_test', got: %s", result.DisplayName)
 	}
 
 	if !strings.Contains(result.Title, "üñïçødé") {
@@ -318,6 +318,7 @@ func TestResponseWithExtraFields(t *testing.T) {
 		responseWithExtras := map[string]interface{}{
 			"kind": "t5",
 			"data": map[string]interface{}{
+				"id":                 "test123",
 				"display_name":       "testsub",
 				"subscribers":        100000,
 				"created_utc":        1234567890.0,
@@ -416,6 +417,7 @@ func TestPartialResponse(t *testing.T) {
 		partialResponse := map[string]interface{}{
 			"kind": "t5",
 			"data": map[string]interface{}{
+				"id":                 "test123",
 				"display_name": "testsub",
 				// Missing subscribers, created_utc, etc.
 				"public_description": "A test subreddit",
