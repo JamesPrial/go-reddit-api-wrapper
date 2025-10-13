@@ -2,6 +2,7 @@ package graw
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
@@ -175,7 +176,7 @@ func TestRateLimitRecoveryPatterns(t *testing.T) {
 			ToThing()
 
 		// Write the Thing as JSON
-		w.Write(thing.Data)
+		json.NewEncoder(w).Encode(thing)
 	})
 
 	// Create client with rate limiting
@@ -274,7 +275,7 @@ func TestBurstCapacityHandling(t *testing.T) {
 			WithID("user123").
 			ToThing()
 
-		w.Write(thing.Data)
+		json.NewEncoder(w).Encode(thing)
 	})
 
 	// Create client with burst capacity
@@ -415,7 +416,7 @@ func TestMalformedRateLimitHeaders(t *testing.T) {
 			WithID("user123").
 			ToThing()
 
-		w.Write(thing.Data)
+		json.NewEncoder(w).Encode(thing)
 	})
 
 	// Create client
@@ -498,7 +499,7 @@ func TestConcurrentRateLimiting(t *testing.T) {
 			WithID("user123").
 			ToThing()
 
-		w.Write(thing.Data)
+		json.NewEncoder(w).Encode(thing)
 	})
 
 	// Create client with conservative rate limiting
@@ -634,7 +635,7 @@ func TestRateLimitEdgeCases(t *testing.T) {
 			WithID("user123").
 			ToThing()
 
-		w.Write(thing.Data)
+		json.NewEncoder(w).Encode(thing)
 	})
 
 	// Create client

@@ -2,6 +2,7 @@ package graw
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -56,7 +57,7 @@ func TestNetworkTimeoutRecovery(t *testing.T) {
 			ToThing()
 
 		// Write the response
-		w.Write(responseThing.Data)
+		json.NewEncoder(w).Encode(responseThing)
 	}))
 	defer server.Close()
 
@@ -256,7 +257,7 @@ func TestHTTP5xxErrorRecovery(t *testing.T) {
 			thing := testutil.NewSubreddit("testsub").
 				WithID("testsubid").
 				ToThing()
-			w.Write(thing.Data)
+			json.NewEncoder(w).Encode(thing)
 		}
 	}))
 	defer server.Close()
@@ -325,7 +326,7 @@ func TestHTTP429RateLimitRecovery(t *testing.T) {
 			thing := testutil.NewSubreddit("testsub").
 				WithID("testsubid").
 				ToThing()
-			w.Write(thing.Data)
+			json.NewEncoder(w).Encode(thing)
 		}
 	}))
 	defer server.Close()
@@ -400,7 +401,7 @@ func TestPartialResponseRecovery(t *testing.T) {
 			thing := testutil.NewSubreddit("testsub").
 				WithID("testsubid").
 				ToThing()
-			w.Write(thing.Data)
+			json.NewEncoder(w).Encode(thing)
 		}
 	}))
 	defer server.Close()
@@ -465,7 +466,7 @@ func TestIntermittentNetworkFailure(t *testing.T) {
 			thing := testutil.NewSubreddit("testsub").
 				WithID("testsubid").
 				ToThing()
-			w.Write(thing.Data)
+			json.NewEncoder(w).Encode(thing)
 		}
 	}))
 	defer server.Close()
@@ -542,7 +543,7 @@ func TestNetworkRecoveryWithRetry(t *testing.T) {
 			thing := testutil.NewSubreddit("testsub").
 				WithID("testsubid").
 				ToThing()
-			w.Write(thing.Data)
+			json.NewEncoder(w).Encode(thing)
 		}
 	}))
 	defer server.Close()
