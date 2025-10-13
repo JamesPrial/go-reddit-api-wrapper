@@ -204,7 +204,6 @@ func TestNullFieldsInResponse(t *testing.T) {
 
 // TestVeryLargeResponse tests handling of very large responses
 func TestVeryLargeResponse(t *testing.T) {
-	t.Skip("TODO: MockServer not returning posts - needs investigation")
 	t.Parallel()
 
 	// Create 100 posts with large content to test large response handling
@@ -212,7 +211,7 @@ func TestVeryLargeResponse(t *testing.T) {
 	posts := make([]*types.Post, 100)
 	for i := 0; i < 100; i++ {
 		posts[i] = testutil.NewPostBuilder().
-			WithID(fmt.Sprintf("post_%d", i)).
+			WithID(fmt.Sprintf("post%d", i)).
 			WithTitle(fmt.Sprintf("Very Long Title With Lots of Text to Make the Response Bigger %d", i)).
 			WithScore(i).
 			WithAuthor(fmt.Sprintf("user_%d", i)).
