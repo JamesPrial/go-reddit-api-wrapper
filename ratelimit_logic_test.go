@@ -49,8 +49,10 @@ func TestProactiveRateLimitingBehavior(t *testing.T) {
 		response := map[string]interface{}{
 			"kind": "t2",
 			"data": map[string]interface{}{
-				"id":   "user123",
-				"name": "testuser",
+				"id":          "user123",
+				"name":        "t2_testuser123",
+				"created":     1234567890.0,
+				"created_utc": 1234567890.0,
 			},
 		}
 		json.NewEncoder(w).Encode(response)
@@ -166,8 +168,10 @@ func TestRateLimitRecoveryPatterns(t *testing.T) {
 		response := map[string]interface{}{
 			"kind": "t2",
 			"data": map[string]interface{}{
-				"id":   "user123",
-				"name": "testuser",
+				"id":          "user123",
+				"name":        "t2_testuser123",
+				"created":     1234567890.0,
+				"created_utc": 1234567890.0,
 			},
 		}
 		json.NewEncoder(w).Encode(response)
@@ -259,8 +263,10 @@ func TestBurstCapacityHandling(t *testing.T) {
 		response := map[string]interface{}{
 			"kind": "t2",
 			"data": map[string]interface{}{
-				"id":   "user123",
-				"name": "testuser",
+				"id":          "user123",
+				"name":        "t2_testuser123",
+				"created":     1234567890.0,
+				"created_utc": 1234567890.0,
 			},
 		}
 		json.NewEncoder(w).Encode(response)
@@ -396,8 +402,10 @@ func TestMalformedRateLimitHeaders(t *testing.T) {
 		response := map[string]interface{}{
 			"kind": "t2",
 			"data": map[string]interface{}{
-				"id":   "user123",
-				"name": "testuser",
+				"id":          "user123",
+				"name":        "t2_testuser123",
+				"created":     1234567890.0,
+				"created_utc": 1234567890.0,
 			},
 		}
 		json.NewEncoder(w).Encode(response)
@@ -473,8 +481,10 @@ func TestConcurrentRateLimiting(t *testing.T) {
 		response := map[string]interface{}{
 			"kind": "t2",
 			"data": map[string]interface{}{
-				"id":   "user123",
-				"name": "testuser",
+				"id":          "user123",
+				"name":        "t2_testuser123",
+				"created":     1234567890.0,
+				"created_utc": 1234567890.0,
 			},
 		}
 		json.NewEncoder(w).Encode(response)
@@ -604,8 +614,10 @@ func TestRateLimitEdgeCases(t *testing.T) {
 		response := map[string]interface{}{
 			"kind": "t2",
 			"data": map[string]interface{}{
-				"id":   "user123",
-				"name": "testuser",
+				"id":          "user123",
+				"name":        "t2_testuser123",
+				"created":     1234567890.0,
+				"created_utc": 1234567890.0,
 			},
 		}
 		json.NewEncoder(w).Encode(response)

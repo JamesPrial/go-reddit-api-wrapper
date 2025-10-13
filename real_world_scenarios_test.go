@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -36,6 +37,7 @@ func TestRedditAPIClientUsage(t *testing.T) {
 			subredditData := map[string]interface{}{
 				"kind": "t5",
 				"data": map[string]interface{}{
+					"id":                 "testsub123",
 					"display_name":       "testsub",
 					"title":              "Test Subreddit",
 					"public_description": "A test subreddit for real-world scenarios",
@@ -55,7 +57,7 @@ func TestRedditAPIClientUsage(t *testing.T) {
 				posts[i] = map[string]interface{}{
 					"kind": "t3",
 					"data": map[string]interface{}{
-						"id":           fmt.Sprintf("t3_%d", i),
+						"id":           fmt.Sprintf("abc%d", i),
 						"title":        fmt.Sprintf("Real World Test Post %d", i),
 						"score":        100 + i*10,
 						"author":       fmt.Sprintf("user_%d", i),
@@ -76,7 +78,7 @@ func TestRedditAPIClientUsage(t *testing.T) {
 				"kind": "Listing",
 				"data": map[string]interface{}{
 					"children": posts,
-					"after":    "t3_next_page",
+					"after":    "",
 					"before":   "",
 				},
 			}
@@ -87,11 +89,12 @@ func TestRedditAPIClientUsage(t *testing.T) {
 			postData := map[string]interface{}{
 				"kind": "t3",
 				"data": map[string]interface{}{
-					"id":       "t3_main_post",
-					"title":    "Main Post for Comments",
-					"score":    1000,
-					"author":   "main_user",
-					"selftext": "This is the main post content",
+					"id":          "abc123",
+					"title":       "Main Post for Comments",
+					"score":       1000,
+					"author":      "mainuser",
+					"selftext":    "This is the main post content",
+					"created_utc": 1609459200.0,
 				},
 			}
 
@@ -226,7 +229,7 @@ func TestRedditAPIClientUsage(t *testing.T) {
 		// Get comments for a post
 		commentsResp, err := client.GetComments(ctx, &types.CommentsRequest{
 			Subreddit: "testsub",
-			PostID:    "main_post",
+			PostID:    "abc123",
 			Pagination: types.Pagination{
 				Limit: 25,
 			},
@@ -352,8 +355,10 @@ func TestErrorHandlingInRealWorld(t *testing.T) {
 			successData := map[string]interface{}{
 				"kind": "t5",
 				"data": map[string]interface{}{
+					"id":           "testsub123",
 					"display_name": "testsub",
 					"subscribers":  100000,
+					"created_utc":  1234567890.0,
 				},
 			}
 			json.NewEncoder(w).Encode(successData)
@@ -366,8 +371,10 @@ func TestErrorHandlingInRealWorld(t *testing.T) {
 			successData := map[string]interface{}{
 				"kind": "t5",
 				"data": map[string]interface{}{
+					"id":           "testsub123",
 					"display_name": "testsub",
 					"subscribers":  100000,
+					"created_utc":  1234567890.0,
 				},
 			}
 			json.NewEncoder(w).Encode(successData)
@@ -457,9 +464,11 @@ func TestConcurrentRealWorldUsage(t *testing.T) {
 			subredditData := map[string]interface{}{
 				"kind": "t5",
 				"data": map[string]interface{}{
+					"id":                 "testsub123",
 					"display_name":       "testsub",
 					"subscribers":        100000,
 					"public_description": "Test subreddit",
+					"created_utc":        1234567890.0,
 				},
 			}
 			json.NewEncoder(w).Encode(subredditData)
@@ -469,10 +478,11 @@ func TestConcurrentRealWorldUsage(t *testing.T) {
 				posts[i] = map[string]interface{}{
 					"kind": "t3",
 					"data": map[string]interface{}{
-						"id":     fmt.Sprintf("t3_%d", i),
-						"title":  fmt.Sprintf("Concurrent Test Post %d", i),
-						"score":  100 + i,
-						"author": fmt.Sprintf("user_%d", i),
+						"id":          fmt.Sprintf("def%d", i),
+						"title":       fmt.Sprintf("Concurrent Test Post %d", i),
+						"score":       100 + i,
+						"author":      fmt.Sprintf("user_%d", i),
+						"created_utc": 1609459200.0 + float64(i*3600),
 					},
 				}
 			}
@@ -539,9 +549,9 @@ func TestConcurrentRealWorldUsage(t *testing.T) {
 				}
 
 				if err != nil {
-					errorCount++
+					atomic.AddInt64(&errorCount, 1)
 				} else {
-					successCount++
+					atomic.AddInt64(&successCount, 1)
 				}
 			}
 		}(userID)
@@ -551,15 +561,17 @@ func TestConcurrentRealWorldUsage(t *testing.T) {
 	duration := time.Since(start)
 
 	totalRequests := numUsers * requestsPerUser
-	successRate := float64(successCount) / float64(totalRequests) * 100
+	finalSuccessCount := atomic.LoadInt64(&successCount)
+	finalErrorCount := atomic.LoadInt64(&errorCount)
+	successRate := float64(finalSuccessCount) / float64(totalRequests) * 100
 	requestsPerSecond := float64(totalRequests) / duration.Seconds()
 
 	t.Logf("Concurrent real world usage test completed:")
 	t.Logf("  Concurrent users: %d", numUsers)
 	t.Logf("  Requests per user: %d", requestsPerUser)
 	t.Logf("  Total requests: %d", totalRequests)
-	t.Logf("  Successful requests: %d", successCount)
-	t.Logf("  Failed requests: %d", errorCount)
+	t.Logf("  Successful requests: %d", finalSuccessCount)
+	t.Logf("  Failed requests: %d", finalErrorCount)
 	t.Logf("  Success rate: %.2f%%", successRate)
 	t.Logf("  Total duration: %v", duration)
 	t.Logf("  Requests per second: %.2f", requestsPerSecond)
@@ -593,7 +605,7 @@ func TestLongRunningOperations(t *testing.T) {
 			posts[i] = map[string]interface{}{
 				"kind": "t3",
 				"data": map[string]interface{}{
-					"id":           fmt.Sprintf("t3_%d", i),
+					"id":           fmt.Sprintf("xyz%d", i),
 					"title":        fmt.Sprintf("Long Running Test Post %d", i),
 					"score":        100 + i,
 					"author":       fmt.Sprintf("user_%d", i),
@@ -610,7 +622,7 @@ func TestLongRunningOperations(t *testing.T) {
 			"kind": "Listing",
 			"data": map[string]interface{}{
 				"children": posts,
-				"after":    "t3_next_page",
+				"after":    "",
 				"before":   "",
 			},
 		}

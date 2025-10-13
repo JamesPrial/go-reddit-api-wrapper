@@ -434,10 +434,14 @@ func TestContextResourceManagement(t *testing.T) {
 		}
 	}
 
+	mu.Lock()
+	finalRequestCount := requestCount
+	mu.Unlock()
+
 	t.Logf("Context resource management test:")
 	t.Logf("  Contexts created: %d", numContexts)
 	t.Logf("  Successful cancellations: %d", successfulCancellations)
-	t.Logf("  Total requests made: %d", requestCount)
+	t.Logf("  Total requests made: %d", finalRequestCount)
 
 	// Most contexts should have been cancelled
 	if successfulCancellations < numContexts/2 {

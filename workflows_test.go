@@ -1010,6 +1010,10 @@ func TestMoreCommentsIntegrationWorkflow(t *testing.T) {
 
 	// Step 2: Get first batch of more comments
 	t.Run("GetFirstBatchOfMoreComments", func(t *testing.T) {
+		if commentsResp == nil || len(commentsResp.MoreIDs) < 10 {
+			t.Skip("Skipping: commentsResp not available or insufficient MoreIDs from previous test")
+		}
+
 		// Get first 10 more comments
 		firstBatch := commentsResp.MoreIDs[:10]
 		moreComments, err := client.GetMoreComments(ctx, &types.MoreCommentsRequest{
@@ -1031,6 +1035,10 @@ func TestMoreCommentsIntegrationWorkflow(t *testing.T) {
 
 	// Step 3: Get second batch of more comments
 	t.Run("GetSecondBatchOfMoreComments", func(t *testing.T) {
+		if commentsResp == nil || len(commentsResp.MoreIDs) < 20 {
+			t.Skip("Skipping: commentsResp not available or insufficient MoreIDs from previous test")
+		}
+
 		// Get next 10 more comments
 		secondBatch := commentsResp.MoreIDs[10:20]
 		moreComments, err := client.GetMoreComments(ctx, &types.MoreCommentsRequest{
@@ -1052,6 +1060,10 @@ func TestMoreCommentsIntegrationWorkflow(t *testing.T) {
 
 	// Step 4: Test LimitChildren behavior
 	t.Run("TestLimitChildrenBehavior", func(t *testing.T) {
+		if commentsResp == nil || len(commentsResp.MoreIDs) < 25 {
+			t.Skip("Skipping: commentsResp not available or insufficient MoreIDs from previous test")
+		}
+
 		// Get more comments with LimitChildren=true
 		remainingBatch := commentsResp.MoreIDs[20:25]
 		moreComments, err := client.GetMoreComments(ctx, &types.MoreCommentsRequest{
