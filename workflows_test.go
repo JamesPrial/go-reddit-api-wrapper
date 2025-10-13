@@ -26,16 +26,20 @@ func TestCompletePostBrowsingWorkflow(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 
 		switch {
-		case strings.Contains(r.URL.Path, "/r/golang/about.json"):
+		case strings.Contains(r.URL.Path, "/r/golang/about"):
 			// Subreddit info
 			subredditData := map[string]interface{}{
 				"kind": "t5",
 				"data": map[string]interface{}{
+					"id":                  "testsub1",
+					"name":                "t5_testsub1",
 					"display_name":        "golang",
 					"title":               "The Go Programming Language",
 					"public_description":  "Go discussions",
 					"subscribers":         500000,
 					"active_user_count":   2500,
+					"created":             1609459200.0,
+					"created_utc":         1609459200.0,
 					"over18":              false,
 					"user_is_banned":      false,
 					"user_is_moderator":   false,
@@ -45,7 +49,7 @@ func TestCompletePostBrowsingWorkflow(t *testing.T) {
 			}
 			json.NewEncoder(w).Encode(subredditData)
 
-		case strings.Contains(r.URL.Path, "/r/golang/hot.json"):
+		case strings.Contains(r.URL.Path, "/r/golang/hot"):
 			// Hot posts with pagination
 			after := r.URL.Query().Get("after")
 			limit := r.URL.Query().Get("limit")
@@ -57,35 +61,47 @@ func TestCompletePostBrowsingWorkflow(t *testing.T) {
 			posts := make([]map[string]interface{}, 0)
 			if after == "" {
 				// First page
-				for i := 1; i <= 5; i++ {
+				for i := 0; i < 5; i++ {
+					score := 100 + i*10
 					posts = append(posts, map[string]interface{}{
 						"kind": "t3",
 						"data": map[string]interface{}{
 							"id":           "post" + string(rune('a'+i)),
+							"name":         "t3_post" + string(rune('a'+i)),
 							"title":        "Test Post " + string(rune('A'+i)),
-							"score":        100 + i*10,
+							"score":        score,
+							"ups":          score,
+							"downs":        0,
 							"author":       "user" + string(rune('1'+i)),
 							"subreddit":    "golang",
+							"created":      1609459200.0 + float64(i*3600),
 							"created_utc":  1609459200.0 + float64(i*3600),
 							"num_comments": 5 + i,
 							"permalink":    "/r/golang/comments/post" + string(rune('a'+i)) + "/test_post_" + string(rune('A'+i)) + "/",
+							"url":          "https://www.reddit.com/r/golang/comments/post" + string(rune('a'+i)) + "/test_post_" + string(rune('A'+i)) + "/",
 						},
 					})
 				}
 			} else {
 				// Second page
-				for i := 6; i <= 8; i++ {
+				for i := 5; i < 8; i++ {
+					score := 100 + i*10
 					posts = append(posts, map[string]interface{}{
 						"kind": "t3",
 						"data": map[string]interface{}{
 							"id":           "post" + string(rune('a'+i)),
+							"name":         "t3_post" + string(rune('a'+i)),
 							"title":        "Test Post " + string(rune('A'+i)),
-							"score":        100 + i*10,
+							"score":        score,
+							"ups":          score,
+							"downs":        0,
 							"author":       "user" + string(rune('1'+i)),
 							"subreddit":    "golang",
+							"created":      1609459200.0 + float64(i*3600),
 							"created_utc":  1609459200.0 + float64(i*3600),
 							"num_comments": 5 + i,
 							"permalink":    "/r/golang/comments/post" + string(rune('a'+i)) + "/test_post_" + string(rune('A'+i)) + "/",
+							"url":          "https://www.reddit.com/r/golang/comments/post" + string(rune('a'+i)) + "/test_post_" + string(rune('A'+i)) + "/",
 						},
 					})
 				}
@@ -211,8 +227,8 @@ func TestCompletePostBrowsingWorkflow(t *testing.T) {
 
 	// Step 4: Verify workflow completion
 	t.Run("WorkflowCompletion", func(t *testing.T) {
-		if requestCount < 4 {
-			t.Errorf("Expected at least 4 requests (subreddit + 3 post pages), got %d", requestCount)
+		if requestCount < 3 {
+			t.Errorf("Expected at least 3 requests (subreddit + 2 post pages), got %d", requestCount)
 		}
 
 		t.Logf("Workflow completed successfully with %d requests", requestCount)
@@ -230,17 +246,24 @@ func TestCommentTreeNavigationWorkflow(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 
 		switch {
-		case strings.Contains(r.URL.Path, "/r/golang/comments/post1.json"):
+		case strings.Contains(r.URL.Path, "/r/golang/comments/post1"):
 			// Post and initial comments
 			postData := map[string]interface{}{
 				"kind": "t3",
 				"data": map[string]interface{}{
 					"id":           "post1",
+					"name":         "t3_post1",
 					"title":        "Test Post for Comments",
 					"author":       "testuser",
 					"subreddit":    "golang",
+					"score":        100,
+					"ups":          100,
+					"downs":        0,
+					"created":      1609459200.0,
+					"created_utc":  1609459200.0,
 					"num_comments": 10,
 					"permalink":    "/r/golang/comments/post1/test_post/",
+					"url":          "https://www.reddit.com/r/golang/comments/post1/test_post/",
 				},
 			}
 
@@ -249,12 +272,18 @@ func TestCommentTreeNavigationWorkflow(t *testing.T) {
 				{
 					"kind": "t1",
 					"data": map[string]interface{}{
-						"id":        "comment1",
-						"author":    "user1",
-						"body":      "This is a top-level comment",
-						"score":     10,
-						"link_id":   "t3_post1",
-						"parent_id": "t3_post1",
+						"id":          "comment1",
+						"name":        "t1_comment1",
+						"author":      "user1",
+						"body":        "This is a top-level comment",
+						"score":       10,
+						"ups":         10,
+						"downs":       0,
+						"link_id":     "t3_post1",
+						"parent_id":   "t3_post1",
+						"subreddit":   "golang",
+						"created":     1609459200.0,
+						"created_utc": 1609459200.0,
 						"replies": map[string]interface{}{
 							"kind": "Listing",
 							"data": map[string]interface{}{
@@ -262,13 +291,19 @@ func TestCommentTreeNavigationWorkflow(t *testing.T) {
 									{
 										"kind": "t1",
 										"data": map[string]interface{}{
-											"id":        "comment2",
-											"author":    "user2",
-											"body":      "This is a reply",
-											"score":     5,
-											"link_id":   "t3_post1",
-											"parent_id": "t1_comment1",
-											"replies":   map[string]interface{}{"kind": "Listing", "data": map[string]interface{}{"children": []interface{}{}}},
+											"id":          "comment2",
+											"name":        "t1_comment2",
+											"author":      "user2",
+											"body":        "This is a reply",
+											"score":       5,
+											"ups":         5,
+											"downs":       0,
+											"link_id":     "t3_post1",
+											"parent_id":   "t1_comment1",
+											"subreddit":   "golang",
+											"created":     1609459200.0,
+											"created_utc": 1609459200.0,
+											"replies":     map[string]interface{}{"kind": "Listing", "data": map[string]interface{}{"children": []interface{}{}}},
 										},
 									},
 								},
@@ -279,12 +314,18 @@ func TestCommentTreeNavigationWorkflow(t *testing.T) {
 				{
 					"kind": "t1",
 					"data": map[string]interface{}{
-						"id":        "comment3",
-						"author":    "user3",
-						"body":      "Another top-level comment",
-						"score":     8,
-						"link_id":   "t3_post1",
-						"parent_id": "t3_post1",
+						"id":          "comment3",
+						"name":        "t1_comment3",
+						"author":      "user3",
+						"body":        "Another top-level comment",
+						"score":       8,
+						"ups":         8,
+						"downs":       0,
+						"link_id":     "t3_post1",
+						"parent_id":   "t3_post1",
+						"subreddit":   "golang",
+						"created":     1609459200.0,
+						"created_utc": 1609459200.0,
 						"replies": map[string]interface{}{
 							"kind": "Listing",
 							"data": map[string]interface{}{
@@ -341,13 +382,19 @@ func TestCommentTreeNavigationWorkflow(t *testing.T) {
 				things = append(things, map[string]interface{}{
 					"kind": "t1",
 					"data": map[string]interface{}{
-						"id":        id,
-						"author":    "user" + id[len(id)-1:],
-						"body":      "This is a more comment: " + id,
-						"score":     3,
-						"link_id":   "t3_post1",
-						"parent_id": "t1_comment3",
-						"replies":   map[string]interface{}{"kind": "Listing", "data": map[string]interface{}{"children": []interface{}{}}},
+						"id":          id,
+						"name":        "t1_" + id,
+						"author":      "user" + id[len(id)-1:],
+						"body":        "This is a more comment: " + id,
+						"score":       3,
+						"ups":         3,
+						"downs":       0,
+						"link_id":     "t3_post1",
+						"parent_id":   "t1_comment3",
+						"subreddit":   "golang",
+						"created":     1609459200.0,
+						"created_utc": 1609459200.0,
+						"replies":     map[string]interface{}{"kind": "Listing", "data": map[string]interface{}{"children": []interface{}{}}},
 					},
 				})
 			}
@@ -473,31 +520,43 @@ func TestSubredditDiscoveryWorkflow(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 
 		switch {
-		case strings.Contains(r.URL.Path, "/r/golang/about.json"):
+		case strings.Contains(r.URL.Path, "/r/golang/about"):
 			// First subreddit
 			subredditData := map[string]interface{}{
 				"kind": "t5",
 				"data": map[string]interface{}{
+					"id":                 "golang123",
+					"name":               "t5_golang123",
 					"display_name":       "golang",
 					"title":              "The Go Programming Language",
 					"public_description": "Go discussions and news",
 					"subscribers":        500000,
 					"active_user_count":  2500,
+					"created":            1609459200.0,
+					"created_utc":        1609459200.0,
 					"over18":             false,
 				},
 			}
 			json.NewEncoder(w).Encode(subredditData)
 
-		case strings.Contains(r.URL.Path, "/r/golang/hot.json"):
+		case strings.Contains(r.URL.Path, "/r/golang/hot"):
 			// Hot posts from golang
 			posts := []map[string]interface{}{
 				{
 					"kind": "t3",
 					"data": map[string]interface{}{
-						"id":        "post1",
-						"title":     "Go 1.20 Released",
-						"subreddit": "golang",
-						"score":     1500,
+						"id":          "post1",
+						"name":        "t3_post1",
+						"title":       "Go 1.20 Released",
+						"author":      "testuser",
+						"subreddit":   "golang",
+						"score":       1500,
+						"ups":         1500,
+						"downs":       0,
+						"created":     1609459200.0,
+						"created_utc": 1609459200.0,
+						"permalink":   "/r/golang/comments/post1/go_release/",
+						"url":         "https://www.reddit.com/r/golang/comments/post1/go_release/",
 					},
 				},
 			}
@@ -509,31 +568,43 @@ func TestSubredditDiscoveryWorkflow(t *testing.T) {
 			}
 			json.NewEncoder(w).Encode(listingData)
 
-		case strings.Contains(r.URL.Path, "/r/rust/about.json"):
+		case strings.Contains(r.URL.Path, "/r/rust/about"):
 			// Second subreddit
 			subredditData := map[string]interface{}{
 				"kind": "t5",
 				"data": map[string]interface{}{
+					"id":                 "rust123",
+					"name":               "t5_rust123",
 					"display_name":       "rust",
 					"title":              "Rust Programming Language",
 					"public_description": "Rust discussions and questions",
 					"subscribers":        300000,
 					"active_user_count":  1800,
+					"created":            1609459200.0,
+					"created_utc":        1609459200.0,
 					"over18":             false,
 				},
 			}
 			json.NewEncoder(w).Encode(subredditData)
 
-		case strings.Contains(r.URL.Path, "/r/rust/hot.json"):
+		case strings.Contains(r.URL.Path, "/r/rust/hot"):
 			// Hot posts from rust
 			posts := []map[string]interface{}{
 				{
 					"kind": "t3",
 					"data": map[string]interface{}{
-						"id":        "post2",
-						"title":     "Rust 2023 Roadmap",
-						"subreddit": "rust",
-						"score":     800,
+						"id":          "post2",
+						"name":        "t3_post2",
+						"title":       "Rust 2023 Roadmap",
+						"author":      "rustuser",
+						"subreddit":   "rust",
+						"score":       800,
+						"ups":         800,
+						"downs":       0,
+						"created":     1609459200.0,
+						"created_utc": 1609459200.0,
+						"permalink":   "/r/rust/comments/post2/rust_roadmap/",
+						"url":         "https://www.reddit.com/r/rust/comments/post2/rust_roadmap/",
 					},
 				},
 			}
@@ -634,39 +705,57 @@ func TestUserActivityWorkflow(t *testing.T) {
 
 		switch {
 		case strings.Contains(r.URL.Path, "/api/v1/me"):
-			// Current user info
+			// Current user info - return wrapped in Thing structure
 			userData := map[string]interface{}{
-				"id":                 "user123",
-				"name":               "testuser",
-				"link_karma":         5000,
-				"comment_karma":      3000,
-				"created_utc":        1609459200.0,
-				"verified":           true,
-				"has_verified_email": true,
+				"kind": "t2",
+				"data": map[string]interface{}{
+					"id":                 "user123",
+					"name":               "t2_user123",
+					"link_karma":         5000,
+					"comment_karma":      3000,
+					"created":            1609459200.0,
+					"created_utc":        1609459200.0,
+					"verified":           true,
+					"has_verified_email": true,
+				},
 			}
 			json.NewEncoder(w).Encode(userData)
 
-		case strings.Contains(r.URL.Path, "/user/testuser/submitted.json"):
+		case strings.Contains(r.URL.Path, "/user/testuser/submitted"):
 			// User's posts
 			posts := []map[string]interface{}{
 				{
 					"kind": "t3",
 					"data": map[string]interface{}{
-						"id":        "userpost1",
-						"title":     "My Go Project",
-						"author":    "testuser",
-						"subreddit": "golang",
-						"score":     50,
+						"id":          "userpost1",
+						"name":        "t3_userpost1",
+						"title":       "My Go Project",
+						"author":      "testuser",
+						"subreddit":   "golang",
+						"score":       50,
+						"ups":         50,
+						"downs":       0,
+						"created":     1609459200.0,
+						"created_utc": 1609459200.0,
+						"permalink":   "/r/golang/comments/userpost1/my_go_project/",
+						"url":         "https://www.reddit.com/r/golang/comments/userpost1/my_go_project/",
 					},
 				},
 				{
 					"kind": "t3",
 					"data": map[string]interface{}{
-						"id":        "userpost2",
-						"title":     "Rust vs Go",
-						"author":    "testuser",
-						"subreddit": "rust",
-						"score":     25,
+						"id":          "userpost2",
+						"name":        "t3_userpost2",
+						"title":       "Rust vs Go",
+						"author":      "testuser",
+						"subreddit":   "rust",
+						"score":       25,
+						"ups":         25,
+						"downs":       0,
+						"created":     1609459200.0,
+						"created_utc": 1609459200.0,
+						"permalink":   "/r/rust/comments/userpost2/rust_vs_go/",
+						"url":         "https://www.reddit.com/r/rust/comments/userpost2/rust_vs_go/",
 					},
 				},
 			}
@@ -678,27 +767,41 @@ func TestUserActivityWorkflow(t *testing.T) {
 			}
 			json.NewEncoder(w).Encode(listingData)
 
-		case strings.Contains(r.URL.Path, "/user/testuser/comments.json"):
+		case strings.Contains(r.URL.Path, "/user/testuser/comments"):
 			// User's comments
 			comments := []map[string]interface{}{
 				{
 					"kind": "t1",
 					"data": map[string]interface{}{
-						"id":        "usercomment1",
-						"body":      "Great explanation!",
-						"author":    "testuser",
-						"subreddit": "golang",
-						"score":     10,
+						"id":          "usercomment1",
+						"name":        "t1_usercomment1",
+						"body":        "Great explanation!",
+						"author":      "testuser",
+						"subreddit":   "golang",
+						"score":       10,
+						"ups":         10,
+						"downs":       0,
+						"created":     1609459200.0,
+						"created_utc": 1609459200.0,
+						"link_id":     "t3_somepost",
+						"parent_id":   "t3_somepost",
 					},
 				},
 				{
 					"kind": "t1",
 					"data": map[string]interface{}{
-						"id":        "usercomment2",
-						"body":      "I disagree with this approach",
-						"author":    "testuser",
-						"subreddit": "programming",
-						"score":     5,
+						"id":          "usercomment2",
+						"name":        "t1_usercomment2",
+						"body":        "I disagree with this approach",
+						"author":      "testuser",
+						"subreddit":   "programming",
+						"score":       5,
+						"ups":         5,
+						"downs":       0,
+						"created":     1609459200.0,
+						"created_utc": 1609459200.0,
+						"link_id":     "t3_anotherpost",
+						"parent_id":   "t3_anotherpost",
 					},
 				},
 			}
@@ -709,6 +812,110 @@ func TestUserActivityWorkflow(t *testing.T) {
 				},
 			}
 			json.NewEncoder(w).Encode(listingData)
+
+		case strings.Contains(r.URL.Path, "/r/testuser/hot"):
+			// User's posts as subreddit (for GetHot call)
+			posts := []map[string]interface{}{
+				{
+					"kind": "t3",
+					"data": map[string]interface{}{
+						"id":          "userpost1",
+						"name":        "t3_userpost1",
+						"title":       "My Go Project",
+						"author":      "testuser",
+						"subreddit":   "golang",
+						"score":       50,
+						"ups":         50,
+						"downs":       0,
+						"created":     1609459200.0,
+						"created_utc": 1609459200.0,
+						"permalink":   "/r/golang/comments/userpost1/my_go_project/",
+						"url":         "https://www.reddit.com/r/golang/comments/userpost1/my_go_project/",
+					},
+				},
+				{
+					"kind": "t3",
+					"data": map[string]interface{}{
+						"id":          "userpost2",
+						"name":        "t3_userpost2",
+						"title":       "Rust vs Go",
+						"author":      "testuser",
+						"subreddit":   "rust",
+						"score":       25,
+						"ups":         25,
+						"downs":       0,
+						"created":     1609459200.0,
+						"created_utc": 1609459200.0,
+						"permalink":   "/r/rust/comments/userpost2/rust_vs_go/",
+						"url":         "https://www.reddit.com/r/rust/comments/userpost2/rust_vs_go/",
+					},
+				},
+			}
+			listingData := map[string]interface{}{
+				"kind": "Listing",
+				"data": map[string]interface{}{
+					"children": posts,
+				},
+			}
+			json.NewEncoder(w).Encode(listingData)
+
+		case strings.Contains(r.URL.Path, "/r/testuser/comments/userpost1"):
+			// User post comments (for GetComments call)
+			postData := map[string]interface{}{
+				"kind": "t3",
+				"data": map[string]interface{}{
+					"id":          "userpost1",
+					"name":        "t3_userpost1",
+					"title":       "My Go Project",
+					"author":      "testuser",
+					"subreddit":   "golang",
+					"score":       50,
+					"ups":         50,
+					"downs":       0,
+					"created":     1609459200.0,
+					"created_utc": 1609459200.0,
+					"permalink":   "/r/golang/comments/userpost1/my_go_project/",
+					"url":         "https://www.reddit.com/r/golang/comments/userpost1/my_go_project/",
+				},
+			}
+
+			comments := []map[string]interface{}{
+				{
+					"kind": "t1",
+					"data": map[string]interface{}{
+						"id":          "c1",
+						"name":        "t1_c1",
+						"body":        "Great project!",
+						"author":      "commenter1",
+						"subreddit":   "golang",
+						"score":       5,
+						"ups":         5,
+						"downs":       0,
+						"created":     1609459200.0,
+						"created_utc": 1609459200.0,
+						"link_id":     "t3_userpost1",
+						"parent_id":   "t3_userpost1",
+						"replies":     map[string]interface{}{"kind": "Listing", "data": map[string]interface{}{"children": []interface{}{}}},
+					},
+				},
+			}
+
+			postListing := map[string]interface{}{
+				"kind": "Listing",
+				"data": map[string]interface{}{
+					"children": []interface{}{postData},
+				},
+			}
+
+			commentsListing := map[string]interface{}{
+				"kind": "Listing",
+				"data": map[string]interface{}{
+					"children": comments,
+				},
+			}
+
+			response := []interface{}{postListing, commentsListing}
+			json.NewEncoder(w).Encode(response)
 
 		default:
 			w.WriteHeader(http.StatusNotFound)
@@ -740,8 +947,8 @@ func TestUserActivityWorkflow(t *testing.T) {
 			t.Fatalf("Failed to get user info: %v", err)
 		}
 
-		if account.Name != "testuser" {
-			t.Errorf("Expected username 'testuser', got '%s'", account.Name)
+		if account.Name != "t2_user123" {
+			t.Errorf("Expected username 't2_user123', got '%s'", account.Name)
 		}
 
 		if account.LinkKarma != 5000 {
@@ -820,16 +1027,24 @@ func TestMoreCommentsIntegrationWorkflow(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 
 		switch {
-		case strings.Contains(r.URL.Path, "/r/golang/comments/post1.json"):
+		case strings.Contains(r.URL.Path, "/r/golang/comments/post1"):
 			// Post with many comments and "more" placeholders
 			postData := map[string]interface{}{
 				"kind": "t3",
 				"data": map[string]interface{}{
 					"id":           "post1",
+					"name":         "t3_post1",
 					"title":        "Post with Many Comments",
 					"author":       "testuser",
 					"subreddit":    "golang",
+					"score":        100,
+					"ups":          100,
+					"downs":        0,
+					"created":      1609459200.0,
+					"created_utc":  1609459200.0,
 					"num_comments": 100,
+					"permalink":    "/r/golang/comments/post1/post_with_many_comments/",
+					"url":          "https://www.reddit.com/r/golang/comments/post1/post_with_many_comments/",
 				},
 			}
 
@@ -838,12 +1053,18 @@ func TestMoreCommentsIntegrationWorkflow(t *testing.T) {
 				{
 					"kind": "t1",
 					"data": map[string]interface{}{
-						"id":        "comment1",
-						"author":    "user1",
-						"body":      "First comment",
-						"score":     10,
-						"link_id":   "t3_post1",
-						"parent_id": "t3_post1",
+						"id":          "comment1",
+						"name":        "t1_comment1",
+						"author":      "user1",
+						"body":        "First comment",
+						"score":       10,
+						"ups":         10,
+						"downs":       0,
+						"link_id":     "t3_post1",
+						"parent_id":   "t3_post1",
+						"subreddit":   "golang",
+						"created":     1609459200.0,
+						"created_utc": 1609459200.0,
 						"replies": map[string]interface{}{
 							"kind": "Listing",
 							"data": map[string]interface{}{
@@ -869,12 +1090,18 @@ func TestMoreCommentsIntegrationWorkflow(t *testing.T) {
 				{
 					"kind": "t1",
 					"data": map[string]interface{}{
-						"id":        "comment2",
-						"author":    "user2",
-						"body":      "Second comment",
-						"score":     8,
-						"link_id":   "t3_post1",
-						"parent_id": "t3_post1",
+						"id":          "comment2",
+						"name":        "t1_comment2",
+						"author":      "user2",
+						"body":        "Second comment",
+						"score":       8,
+						"ups":         8,
+						"downs":       0,
+						"link_id":     "t3_post1",
+						"parent_id":   "t3_post1",
+						"subreddit":   "golang",
+						"created":     1609459200.0,
+						"created_utc": 1609459200.0,
 						"replies": map[string]interface{}{
 							"kind": "Listing",
 							"data": map[string]interface{}{
@@ -937,13 +1164,19 @@ func TestMoreCommentsIntegrationWorkflow(t *testing.T) {
 				things = append(things, map[string]interface{}{
 					"kind": "t1",
 					"data": map[string]interface{}{
-						"id":        id,
-						"author":    "user" + id[len(id)-1:],
-						"body":      "More comment content: " + id,
-						"score":     3,
-						"link_id":   "t3_post1",
-						"parent_id": "t1_comment1",
-						"replies":   map[string]interface{}{"kind": "Listing", "data": map[string]interface{}{"children": []interface{}{}}},
+						"id":          id,
+						"name":        "t1_" + id,
+						"author":      "user" + id[len(id)-1:],
+						"body":        "More comment content: " + id,
+						"score":       3,
+						"ups":         3,
+						"downs":       0,
+						"link_id":     "t3_post1",
+						"parent_id":   "t1_comment1",
+						"subreddit":   "golang",
+						"created":     1609459200.0,
+						"created_utc": 1609459200.0,
+						"replies":     map[string]interface{}{"kind": "Listing", "data": map[string]interface{}{"children": []interface{}{}}},
 					},
 				})
 			}
