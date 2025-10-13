@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jamesprial/go-reddit-api-wrapper/internal/testutil"
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 )
 
@@ -42,9 +43,7 @@ func getTestClient(t *testing.T) *Reddit {
 	}
 
 	client, err := NewClient(config)
-	if err != nil {
-		t.Fatalf("Failed to create httpClient: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	return client
 }
@@ -53,7 +52,6 @@ func TestIntegration_GetHot(t *testing.T) {
 	client := getTestClient(t)
 	ctx := context.Background()
 
-	// Test getting hot posts from r/golang
 	resp, err := client.GetHot(ctx, &types.PostsRequest{
 		Subreddit: "golang",
 		Pagination: types.Pagination{
@@ -61,9 +59,7 @@ func TestIntegration_GetHot(t *testing.T) {
 		},
 	})
 
-	if err != nil {
-		t.Fatalf("GetHot failed: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	if len(resp.Posts) == 0 {
 		t.Error("Expected at least 1 post, got 0")
@@ -95,9 +91,7 @@ func TestIntegration_GetComments(t *testing.T) {
 		},
 	})
 
-	if err != nil {
-		t.Fatalf("GetHot failed: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	if len(postsResp.Posts) == 0 {
 		t.Skip("No posts available to test comments")
@@ -114,9 +108,7 @@ func TestIntegration_GetComments(t *testing.T) {
 		},
 	})
 
-	if err != nil {
-		t.Fatalf("GetComments failed: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	if commentsResp.Post == nil {
 		t.Error("Expected post in response, got nil")
@@ -172,9 +164,7 @@ func TestIntegration_GetMoreComments(t *testing.T) {
 		},
 	})
 
-	if err != nil {
-		t.Fatalf("GetHot failed: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	if len(postsResp.Posts) == 0 {
 		t.Skip("No posts available to test more comments")
@@ -191,9 +181,7 @@ func TestIntegration_GetMoreComments(t *testing.T) {
 		},
 	})
 
-	if err != nil {
-		t.Fatalf("GetComments failed: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	// If there are more comment IDs, try to fetch them
 	if len(commentsResp.MoreIDs) == 0 {
@@ -201,7 +189,7 @@ func TestIntegration_GetMoreComments(t *testing.T) {
 	}
 
 	// Test with LimitChildren parameter variations
-	testCases := []struct {
+	tests := []struct {
 		name          string
 		limitChildren bool
 		maxIDs        int
@@ -210,7 +198,7 @@ func TestIntegration_GetMoreComments(t *testing.T) {
 		{"with limit", true, 10},
 	}
 
-	for _, tc := range testCases {
+	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Take a subset of more IDs
 			moreIDs := commentsResp.MoreIDs
@@ -225,9 +213,7 @@ func TestIntegration_GetMoreComments(t *testing.T) {
 				LimitChildren: tc.limitChildren,
 			})
 
-			if err != nil {
-				t.Fatalf("GetMoreComments failed: %v", err)
-			}
+			testutil.AssertNoError(t, err)
 
 			t.Logf("Fetched %d more comments with LimitChildren=%v", len(moreComments), tc.limitChildren)
 
@@ -246,9 +232,7 @@ func TestIntegration_GetSubreddit(t *testing.T) {
 	ctx := context.Background()
 
 	subreddit, err := client.GetSubreddit(ctx, "golang")
-	if err != nil {
-		t.Fatalf("GetSubreddit failed: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	if subreddit.DisplayName != "golang" {
 		t.Errorf("Expected DisplayName 'golang', got '%s'", subreddit.DisplayName)
@@ -274,9 +258,7 @@ func TestIntegration_RateLimiting(t *testing.T) {
 			},
 		})
 
-		if err != nil {
-			t.Fatalf("Request %d failed: %v", i, err)
-		}
+		testutil.AssertNoError(t, err)
 
 		elapsed := time.Since(start)
 		t.Logf("Request %d completed in %v", i, elapsed)
@@ -309,8 +291,6 @@ func TestIntegration_ErrorHandling(t *testing.T) {
 			},
 		})
 
-		if err == nil {
-			t.Error("Expected error for invalid post ID, got nil")
-		}
+		testutil.AssertError(t, err)
 	})
 }
