@@ -3,6 +3,7 @@ package graw
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -333,6 +334,8 @@ func TestCommentTreeNavigationWorkflow(t *testing.T) {
 									{
 										"kind": "more",
 										"data": map[string]interface{}{
+											"id":       "more1",
+											"name":     "t4_more1",
 											"count":    5,
 											"children": []string{"comment4", "comment5", "comment6", "comment7", "comment8"},
 										},
@@ -361,14 +364,16 @@ func TestCommentTreeNavigationWorkflow(t *testing.T) {
 			response := []interface{}{postListing, commentsListing}
 			json.NewEncoder(w).Encode(response)
 
-		case strings.Contains(r.URL.Path, "/api/morechildren.json"):
+		case strings.Contains(r.URL.Path, "/api/morechildren"):
 			// More comments endpoint
 			if err := r.ParseForm(); err != nil {
 				w.WriteHeader(http.StatusBadRequest)
 				return
 			}
 
-			commentIDs := r.Form["children"]
+			// children is sent as a comma-separated string, need to split it
+			childrenStr := r.Form.Get("children")
+			commentIDs := strings.Split(childrenStr, ",")
 			linkID := r.Form.Get("link_id")
 
 			if linkID != "t3_post1" {
@@ -379,22 +384,25 @@ func TestCommentTreeNavigationWorkflow(t *testing.T) {
 			// Return the requested more comments
 			things := make([]map[string]interface{}, 0)
 			for _, id := range commentIDs {
+				bodyText := "This is a more comment: " + id
 				things = append(things, map[string]interface{}{
 					"kind": "t1",
 					"data": map[string]interface{}{
-						"id":          id,
-						"name":        "t1_" + id,
-						"author":      "user" + id[len(id)-1:],
-						"body":        "This is a more comment: " + id,
-						"score":       3,
-						"ups":         3,
-						"downs":       0,
-						"link_id":     "t3_post1",
-						"parent_id":   "t1_comment3",
-						"subreddit":   "golang",
-						"created":     1609459200.0,
-						"created_utc": 1609459200.0,
-						"replies":     map[string]interface{}{"kind": "Listing", "data": map[string]interface{}{"children": []interface{}{}}},
+						"id":           id,
+						"name":         "t1_" + id,
+						"author":       "user" + id[len(id)-1:],
+						"body":         bodyText,
+						"body_html":    "<div class=\"md\"><p>" + bodyText + "</p></div>",
+						"subreddit_id": "t5_golang123",
+						"score":        3,
+						"ups":          3,
+						"downs":        0,
+						"link_id":      "t3_post1",
+						"parent_id":    "t1_comment3",
+						"subreddit":    "golang",
+						"created":      1609459200.0,
+						"created_utc":  1609459200.0,
+						"replies":      map[string]interface{}{"kind": "Listing", "data": map[string]interface{}{"children": []interface{}{}}},
 					},
 				})
 			}
@@ -1072,6 +1080,8 @@ func TestMoreCommentsIntegrationWorkflow(t *testing.T) {
 									{
 										"kind": "more",
 										"data": map[string]interface{}{
+											"id":    "morebatch1",
+											"name":  "t4_morebatch1",
 											"count": 20,
 											"children": func() []string {
 												ids := make([]string, 20)
@@ -1109,11 +1119,14 @@ func TestMoreCommentsIntegrationWorkflow(t *testing.T) {
 									{
 										"kind": "more",
 										"data": map[string]interface{}{
+											"id":    "morebatch2",
+											"name":  "t4_morebatch2",
 											"count": 30,
 											"children": func() []string {
 												ids := make([]string, 30)
 												for i := 0; i < 30; i++ {
-													ids[i] = "comment" + string(rune('a'+i+22))
+													// Use numbers to avoid going past 'z'
+													ids[i] = fmt.Sprintf("c%d", i+100)
 												}
 												return ids
 											}(),
@@ -1143,14 +1156,16 @@ func TestMoreCommentsIntegrationWorkflow(t *testing.T) {
 			response := []interface{}{postListing, commentsListing}
 			json.NewEncoder(w).Encode(response)
 
-		case strings.Contains(r.URL.Path, "/api/morechildren.json"):
+		case strings.Contains(r.URL.Path, "/api/morechildren"):
 			// More comments endpoint
 			if err := r.ParseForm(); err != nil {
 				w.WriteHeader(http.StatusBadRequest)
 				return
 			}
 
-			commentIDs := r.Form["children"]
+			// children is sent as a comma-separated string, need to split it
+			childrenStr := r.Form.Get("children")
+			commentIDs := strings.Split(childrenStr, ",")
 			linkID := r.Form.Get("link_id")
 
 			if linkID != "t3_post1" {
@@ -1161,22 +1176,25 @@ func TestMoreCommentsIntegrationWorkflow(t *testing.T) {
 			// Return the requested more comments
 			things := make([]map[string]interface{}, 0)
 			for _, id := range commentIDs {
+				bodyText := "More comment content: " + id
 				things = append(things, map[string]interface{}{
 					"kind": "t1",
 					"data": map[string]interface{}{
-						"id":          id,
-						"name":        "t1_" + id,
-						"author":      "user" + id[len(id)-1:],
-						"body":        "More comment content: " + id,
-						"score":       3,
-						"ups":         3,
-						"downs":       0,
-						"link_id":     "t3_post1",
-						"parent_id":   "t1_comment1",
-						"subreddit":   "golang",
-						"created":     1609459200.0,
-						"created_utc": 1609459200.0,
-						"replies":     map[string]interface{}{"kind": "Listing", "data": map[string]interface{}{"children": []interface{}{}}},
+						"id":           id,
+						"name":         "t1_" + id,
+						"author":       "user" + id[len(id)-1:],
+						"body":         bodyText,
+						"body_html":    "<div class=\"md\"><p>" + bodyText + "</p></div>",
+						"subreddit_id": "t5_golang123",
+						"score":        3,
+						"ups":          3,
+						"downs":        0,
+						"link_id":      "t3_post1",
+						"parent_id":    "t1_comment1",
+						"subreddit":    "golang",
+						"created":      1609459200.0,
+						"created_utc":  1609459200.0,
+						"replies":      map[string]interface{}{"kind": "Listing", "data": map[string]interface{}{"children": []interface{}{}}},
 					},
 				})
 			}

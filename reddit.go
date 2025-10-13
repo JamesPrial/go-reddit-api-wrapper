@@ -916,7 +916,7 @@ func (r *Reddit) GetMoreComments(ctx context.Context, request *types.MoreComment
 		parsed, err := r.parser.ParseThing(ctx, thing)
 		if err != nil {
 			// Log parse error if logger is available
-			if r.config.Logger != nil {
+			if r.config != nil && r.config.Logger != nil {
 				r.config.Logger.LogAttrs(ctx, slog.LevelWarn, "failed to parse comment from morechildren",
 					slog.String("error", err.Error()),
 					slog.String("kind", thing.Kind))
@@ -926,7 +926,7 @@ func (r *Reddit) GetMoreComments(ctx context.Context, request *types.MoreComment
 		comment, ok := parsed.(*types.Comment)
 		if !ok {
 			// Log unexpected type if logger is available
-			if r.config.Logger != nil {
+			if r.config != nil && r.config.Logger != nil {
 				r.config.Logger.LogAttrs(ctx, slog.LevelWarn, "unexpected type from morechildren",
 					slog.String("kind", thing.Kind))
 			}
