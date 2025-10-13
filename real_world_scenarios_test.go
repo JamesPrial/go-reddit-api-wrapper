@@ -32,8 +32,8 @@ func TestRedditAPIClientUsage(t *testing.T) {
 
 		path := r.URL.Path
 		switch {
-		case strings.Contains(path, "/r/"):
-			// Subreddit endpoint
+		case strings.HasSuffix(path, "/about"):
+			// Subreddit info endpoint - must be checked before generic /r/ case
 			subredditData := map[string]interface{}{
 				"kind": "t5",
 				"data": map[string]interface{}{
@@ -50,10 +50,14 @@ func TestRedditAPIClientUsage(t *testing.T) {
 			}
 			json.NewEncoder(w).Encode(subredditData)
 
-		case strings.Contains(path, "/hot/") || strings.Contains(path, "/new/") || strings.Contains(path, "/top/"):
-			// Posts listing endpoint
-			posts := make([]map[string]interface{}, 25)
-			for i := 0; i < 25; i++ {
+		case strings.HasSuffix(path, "/hot") || strings.HasSuffix(path, "/new") || strings.HasSuffix(path, "/top"):
+			// Posts listing endpoint - must be checked before generic /r/ case
+			limit := 25
+			if limitParam := r.URL.Query().Get("limit"); limitParam != "" {
+				fmt.Sscanf(limitParam, "%d", &limit)
+			}
+			posts := make([]map[string]interface{}, limit)
+			for i := 0; i < limit; i++ {
 				posts[i] = map[string]interface{}{
 					"kind": "t3",
 					"data": map[string]interface{}{
@@ -85,7 +89,7 @@ func TestRedditAPIClientUsage(t *testing.T) {
 			json.NewEncoder(w).Encode(listingData)
 
 		case strings.Contains(path, "/comments/"):
-			// Comments endpoint
+			// Comments endpoint - must be checked before generic /r/ case
 			postData := map[string]interface{}{
 				"kind": "t3",
 				"data": map[string]interface{}{
@@ -460,7 +464,9 @@ func TestConcurrentRealWorldUsage(t *testing.T) {
 		w.Header().Set("X-RateLimit-Reset", "60")
 
 		path := r.URL.Path
-		if strings.Contains(path, "/r/") {
+		switch {
+		case strings.HasSuffix(path, "/about"):
+			// Subreddit info endpoint
 			subredditData := map[string]interface{}{
 				"kind": "t5",
 				"data": map[string]interface{}{
@@ -472,7 +478,9 @@ func TestConcurrentRealWorldUsage(t *testing.T) {
 				},
 			}
 			json.NewEncoder(w).Encode(subredditData)
-		} else {
+
+		case strings.HasSuffix(path, "/hot") || strings.HasSuffix(path, "/new"):
+			// Posts listing endpoint
 			posts := make([]map[string]interface{}, 10)
 			for i := 0; i < 10; i++ {
 				posts[i] = map[string]interface{}{
@@ -496,6 +504,10 @@ func TestConcurrentRealWorldUsage(t *testing.T) {
 				},
 			}
 			json.NewEncoder(w).Encode(listingData)
+
+		default:
+			// Default 404
+			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
 	defer server.Close()
