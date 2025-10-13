@@ -184,8 +184,8 @@ func TestMoreBuilder(t *testing.T) {
 		if more.ID != "more123" {
 			t.Errorf("Expected ID more123, got %s", more.ID)
 		}
-		if more.Name != "more_more123" {
-			t.Errorf("Expected Name more_more123, got %s", more.Name)
+		if more.Name != "t2_more123" {
+			t.Errorf("Expected Name t2_more123, got %s", more.Name)
 		}
 		if len(more.Children) != 0 {
 			t.Errorf("Expected empty Children, got %d items", len(more.Children))
@@ -203,8 +203,8 @@ func TestMoreBuilder(t *testing.T) {
 		if more.ID != "more456" {
 			t.Errorf("Expected ID more456, got %s", more.ID)
 		}
-		if more.Name != "more_more456" {
-			t.Errorf("Expected Name more_more456, got %s", more.Name)
+		if more.Name != "t2_more456" {
+			t.Errorf("Expected Name t2_more456, got %s", more.Name)
 		}
 		if len(more.Children) != 3 {
 			t.Errorf("Expected 3 children, got %d", len(more.Children))
@@ -223,8 +223,8 @@ func TestMoreBuilder(t *testing.T) {
 		if thing.ID != "more789" {
 			t.Errorf("Expected ID more789, got %s", thing.ID)
 		}
-		if thing.Name != "more_more789" {
-			t.Errorf("Expected Name more_more789, got %s", thing.Name)
+		if thing.Name != "t2_more789" {
+			t.Errorf("Expected Name t2_more789, got %s", thing.Name)
 		}
 
 		// Verify data can be unmarshaled
