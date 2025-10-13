@@ -2,54 +2,46 @@ package graw
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"runtime"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/jamesprial/go-reddit-api-wrapper/internal"
+	"github.com/jamesprial/go-reddit-api-wrapper/internal/testutil"
 )
+
+// Note: mockTokenProvider is defined in reddit_test.go and shared across all test files
 
 // TestConnectionResourceManagement tests proper cleanup of HTTP connections
 func TestConnectionResourceManagement(t *testing.T) {
 	var requestCount int
 	var mu sync.Mutex
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// Setup test data using builders
+	post := testutil.NewPostBuilder().
+		WithID("test_post").
+		WithTitle("Test Post").
+		WithScore(100).
+		WithAuthor("testuser").
+		Build()
+
+	server := testutil.NewMockServer().
+		WithPosts("", "hot", post).
+		Start()
+	defer server.Close()
+
+	// Override the handler to count requests
+	originalHandler := server.Server().Config.Handler
+	server.Server().Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		requestCount++
 		mu.Unlock()
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-
-		postData := map[string]interface{}{
-			"kind": "t3",
-			"data": map[string]interface{}{
-				"id":          "test_post",
-				"title":       "Test Post",
-				"score":       100,
-				"author":      "testuser",
-				"created_utc": 1609459200.0,
-			},
-		}
-
-		listingData := map[string]interface{}{
-			"kind": "Listing",
-			"data": map[string]interface{}{
-				"children": []interface{}{postData},
-				"after":    "",
-				"before":   "",
-			},
-		}
-		json.NewEncoder(w).Encode(listingData)
-	}))
-	defer server.Close()
+		originalHandler.ServeHTTP(w, r)
+	})
 
 	// Test multiple clients with proper cleanup
 	const numClients = 5
@@ -70,10 +62,8 @@ func TestConnectionResourceManagement(t *testing.T) {
 		}
 		httpClients = append(httpClients, httpClient)
 
-		internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
-		if err != nil {
-			t.Fatalf("Failed to create internal client %d: %v", i, err)
-		}
+		internalClient, err := internal.NewClient(httpClient, server.URL(), "test/1.0", nil)
+		testutil.AssertNoError(t, err)
 
 		client := &Reddit{
 			httpClient: internalClient,
@@ -95,14 +85,8 @@ func TestConnectionResourceManagement(t *testing.T) {
 
 			for j := 0; j < requestsPerClient; j++ {
 				resp, err := c.GetHot(ctx, nil)
-				if err != nil {
-					t.Errorf("Client %d, request %d failed: %v", clientID, j+1, err)
-					return
-				}
-
-				if len(resp.Posts) == 0 {
-					t.Errorf("Client %d, request %d: expected posts, got empty", clientID, j+1)
-				}
+				testutil.AssertNoError(t, err)
+				testutil.AssertPostCount(t, resp, 1)
 			}
 		}(i, client)
 	}
@@ -127,7 +111,7 @@ func TestConnectionResourceManagement(t *testing.T) {
 
 	t.Logf("Connection resource management test completed:")
 	t.Logf("  Clients created: %d", numClients)
-	t.Logf("  Requests per httpClient: %d", requestsPerClient)
+	t.Logf("  Requests per client: %d", requestsPerClient)
 	t.Logf("  Total requests: %d", requestCount)
 	t.Logf("  All connections cleaned up properly")
 }
@@ -137,48 +121,75 @@ func TestMemoryResourceManagement(t *testing.T) {
 	var requestCount int
 	var mu sync.Mutex
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// Create 200 posts for larger responses
+	posts := make([]*http.HandlerFunc, 0, 200)
+	for i := 0; i < 200; i++ {
+		// We'll track requests outside the builder
+		posts = append(posts, nil)
+	}
+
+	// We need to use httptest directly here since we need to customize the handler
+	// to generate large responses dynamically based on request count
+	server := testutil.NewMockServer().Start()
+	defer server.Close()
+
+	// Override handler to return large responses and count requests
+	server.Server().Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		requestCount++
 		mu.Unlock()
 
 		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Ratelimit-Remaining", "60")
+		w.Header().Set("X-Ratelimit-Reset", "60")
 		w.WriteHeader(http.StatusOK)
 
-		// Return larger responses to test memory management
-		posts := make([]map[string]interface{}, 200)
+		// Build 200 posts dynamically using builders
+		postList := make([]*testutil.PostBuilder, 200)
 		for i := 0; i < 200; i++ {
-			posts[i] = map[string]interface{}{
-				"kind": "t3",
-				"data": map[string]interface{}{
-					"id":           fmt.Sprintf("post_%d", i),
-					"title":        fmt.Sprintf("Test Post %d with substantial content", i),
-					"score":        100 + i,
-					"author":       fmt.Sprintf("user_%d", i),
-					"selftext":     fmt.Sprintf("This is a longer selftext for post %d to test memory management. ", i),
-					"created_utc":  1609459200.0 + float64(i),
-					"num_comments": i + 1,
-				},
-			}
+			postList[i] = testutil.NewPostBuilder().
+				WithID(fmt.Sprintf("post_%d", i)).
+				WithTitle(fmt.Sprintf("Test Post %d with substantial content", i)).
+				WithScore(100 + i).
+				WithAuthor(fmt.Sprintf("user_%d", i)).
+				WithSelfText(fmt.Sprintf("This is a longer selftext for post %d to test memory management. ", i)).
+				WithCreated(1609459200.0 + float64(i)).
+				WithNumComments(i + 1)
 		}
 
-		listingData := map[string]interface{}{
+		// Convert to Things and write response
+		children := make([]interface{}, 200)
+		for i := 0; i < 200; i++ {
+			children[i] = postList[i].ToThing()
+		}
+
+		listing := map[string]interface{}{
 			"kind": "Listing",
 			"data": map[string]interface{}{
-				"children": posts,
+				"children": children,
 				"after":    "",
 				"before":   "",
 			},
 		}
-		json.NewEncoder(w).Encode(listingData)
-	}))
-	defer server.Close()
+
+		// Write JSON response
+		w.Header().Set("Content-Type", "application/json")
+		// Manual JSON encoding to avoid import
+		fmt.Fprintf(w, `{"kind":"Listing","data":{"children":[`)
+		for i := 0; i < 200; i++ {
+			post := postList[i].Build()
+			if i > 0 {
+				fmt.Fprintf(w, ",")
+			}
+			fmt.Fprintf(w, `{"kind":"t3","data":{"id":"%s","title":"%s","score":%d,"author":"%s","selftext":"%s","created_utc":%f,"num_comments":%d,"name":"t3_%s","permalink":"/r/test/comments/%s/","subreddit":"test","url":"https://reddit.com/r/test/"}}`,
+				post.ID, post.Title, post.Score, post.Author, post.SelfText, post.CreatedUTC, post.NumComments, post.ID, post.ID)
+		}
+		fmt.Fprintf(w, `],"after":"","before":""}}`)
+	})
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
-	if err != nil {
-		t.Fatalf("Failed to create internal httpClient: %v", err)
-	}
+	internalClient, err := internal.NewClient(httpClient, server.URL(), "test/1.0", nil)
+	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
@@ -203,13 +214,8 @@ func TestMemoryResourceManagement(t *testing.T) {
 		// Make multiple requests
 		for i := 0; i < 10; i++ {
 			resp, err := client.GetHot(ctx, nil)
-			if err != nil {
-				t.Fatalf("Iteration %d, request %d failed: %v", iteration+1, i+1, err)
-			}
-
-			if len(resp.Posts) != 200 {
-				t.Errorf("Expected 200 posts, got %d", len(resp.Posts))
-			}
+			testutil.AssertNoError(t, err)
+			testutil.AssertPostCount(t, resp, 200)
 
 			// Clear reference to allow garbage collection
 			resp = nil
@@ -258,42 +264,31 @@ func TestGoroutineResourceManagement(t *testing.T) {
 	var requestCount int
 	var mu sync.Mutex
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// Setup test data using builders
+	post := testutil.NewPostBuilder().
+		WithID("test_post").
+		WithTitle("Test Post").
+		WithScore(100).
+		WithAuthor("testuser").
+		Build()
+
+	server := testutil.NewMockServer().
+		WithPosts("", "hot", post).
+		Start()
+	defer server.Close()
+
+	// Override handler to count requests
+	originalHandler := server.Server().Config.Handler
+	server.Server().Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		requestCount++
 		mu.Unlock()
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-
-		postData := map[string]interface{}{
-			"kind": "t3",
-			"data": map[string]interface{}{
-				"id":          "test_post",
-				"title":       "Test Post",
-				"score":       100,
-				"author":      "testuser",
-				"created_utc": 1609459200.0,
-			},
-		}
-
-		listingData := map[string]interface{}{
-			"kind": "Listing",
-			"data": map[string]interface{}{
-				"children": []interface{}{postData},
-				"after":    "",
-				"before":   "",
-			},
-		}
-		json.NewEncoder(w).Encode(listingData)
-	}))
-	defer server.Close()
+		originalHandler.ServeHTTP(w, r)
+	})
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
-	if err != nil {
-		t.Fatalf("Failed to create internal httpClient: %v", err)
-	}
+	internalClient, err := internal.NewClient(httpClient, server.URL(), "test/1.0", nil)
+	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
@@ -321,14 +316,8 @@ func TestGoroutineResourceManagement(t *testing.T) {
 
 				// Make a request
 				resp, err := client.GetHot(ctx, nil)
-				if err != nil {
-					t.Errorf("Goroutine %d failed: %v", goroutineID, err)
-					return
-				}
-
-				if len(resp.Posts) == 0 {
-					t.Errorf("Goroutine %d: expected posts, got empty", goroutineID)
-				}
+				testutil.AssertNoError(t, err)
+				testutil.AssertPostCount(t, resp, 1)
 			}(batch*goroutinesPerBatch + i)
 		}
 
@@ -370,7 +359,21 @@ func TestContextResourceManagement(t *testing.T) {
 	var requestCount int
 	var mu sync.Mutex
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// Setup test data using builders
+	post := testutil.NewPostBuilder().
+		WithID("test_post").
+		WithTitle("Test Post").
+		WithScore(100).
+		WithAuthor("testuser").
+		Build()
+
+	server := testutil.NewMockServer().
+		WithPosts("", "hot", post).
+		Start()
+	defer server.Close()
+
+	// Override handler to simulate slow response and count requests
+	server.Server().Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		requestCount++
 		mu.Unlock()
@@ -378,37 +381,25 @@ func TestContextResourceManagement(t *testing.T) {
 		// Simulate slow response
 		time.Sleep(100 * time.Millisecond)
 
+		// Use the MockServer's response format
 		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Ratelimit-Remaining", "60")
+		w.Header().Set("X-Ratelimit-Reset", "60")
 		w.WriteHeader(http.StatusOK)
 
-		postData := map[string]interface{}{
-			"kind": "t3",
-			"data": map[string]interface{}{
-				"id":          "test_post",
-				"title":       "Test Post",
-				"score":       100,
-				"author":      "testuser",
-				"created_utc": 1609459200.0,
-			},
-		}
+		thing := testutil.NewPostBuilder().
+			WithID("test_post").
+			WithTitle("Test Post").
+			WithScore(100).
+			Build()
 
-		listingData := map[string]interface{}{
-			"kind": "Listing",
-			"data": map[string]interface{}{
-				"children": []interface{}{postData},
-				"after":    "",
-				"before":   "",
-			},
-		}
-		json.NewEncoder(w).Encode(listingData)
-	}))
-	defer server.Close()
+		fmt.Fprintf(w, `{"kind":"Listing","data":{"children":[{"kind":"t3","data":{"id":"%s","title":"%s","score":%d,"author":"%s","name":"t3_%s","created_utc":%f,"permalink":"/r/test/comments/%s/","subreddit":"test","url":"https://reddit.com/r/test/","num_comments":0,"upvote_ratio":0.95}}],"after":"","before":""}}`,
+			thing.ID, thing.Title, thing.Score, thing.Author, thing.ID, thing.CreatedUTC, thing.ID)
+	})
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
-	if err != nil {
-		t.Fatalf("Failed to create internal httpClient: %v", err)
-	}
+	internalClient, err := internal.NewClient(httpClient, server.URL(), "test/1.0", nil)
+	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
@@ -454,36 +445,27 @@ func TestFileDescriptorResourceManagement(t *testing.T) {
 	var requestCount int
 	var mu sync.Mutex
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// Setup test data using builders
+	post := testutil.NewPostBuilder().
+		WithID("test_post").
+		WithTitle("Test Post").
+		WithScore(100).
+		WithAuthor("testuser").
+		Build()
+
+	server := testutil.NewMockServer().
+		WithPosts("", "hot", post).
+		Start()
+	defer server.Close()
+
+	// Override handler to count requests
+	originalHandler := server.Server().Config.Handler
+	server.Server().Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		requestCount++
 		mu.Unlock()
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-
-		postData := map[string]interface{}{
-			"kind": "t3",
-			"data": map[string]interface{}{
-				"id":          "test_post",
-				"title":       "Test Post",
-				"score":       100,
-				"author":      "testuser",
-				"created_utc": 1609459200.0,
-			},
-		}
-
-		listingData := map[string]interface{}{
-			"kind": "Listing",
-			"data": map[string]interface{}{
-				"children": []interface{}{postData},
-				"after":    "",
-				"before":   "",
-			},
-		}
-		json.NewEncoder(w).Encode(listingData)
-	}))
-	defer server.Close()
+		originalHandler.ServeHTTP(w, r)
+	})
 
 	// Create multiple HTTP clients to test file descriptor usage
 	const numClients = 10
@@ -500,10 +482,8 @@ func TestFileDescriptorResourceManagement(t *testing.T) {
 			},
 		}
 
-		internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
-		if err != nil {
-			t.Fatalf("Failed to create internal client %d: %v", i, err)
-		}
+		internalClient, err := internal.NewClient(httpClient, server.URL(), "test/1.0", nil)
+		testutil.AssertNoError(t, err)
 
 		client := &Reddit{
 			httpClient: internalClient,
@@ -525,14 +505,8 @@ func TestFileDescriptorResourceManagement(t *testing.T) {
 
 			for j := 0; j < 3; j++ {
 				resp, err := c.GetHot(ctx, nil)
-				if err != nil {
-					t.Errorf("Client %d, request %d failed: %v", clientID, j+1, err)
-					return
-				}
-
-				if len(resp.Posts) == 0 {
-					t.Errorf("Client %d, request %d: expected posts, got empty", clientID, j+1)
-				}
+				testutil.AssertNoError(t, err)
+				testutil.AssertPostCount(t, resp, 1)
 			}
 		}(i, client)
 	}
@@ -544,8 +518,8 @@ func TestFileDescriptorResourceManagement(t *testing.T) {
 		if closer, ok := client.httpClient.(interface{ Close() error }); ok {
 			closer.Close()
 		}
-		// Note: Transport cleanup handled by client.Close()
-		_ = clients[i] // Clear reference
+		// Clear reference
+		_ = clients[i]
 	}
 
 	// Force garbage collection
@@ -568,50 +542,43 @@ func TestBufferResourceManagement(t *testing.T) {
 	var requestCount int
 	var mu sync.Mutex
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testutil.NewMockServer().Start()
+	defer server.Close()
+
+	// Override handler to return varying-size responses
+	server.Server().Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
+		currentCount := requestCount
 		requestCount++
 		mu.Unlock()
 
 		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Ratelimit-Remaining", "60")
+		w.Header().Set("X-Ratelimit-Reset", "60")
 		w.WriteHeader(http.StatusOK)
 
-		// Return responses with varying sizes to test buffer management
-		size := (requestCount % 5) + 1 // 1-5KB responses
+		// Return responses with varying sizes (1-5KB)
+		size := (currentCount % 5) + 1
 		content := make([]byte, size*1024)
 		for i := range content {
 			content[i] = byte('A' + (i % 26))
 		}
 
-		postData := map[string]interface{}{
-			"kind": "t3",
-			"data": map[string]interface{}{
-				"id":          fmt.Sprintf("post_%d", requestCount),
-				"title":       "Test Post",
-				"score":       100,
-				"author":      "testuser",
-				"content":     string(content),
-				"created_utc": 1609459200.0,
-			},
-		}
+		post := testutil.NewPostBuilder().
+			WithID(fmt.Sprintf("post_%d", currentCount)).
+			WithTitle("Test Post").
+			WithScore(100).
+			WithAuthor("testuser").
+			WithSelfText(string(content)).
+			Build()
 
-		listingData := map[string]interface{}{
-			"kind": "Listing",
-			"data": map[string]interface{}{
-				"children": []interface{}{postData},
-				"after":    "",
-				"before":   "",
-			},
-		}
-		json.NewEncoder(w).Encode(listingData)
-	}))
-	defer server.Close()
+		fmt.Fprintf(w, `{"kind":"Listing","data":{"children":[{"kind":"t3","data":{"id":"%s","title":"%s","score":%d,"author":"%s","selftext":"%s","name":"t3_%s","created_utc":%f,"permalink":"/r/test/comments/%s/","subreddit":"test","url":"https://reddit.com/r/test/","num_comments":0,"upvote_ratio":0.95}}],"after":"","before":""}}`,
+			post.ID, post.Title, post.Score, post.Author, post.SelfText, post.ID, post.CreatedUTC, post.ID)
+	})
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
-	if err != nil {
-		t.Fatalf("Failed to create internal httpClient: %v", err)
-	}
+	internalClient, err := internal.NewClient(httpClient, server.URL(), "test/1.0", nil)
+	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
@@ -628,13 +595,8 @@ func TestBufferResourceManagement(t *testing.T) {
 
 	for i := 0; i < numRequests; i++ {
 		resp, err := client.GetHot(ctx, nil)
-		if err != nil {
-			t.Fatalf("Request %d failed: %v", i+1, err)
-		}
-
-		if len(resp.Posts) == 0 {
-			t.Errorf("Request %d: expected posts, got empty", i+1)
-		}
+		testutil.AssertNoError(t, err)
+		testutil.AssertPostCount(t, resp, 1)
 
 		// Estimate response size
 		if len(resp.Posts) > 0 && resp.Posts[0].SelfText != "" {
@@ -661,36 +623,27 @@ func TestResourceLeakDetection(t *testing.T) {
 	var requestCount int
 	var mu sync.Mutex
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// Setup test data using builders
+	post := testutil.NewPostBuilder().
+		WithID("test_post").
+		WithTitle("Test Post").
+		WithScore(100).
+		WithAuthor("testuser").
+		Build()
+
+	server := testutil.NewMockServer().
+		WithPosts("", "hot", post).
+		Start()
+	defer server.Close()
+
+	// Override handler to count requests
+	originalHandler := server.Server().Config.Handler
+	server.Server().Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		requestCount++
 		mu.Unlock()
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-
-		postData := map[string]interface{}{
-			"kind": "t3",
-			"data": map[string]interface{}{
-				"id":          "test_post",
-				"title":       "Test Post",
-				"score":       100,
-				"author":      "testuser",
-				"created_utc": 1609459200.0,
-			},
-		}
-
-		listingData := map[string]interface{}{
-			"kind": "Listing",
-			"data": map[string]interface{}{
-				"children": []interface{}{postData},
-				"after":    "",
-				"before":   "",
-			},
-		}
-		json.NewEncoder(w).Encode(listingData)
-	}))
-	defer server.Close()
+		originalHandler.ServeHTTP(w, r)
+	})
 
 	// Baseline resource measurements
 	var baselineMem runtime.MemStats
@@ -716,10 +669,8 @@ func TestResourceLeakDetection(t *testing.T) {
 				},
 			}
 
-			internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
-			if err != nil {
-				t.Fatalf("Failed to create internal client %d-%d: %v", cycle, i, err)
-			}
+			internalClient, err := internal.NewClient(httpClient, server.URL(), "test/1.0", nil)
+			testutil.AssertNoError(t, err)
 
 			client := &Reddit{
 				httpClient: internalClient,
@@ -741,14 +692,8 @@ func TestResourceLeakDetection(t *testing.T) {
 
 				for j := 0; j < 2; j++ {
 					resp, err := c.GetHot(ctx, nil)
-					if err != nil {
-						t.Errorf("Cycle %d, client %d, request %d failed: %v", cycle, clientID, j+1, err)
-						return
-					}
-
-					if len(resp.Posts) == 0 {
-						t.Errorf("Cycle %d, client %d, request %d: expected posts, got empty", cycle, clientID, j+1)
-					}
+					testutil.AssertNoError(t, err)
+					testutil.AssertPostCount(t, resp, 1)
 				}
 			}(i, client)
 		}
@@ -760,7 +705,6 @@ func TestResourceLeakDetection(t *testing.T) {
 			if closer, ok := clients[i].httpClient.(interface{ Close() error }); ok {
 				closer.Close()
 			}
-			// Note: Transport cleanup handled by client.Close()
 		}
 
 		// Clear references

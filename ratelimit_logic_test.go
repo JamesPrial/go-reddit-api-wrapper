@@ -2,10 +2,7 @@ package graw
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"strconv"
 	"strings"
 	"sync"
@@ -13,16 +10,32 @@ import (
 	"time"
 
 	"github.com/jamesprial/go-reddit-api-wrapper/internal"
+	"github.com/jamesprial/go-reddit-api-wrapper/internal/testutil"
 )
+
+// Note: mockTokenProvider is defined in reddit_test.go and shared across all test files
 
 // TestProactiveRateLimitingBehavior tests proactive rate limiting when approaching limits
 func TestProactiveRateLimitingBehavior(t *testing.T) {
 	t.Skip("Rate limiting test times out - needs investigation")
+
 	var requestCount int64
 	var lastRequestTime time.Time
 	var mu sync.Mutex
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// Create account using builder
+	account := testutil.NewAccount("testuser123").
+		WithID("user123").
+		Build()
+
+	server := testutil.NewMockServer().
+		WithAccount(account).
+		Start()
+	defer server.Close()
+
+	// Override handler to include rate limit tracking
+	originalHandler := server.Server().Config.Handler
+	server.Server().Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		currentCount := requestCount
 		requestCount++
@@ -34,30 +47,17 @@ func TestProactiveRateLimitingBehavior(t *testing.T) {
 			t.Logf("Request %d came %v after request %d", currentCount, timeSinceLast, currentCount-1)
 		}
 		lastRequestTime = now
-		mu.Unlock()
 
 		// Simulate rate limit headers that decrease with each request
 		remaining := 60 - int(currentCount%10)
 		reset := int(time.Now().Unix()) + 300
-
 		w.Header().Set("X-Ratelimit-Remaining", strconv.Itoa(remaining))
 		w.Header().Set("X-Ratelimit-Reset", strconv.Itoa(reset))
 		w.Header().Set("X-Ratelimit-Used", strconv.Itoa(int(currentCount%10)))
-		w.Header().Set("Content-Type", "application/json")
+		mu.Unlock()
 
-		// Simple response
-		response := map[string]interface{}{
-			"kind": "t2",
-			"data": map[string]interface{}{
-				"id":          "user123",
-				"name":        "t2_testuser123",
-				"created":     1234567890.0,
-				"created_utc": 1234567890.0,
-			},
-		}
-		json.NewEncoder(w).Encode(response)
-	}))
-	defer server.Close()
+		originalHandler.ServeHTTP(w, r)
+	})
 
 	// Create client with rate limiting
 	httpClient := &http.Client{Timeout: 30 * time.Second}
@@ -67,10 +67,8 @@ func TestProactiveRateLimitingBehavior(t *testing.T) {
 		ProactiveThreshold: 8, // Start being proactive at 8 remaining
 	}
 
-	internalClient, err := internal.NewClientWithRateLimit(httpClient, server.URL, "test/1.0", nil, rateLimitConfig)
-	if err != nil {
-		t.Fatalf("Failed to create internal httpClient: %v", err)
-	}
+	internalClient, err := internal.NewClientWithRateLimit(httpClient, server.URL(), "test/1.0", nil, rateLimitConfig)
+	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
@@ -98,10 +96,7 @@ func TestProactiveRateLimitingBehavior(t *testing.T) {
 				_, err := client.Me(ctx)
 				requestDuration := time.Since(requestStart)
 
-				if err != nil {
-					t.Errorf("Request %d failed: %v", requestNum, err)
-				}
-
+				testutil.AssertNoError(t, err)
 				results <- requestDuration
 			}(i)
 		}
@@ -138,45 +133,50 @@ func TestProactiveRateLimitingBehavior(t *testing.T) {
 // TestRateLimitRecoveryPatterns tests recovery patterns after hitting rate limits
 func TestRateLimitRecoveryPatterns(t *testing.T) {
 	t.Skip("Rate limiting test needs investigation")
+
 	var requestCount int64
 	var hitRateLimit bool
 	var mu sync.Mutex
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// Create account using builder
+	account := testutil.NewAccount("testuser123").
+		WithID("user123").
+		Build()
+
+	server := testutil.NewMockServer().
+		WithAccount(account).
+		Start()
+	defer server.Close()
+
+	// Override handler to simulate rate limit errors
+	server.Server().Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		currentCount := requestCount
 		requestCount++
 		mu.Unlock()
+
+		w.Header().Set("Content-Type", "application/json")
 
 		// After 5 requests, start returning 429
 		if currentCount >= 5 && currentCount < 8 {
 			w.Header().Set("X-Ratelimit-Remaining", "0")
 			w.Header().Set("X-Ratelimit-Reset", strconv.Itoa(int(time.Now().Unix())+2)) // 2 seconds
 			w.WriteHeader(http.StatusTooManyRequests)
-			json.NewEncoder(w).Encode(map[string]string{
-				"message": "Too Many Requests",
-				"error":   "rate_limit_exceeded",
-			})
+			w.Write([]byte(`{"message":"Too Many Requests","error":"rate_limit_exceeded"}`))
 			return
 		}
 
-		// Normal response
+		// Normal response - use builder
 		w.Header().Set("X-Ratelimit-Remaining", "10")
 		w.Header().Set("X-Ratelimit-Reset", strconv.Itoa(int(time.Now().Unix())+300))
-		w.Header().Set("Content-Type", "application/json")
 
-		response := map[string]interface{}{
-			"kind": "t2",
-			"data": map[string]interface{}{
-				"id":          "user123",
-				"name":        "t2_testuser123",
-				"created":     1234567890.0,
-				"created_utc": 1234567890.0,
-			},
-		}
-		json.NewEncoder(w).Encode(response)
-	}))
-	defer server.Close()
+		thing := testutil.NewAccount("testuser123").
+			WithID("user123").
+			ToThing()
+
+		// Write the Thing as JSON
+		w.Write(thing.Data)
+	})
 
 	// Create client with rate limiting
 	httpClient := &http.Client{Timeout: 30 * time.Second}
@@ -186,10 +186,8 @@ func TestRateLimitRecoveryPatterns(t *testing.T) {
 		ProactiveThreshold: 3,
 	}
 
-	internalClient, err := internal.NewClientWithRateLimit(httpClient, server.URL, "test/1.0", nil, rateLimitConfig)
-	if err != nil {
-		t.Fatalf("Failed to create internal httpClient: %v", err)
-	}
+	internalClient, err := internal.NewClientWithRateLimit(httpClient, server.URL(), "test/1.0", nil, rateLimitConfig)
+	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
@@ -247,10 +245,22 @@ func TestRateLimitRecoveryPatterns(t *testing.T) {
 // TestBurstCapacityHandling tests burst capacity and recovery
 func TestBurstCapacityHandling(t *testing.T) {
 	t.Skip("Rate limiting test needs investigation")
+
 	var requestCount int64
 	var mu sync.Mutex
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// Create account using builder
+	account := testutil.NewAccount("testuser123").
+		WithID("user123").
+		Build()
+
+	server := testutil.NewMockServer().
+		WithAccount(account).
+		Start()
+	defer server.Close()
+
+	// Override handler for rate limit tracking
+	server.Server().Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		requestCount++
 		mu.Unlock()
@@ -260,18 +270,12 @@ func TestBurstCapacityHandling(t *testing.T) {
 		w.Header().Set("X-Ratelimit-Reset", strconv.Itoa(int(time.Now().Unix())+300))
 		w.Header().Set("Content-Type", "application/json")
 
-		response := map[string]interface{}{
-			"kind": "t2",
-			"data": map[string]interface{}{
-				"id":          "user123",
-				"name":        "t2_testuser123",
-				"created":     1234567890.0,
-				"created_utc": 1234567890.0,
-			},
-		}
-		json.NewEncoder(w).Encode(response)
-	}))
-	defer server.Close()
+		thing := testutil.NewAccount("testuser123").
+			WithID("user123").
+			ToThing()
+
+		w.Write(thing.Data)
+	})
 
 	// Create client with burst capacity
 	httpClient := &http.Client{Timeout: 30 * time.Second}
@@ -281,10 +285,8 @@ func TestBurstCapacityHandling(t *testing.T) {
 		ProactiveThreshold: 5,
 	}
 
-	internalClient, err := internal.NewClientWithRateLimit(httpClient, server.URL, "test/1.0", nil, rateLimitConfig)
-	if err != nil {
-		t.Fatalf("Failed to create internal httpClient: %v", err)
-	}
+	internalClient, err := internal.NewClientWithRateLimit(httpClient, server.URL(), "test/1.0", nil, rateLimitConfig)
+	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
@@ -345,9 +347,7 @@ func TestBurstCapacityHandling(t *testing.T) {
 		_, err := client.Me(ctx)
 		recoveryDuration := time.Since(recoveryStart)
 
-		if err != nil {
-			t.Errorf("Recovery request failed: %v", err)
-		}
+		testutil.AssertNoError(t, err)
 
 		t.Logf("Recovery request completed in %v", recoveryDuration)
 
@@ -361,10 +361,22 @@ func TestBurstCapacityHandling(t *testing.T) {
 // TestMalformedRateLimitHeaders tests handling of malformed rate limit headers
 func TestMalformedRateLimitHeaders(t *testing.T) {
 	t.Skip("Rate limiting test needs investigation")
+
 	var requestCount int64
 	var mu sync.Mutex
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// Create account using builder
+	account := testutil.NewAccount("testuser123").
+		WithID("user123").
+		Build()
+
+	server := testutil.NewMockServer().
+		WithAccount(account).
+		Start()
+	defer server.Close()
+
+	// Override handler to test malformed headers
+	server.Server().Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		currentCount := requestCount
 		requestCount++
@@ -399,18 +411,12 @@ func TestMalformedRateLimitHeaders(t *testing.T) {
 			w.Header().Set("X-Ratelimit-Reset", "123456789")
 		}
 
-		response := map[string]interface{}{
-			"kind": "t2",
-			"data": map[string]interface{}{
-				"id":          "user123",
-				"name":        "t2_testuser123",
-				"created":     1234567890.0,
-				"created_utc": 1234567890.0,
-			},
-		}
-		json.NewEncoder(w).Encode(response)
-	}))
-	defer server.Close()
+		thing := testutil.NewAccount("testuser123").
+			WithID("user123").
+			ToThing()
+
+		w.Write(thing.Data)
+	})
 
 	// Create client
 	httpClient := &http.Client{Timeout: 30 * time.Second}
@@ -420,10 +426,8 @@ func TestMalformedRateLimitHeaders(t *testing.T) {
 		ProactiveThreshold: 5,
 	}
 
-	internalClient, err := internal.NewClientWithRateLimit(httpClient, server.URL, "test/1.0", nil, rateLimitConfig)
-	if err != nil {
-		t.Fatalf("Failed to create internal httpClient: %v", err)
-	}
+	internalClient, err := internal.NewClientWithRateLimit(httpClient, server.URL(), "test/1.0", nil, rateLimitConfig)
+	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
@@ -461,10 +465,22 @@ func TestMalformedRateLimitHeaders(t *testing.T) {
 // TestConcurrentRateLimiting tests rate limiting under concurrent load
 func TestConcurrentRateLimiting(t *testing.T) {
 	t.Skip("Rate limiting test times out - needs investigation")
+
 	var requestCount int64
 	var mu sync.Mutex
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// Create account using builder
+	account := testutil.NewAccount("testuser123").
+		WithID("user123").
+		Build()
+
+	server := testutil.NewMockServer().
+		WithAccount(account).
+		Start()
+	defer server.Close()
+
+	// Override handler for rate limit simulation
+	server.Server().Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		requestCount++
 		currentCount := requestCount
@@ -478,18 +494,12 @@ func TestConcurrentRateLimiting(t *testing.T) {
 		w.Header().Set("X-Ratelimit-Reset", strconv.Itoa(reset))
 		w.Header().Set("Content-Type", "application/json")
 
-		response := map[string]interface{}{
-			"kind": "t2",
-			"data": map[string]interface{}{
-				"id":          "user123",
-				"name":        "t2_testuser123",
-				"created":     1234567890.0,
-				"created_utc": 1234567890.0,
-			},
-		}
-		json.NewEncoder(w).Encode(response)
-	}))
-	defer server.Close()
+		thing := testutil.NewAccount("testuser123").
+			WithID("user123").
+			ToThing()
+
+		w.Write(thing.Data)
+	})
 
 	// Create client with conservative rate limiting
 	httpClient := &http.Client{Timeout: 30 * time.Second}
@@ -499,10 +509,8 @@ func TestConcurrentRateLimiting(t *testing.T) {
 		ProactiveThreshold: 3,
 	}
 
-	internalClient, err := internal.NewClientWithRateLimit(httpClient, server.URL, "test/1.0", nil, rateLimitConfig)
-	if err != nil {
-		t.Fatalf("Failed to create internal httpClient: %v", err)
-	}
+	internalClient, err := internal.NewClientWithRateLimit(httpClient, server.URL(), "test/1.0", nil, rateLimitConfig)
+	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
@@ -579,7 +587,18 @@ func TestRateLimitEdgeCases(t *testing.T) {
 	var requestCount int64
 	var mu sync.Mutex
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// Create account using builder
+	account := testutil.NewAccount("testuser123").
+		WithID("user123").
+		Build()
+
+	server := testutil.NewMockServer().
+		WithAccount(account).
+		Start()
+	defer server.Close()
+
+	// Override handler for edge case testing
+	server.Server().Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		currentCount := requestCount
 		requestCount++
@@ -611,18 +630,12 @@ func TestRateLimitEdgeCases(t *testing.T) {
 			w.Header().Set("X-Ratelimit-Reset", strconv.Itoa(int(time.Now().Unix())+300))
 		}
 
-		response := map[string]interface{}{
-			"kind": "t2",
-			"data": map[string]interface{}{
-				"id":          "user123",
-				"name":        "t2_testuser123",
-				"created":     1234567890.0,
-				"created_utc": 1234567890.0,
-			},
-		}
-		json.NewEncoder(w).Encode(response)
-	}))
-	defer server.Close()
+		thing := testutil.NewAccount("testuser123").
+			WithID("user123").
+			ToThing()
+
+		w.Write(thing.Data)
+	})
 
 	// Create client
 	httpClient := &http.Client{Timeout: 30 * time.Second}
@@ -632,10 +645,8 @@ func TestRateLimitEdgeCases(t *testing.T) {
 		ProactiveThreshold: 5,
 	}
 
-	internalClient, err := internal.NewClientWithRateLimit(httpClient, server.URL, "test/1.0", nil, rateLimitConfig)
-	if err != nil {
-		t.Fatalf("Failed to create internal httpClient: %v", err)
-	}
+	internalClient, err := internal.NewClientWithRateLimit(httpClient, server.URL(), "test/1.0", nil, rateLimitConfig)
+	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
@@ -656,9 +667,9 @@ func TestRateLimitEdgeCases(t *testing.T) {
 			duration := time.Since(start)
 
 			if err != nil {
-				results = append(results, fmt.Sprintf("Request %d: FAILED (%v)", i+1, err))
+				results = append(results, "Request "+strconv.Itoa(i+1)+": FAILED ("+err.Error()+")")
 			} else {
-				results = append(results, fmt.Sprintf("Request %d: SUCCESS (%v)", i+1, duration))
+				results = append(results, "Request "+strconv.Itoa(i+1)+": SUCCESS ("+duration.String()+")")
 				successCount++
 			}
 

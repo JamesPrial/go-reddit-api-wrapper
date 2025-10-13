@@ -9,53 +9,43 @@ import (
 	"time"
 
 	"github.com/jamesprial/go-reddit-api-wrapper/internal"
+	"github.com/jamesprial/go-reddit-api-wrapper/internal/testutil"
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 )
 
-// Helper function to create complete mock post data
-func createMockPost(id, title, author string, score int, created float64) map[string]interface{} {
-	return map[string]interface{}{
-		"kind": "t3",
-		"data": map[string]interface{}{
-			"id":           id,
-			"name":         "t3_" + id,
-			"title":        title,
-			"score":        score,
-			"ups":          score,
-			"downs":        0,
-			"author":       author,
-			"subreddit":    "testsub",
-			"subreddit_id": "t5_testsub",
-			"created":      created,
-			"created_utc":  created,
-			"num_comments": 5,
-			"url":          "https://reddit.com/r/testsub/comments/" + id,
-			"permalink":    "/r/testsub/comments/" + id + "/test_post/",
-			"upvote_ratio": 0.95,
-			"is_self":      false,
-			"selftext":     "",
-			"domain":       "example.com",
-			"over_18":      false,
-			"thumbnail":    "",
-			"clicked":      false,
-			"hidden":       false,
-			"saved":        false,
-			"locked":       false,
-			"stickied":     false,
-		},
-	}
-}
-
-// TestPaginationForwardNavigation tests forward pagination through multiple pages
-func TestPaginationForwardNavigation(t *testing.T) {
-	t.Skip("Pagination test needs investigation - off-by-one logic")
-	var requestCount int
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requestCount++
-
+// mockPaginationServer creates a custom server that handles pagination properly.
+// It returns different pages of data based on the 'after' and 'before' query parameters.
+func mockPaginationServer(handler func(w http.ResponseWriter, r *http.Request)) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Ratelimit-Remaining", "60")
 		w.Header().Set("X-Ratelimit-Reset", "60")
 		w.Header().Set("Content-Type", "application/json")
+		handler(w, r)
+	}))
+}
+
+// createPaginationTestClient creates a Reddit client for pagination tests with a custom server URL.
+func createPaginationTestClient(t *testing.T, serverURL string) *Reddit {
+	t.Helper()
+	httpClient := &http.Client{Timeout: 30 * time.Second}
+	internalClient, err := internal.NewClient(httpClient, serverURL, "test/1.0", nil)
+	testutil.AssertNoError(t, err)
+
+	return &Reddit{
+		httpClient: internalClient,
+		parser:     internal.NewParser(),
+		validator:  internal.NewValidator(),
+		auth:       &mockTokenProvider{token: "test_token"},
+	}
+}
+
+// TestPaginationForwardNavigation tests forward pagination through multiple pages.
+func TestPaginationForwardNavigation(t *testing.T) {
+	t.Skip("Pagination test needs investigation - off-by-one logic")
+
+	var requestCount int
+	server := mockPaginationServer(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
 
 		after := r.URL.Query().Get("after")
 		limit := r.URL.Query().Get("limit")
@@ -64,123 +54,63 @@ func TestPaginationForwardNavigation(t *testing.T) {
 			limit = "25"
 		}
 
-		posts := make([]map[string]interface{}, 0)
+		var posts []*types.Post
 		var nextAfter string
 
 		if after == "" {
-			// First page
+			// First page: posts a-e
 			for i := 0; i < 5; i++ {
 				postID := "post" + string(rune('a'+i))
-				score := 100 + i*10
-				created := 1609459200.0 + float64(i*3600)
-				posts = append(posts, map[string]interface{}{
-					"kind": "t3",
-					"data": map[string]interface{}{
-						"id":           postID,
-						"name":         "t3_" + postID,
-						"title":        "Test Post " + string(rune('A'+i)),
-						"score":        score,
-						"ups":          score,
-						"downs":        0,
-						"author":       "user" + string(rune('1'+i)),
-						"subreddit":    "testsub",
-						"subreddit_id": "t5_testsub",
-						"created":      created,
-						"created_utc":  created,
-						"num_comments": 5 + i,
-						"url":          "https://reddit.com/r/testsub/comments/" + postID,
-						"permalink":    "/r/testsub/comments/" + postID + "/test_post/",
-						"upvote_ratio": 0.95,
-						"is_self":      false,
-						"selftext":     "",
-						"domain":       "example.com",
-						"over_18":      false,
-						"thumbnail":    "",
-						"clicked":      false,
-						"hidden":       false,
-						"saved":        false,
-						"locked":       false,
-						"stickied":     false,
-					},
-				})
+				posts = append(posts, testutil.NewPostBuilder().
+					WithID(postID).
+					WithTitle("Test Post "+string(rune('A'+i))).
+					WithAuthor("user"+string(rune('1'+i))).
+					WithScore(100+i*10).
+					WithSubreddit("testsub").
+					WithNumComments(5+i).
+					WithCreated(1609459200.0+float64(i*3600)).
+					Build())
 			}
 			nextAfter = "t3_poste"
 		} else if after == "t3_poste" {
-			// Second page
+			// Second page: posts f-j
 			for i := 5; i < 10; i++ {
 				postID := "post" + string(rune('a'+i))
-				score := 100 + i*10
-				created := 1609459200.0 + float64(i*3600)
-				posts = append(posts, map[string]interface{}{
-					"kind": "t3",
-					"data": map[string]interface{}{
-						"id":           postID,
-						"name":         "t3_" + postID,
-						"title":        "Test Post " + string(rune('A'+i)),
-						"score":        score,
-						"ups":          score,
-						"downs":        0,
-						"author":       "user" + string(rune('1'+i)),
-						"subreddit":    "testsub",
-						"subreddit_id": "t5_testsub",
-						"created":      created,
-						"created_utc":  created,
-						"num_comments": 5 + i,
-						"url":          "https://reddit.com/r/testsub/comments/" + postID,
-						"permalink":    "/r/testsub/comments/" + postID + "/test_post/",
-						"upvote_ratio": 0.95,
-						"is_self":      false,
-						"selftext":     "",
-						"domain":       "example.com",
-						"over_18":      false,
-						"thumbnail":    "",
-						"clicked":      false,
-						"hidden":       false,
-						"saved":        false,
-						"locked":       false,
-						"stickied":     false,
-					},
-				})
+				posts = append(posts, testutil.NewPostBuilder().
+					WithID(postID).
+					WithTitle("Test Post "+string(rune('A'+i))).
+					WithAuthor("user"+string(rune('1'+i))).
+					WithScore(100+i*10).
+					WithSubreddit("testsub").
+					WithNumComments(5+i).
+					WithCreated(1609459200.0+float64(i*3600)).
+					Build())
 			}
 			nextAfter = "t3_postj"
 		} else if after == "t3_postj" {
-			// Third page (last)
+			// Third page: posts k-l
 			for i := 10; i < 12; i++ {
 				postID := "post" + string(rune('a'+i))
-				score := 100 + i*10
-				created := 1609459200.0 + float64(i*3600)
-				posts = append(posts, map[string]interface{}{
-					"kind": "t3",
-					"data": map[string]interface{}{
-						"id":           postID,
-						"name":         "t3_" + postID,
-						"title":        "Test Post " + string(rune('A'+i)),
-						"score":        score,
-						"ups":          score,
-						"downs":        0,
-						"author":       "user" + string(rune('1'+i)),
-						"subreddit":    "testsub",
-						"subreddit_id": "t5_testsub",
-						"created":      created,
-						"created_utc":  created,
-						"num_comments": 5 + i,
-						"url":          "https://reddit.com/r/testsub/comments/" + postID,
-						"permalink":    "/r/testsub/comments/" + postID + "/test_post/",
-						"upvote_ratio": 0.95,
-						"is_self":      false,
-						"selftext":     "",
-						"domain":       "example.com",
-						"over_18":      false,
-						"thumbnail":    "",
-						"clicked":      false,
-						"hidden":       false,
-						"saved":        false,
-						"locked":       false,
-						"stickied":     false,
-					},
-				})
+				posts = append(posts, testutil.NewPostBuilder().
+					WithID(postID).
+					WithTitle("Test Post "+string(rune('A'+i))).
+					WithAuthor("user"+string(rune('1'+i))).
+					WithScore(100+i*10).
+					WithSubreddit("testsub").
+					WithNumComments(5+i).
+					WithCreated(1609459200.0+float64(i*3600)).
+					Build())
 			}
 			nextAfter = ""
+		}
+
+		// Convert posts to Things
+		children := make([]interface{}, len(posts))
+		for i, post := range posts {
+			children[i] = map[string]interface{}{
+				"kind": "t3",
+				"data": post,
+			}
 		}
 
 		listingData := map[string]interface{}{
@@ -188,27 +118,16 @@ func TestPaginationForwardNavigation(t *testing.T) {
 			"data": map[string]interface{}{
 				"after":    nextAfter,
 				"before":   after,
-				"children": posts,
+				"children": children,
 			},
 		}
 		json.NewEncoder(w).Encode(listingData)
-	}))
+	})
 	defer server.Close()
 
-	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
-	if err != nil {
-		t.Fatalf("Failed to create internal httpClient: %v", err)
-	}
-
-	client := &Reddit{
-		httpClient: internalClient,
-		parser:     internal.NewParser(),
-		validator:  internal.NewValidator(),
-		auth:       &mockTokenProvider{token: "test_token"},
-	}
-
+	client := createPaginationTestClient(t, server.URL)
 	ctx := context.Background()
+
 	var allPosts []map[string]interface{}
 	currentAfter := ""
 
@@ -222,10 +141,7 @@ func TestPaginationForwardNavigation(t *testing.T) {
 			},
 		})
 
-		if err != nil {
-			t.Fatalf("Failed to get posts: %v", err)
-		}
-
+		testutil.AssertNoError(t, err)
 		if len(resp.Posts) == 0 {
 			t.Error("Expected posts but got empty response")
 			break
@@ -269,53 +185,74 @@ func TestPaginationForwardNavigation(t *testing.T) {
 	t.Logf("Successfully paginated through %d posts in %d requests", len(allPosts), requestCount)
 }
 
-// TestPaginationBackwardNavigation tests backward pagination
+// TestPaginationBackwardNavigation tests backward pagination.
 func TestPaginationBackwardNavigation(t *testing.T) {
 	t.Skip("Pagination test needs investigation")
-	var requestCount int
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requestCount++
 
-		w.Header().Set("X-Ratelimit-Remaining", "60")
-		w.Header().Set("X-Ratelimit-Reset", "60")
-		w.Header().Set("Content-Type", "application/json")
+	var requestCount int
+	server := mockPaginationServer(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
 
 		after := r.URL.Query().Get("after")
 		before := r.URL.Query().Get("before")
 
-		posts := make([]map[string]interface{}, 0)
+		var posts []*types.Post
 		var nextAfter, nextBefore string
 
 		if before == "" && after == "" {
-			// Middle page (starting point)
+			// Middle page (starting point): posts f-j
 			for i := 5; i < 10; i++ {
 				postID := "post" + string(rune('a'+i))
-				score := 100 + i*10
-				created := 1609459200.0 + float64(i*3600)
-				posts = append(posts, createMockPost(postID, "Test Post "+string(rune('A'+i)), "user"+string(rune('1'+i)), score, created))
+				posts = append(posts, testutil.NewPostBuilder().
+					WithID(postID).
+					WithTitle("Test Post "+string(rune('A'+i))).
+					WithAuthor("user"+string(rune('1'+i))).
+					WithScore(100+i*10).
+					WithSubreddit("testsub").
+					WithCreated(1609459200.0+float64(i*3600)).
+					Build())
 			}
 			nextAfter = "t3_postj"
 			nextBefore = "t3_poste"
 		} else if before == "t3_poste" && after == "" {
-			// Previous page
+			// Previous page: posts a-e
 			for i := 0; i < 5; i++ {
 				postID := "post" + string(rune('a'+i))
-				score := 100 + i*10
-				created := 1609459200.0 + float64(i*3600)
-				posts = append(posts, createMockPost(postID, "Test Post "+string(rune('A'+i)), "user"+string(rune('1'+i)), score, created))
+				posts = append(posts, testutil.NewPostBuilder().
+					WithID(postID).
+					WithTitle("Test Post "+string(rune('A'+i))).
+					WithAuthor("user"+string(rune('1'+i))).
+					WithScore(100+i*10).
+					WithSubreddit("testsub").
+					WithCreated(1609459200.0+float64(i*3600)).
+					Build())
 			}
 			nextAfter = "t3_poste"
 			nextBefore = ""
 		} else if before == "" && after == "t3_postj" {
-			// Next page
+			// Next page: posts k-o
 			for i := 10; i < 15; i++ {
 				postID := "post" + string(rune('a'+i))
-				score := 100 + i*10
-				created := 1609459200.0 + float64(i*3600)
-				posts = append(posts, createMockPost(postID, "Test Post "+string(rune('A'+i)), "user"+string(rune('1'+i)), score, created))
+				posts = append(posts, testutil.NewPostBuilder().
+					WithID(postID).
+					WithTitle("Test Post "+string(rune('A'+i))).
+					WithAuthor("user"+string(rune('1'+i))).
+					WithScore(100+i*10).
+					WithSubreddit("testsub").
+					WithCreated(1609459200.0+float64(i*3600)).
+					Build())
 			}
 			nextAfter = ""
 			nextBefore = "t3_postj"
+		}
+
+		// Convert posts to Things
+		children := make([]interface{}, len(posts))
+		for i, post := range posts {
+			children[i] = map[string]interface{}{
+				"kind": "t3",
+				"data": post,
+			}
 		}
 
 		listingData := map[string]interface{}{
@@ -323,26 +260,14 @@ func TestPaginationBackwardNavigation(t *testing.T) {
 			"data": map[string]interface{}{
 				"after":    nextAfter,
 				"before":   nextBefore,
-				"children": posts,
+				"children": children,
 			},
 		}
 		json.NewEncoder(w).Encode(listingData)
-	}))
+	})
 	defer server.Close()
 
-	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
-	if err != nil {
-		t.Fatalf("Failed to create internal httpClient: %v", err)
-	}
-
-	client := &Reddit{
-		httpClient: internalClient,
-		parser:     internal.NewParser(),
-		validator:  internal.NewValidator(),
-		auth:       &mockTokenProvider{token: "test_token"},
-	}
-
+	client := createPaginationTestClient(t, server.URL)
 	ctx := context.Background()
 
 	// Start with middle page
@@ -353,13 +278,8 @@ func TestPaginationBackwardNavigation(t *testing.T) {
 		},
 	})
 
-	if err != nil {
-		t.Fatalf("Failed to get initial posts: %v", err)
-	}
-
-	if len(resp.Posts) != 5 {
-		t.Errorf("Expected 5 posts on initial page, got %d", len(resp.Posts))
-	}
+	testutil.AssertNoError(t, err)
+	testutil.AssertPostCount(t, resp, 5)
 
 	// Navigate backward
 	prevResp, err := client.GetHot(ctx, &types.PostsRequest{
@@ -370,13 +290,8 @@ func TestPaginationBackwardNavigation(t *testing.T) {
 		},
 	})
 
-	if err != nil {
-		t.Fatalf("Failed to get previous posts: %v", err)
-	}
-
-	if len(prevResp.Posts) != 5 {
-		t.Errorf("Expected 5 posts on previous page, got %d", len(prevResp.Posts))
-	}
+	testutil.AssertNoError(t, err)
+	testutil.AssertPostCount(t, prevResp, 5)
 
 	// Navigate forward again
 	nextResp, err := client.GetHot(ctx, &types.PostsRequest{
@@ -387,16 +302,10 @@ func TestPaginationBackwardNavigation(t *testing.T) {
 		},
 	})
 
-	if err != nil {
-		t.Fatalf("Failed to get next posts: %v", err)
-	}
+	testutil.AssertNoError(t, err)
+	testutil.AssertPostCount(t, nextResp, 5)
 
 	// Should be back to original page
-	if len(nextResp.Posts) != 5 {
-		t.Errorf("Expected 5 posts on returned page, got %d", len(nextResp.Posts))
-	}
-
-	// Verify we got the same posts as the initial request
 	if nextResp.AfterFullname != resp.AfterFullname {
 		t.Errorf("Expected after fullname %s, got %s", resp.AfterFullname, nextResp.AfterFullname)
 	}
@@ -408,72 +317,11 @@ func TestPaginationBackwardNavigation(t *testing.T) {
 	t.Logf("Successfully navigated backward and forward through pagination")
 }
 
-// TestPaginationLimitBehavior tests different limit values
+// TestPaginationLimitBehavior tests different limit values.
 func TestPaginationLimitBehavior(t *testing.T) {
 	t.Skip("Pagination test needs investigation")
-	var requestCount int
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requestCount++
 
-		w.Header().Set("X-Ratelimit-Remaining", "60")
-		w.Header().Set("X-Ratelimit-Reset", "60")
-		w.Header().Set("Content-Type", "application/json")
-
-		limit := r.URL.Query().Get("limit")
-		if limit == "" {
-			limit = "25" // Default
-		}
-
-		// Return exactly the requested number of posts
-		postCount := 0
-		if limit == "1" {
-			postCount = 1
-		} else if limit == "5" {
-			postCount = 5
-		} else if limit == "10" {
-			postCount = 10
-		} else if limit == "100" {
-			postCount = 25 // Cap at 25 for this test
-		} else {
-			postCount = 25 // Default
-		}
-
-		posts := make([]map[string]interface{}, postCount)
-		for i := 0; i < postCount; i++ {
-			postID := "post" + string(rune('a'+i))
-			score := 100 + i*10
-			created := 1609459200.0 + float64(i*3600)
-			posts[i] = createMockPost(postID, "Test Post "+string(rune('A'+i)), "user"+string(rune('1'+i)), score, created)
-		}
-
-		listingData := map[string]interface{}{
-			"kind": "Listing",
-			"data": map[string]interface{}{
-				"after":    "t3_next",
-				"before":   "",
-				"children": posts,
-			},
-		}
-		json.NewEncoder(w).Encode(listingData)
-	}))
-	defer server.Close()
-
-	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
-	if err != nil {
-		t.Fatalf("Failed to create internal httpClient: %v", err)
-	}
-
-	client := &Reddit{
-		httpClient: internalClient,
-		parser:     internal.NewParser(),
-		validator:  internal.NewValidator(),
-		auth:       &mockTokenProvider{token: "test_token"},
-	}
-
-	ctx := context.Background()
-
-	testCases := []struct {
+	tests := []struct {
 		name     string
 		limit    int
 		expected int
@@ -486,7 +334,66 @@ func TestPaginationLimitBehavior(t *testing.T) {
 		{"No limit (default)", 0, 25},
 	}
 
-	for _, tc := range testCases {
+	var requestCount int
+	server := mockPaginationServer(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+
+		limit := r.URL.Query().Get("limit")
+		if limit == "" {
+			limit = "25"
+		}
+
+		// Return exactly the requested number of posts
+		postCount := 25 // Default
+		switch limit {
+		case "1":
+			postCount = 1
+		case "5":
+			postCount = 5
+		case "10":
+			postCount = 10
+		case "100":
+			postCount = 25 // Cap at 25
+		}
+
+		posts := make([]*types.Post, postCount)
+		for i := 0; i < postCount; i++ {
+			postID := "post" + string(rune('a'+i))
+			posts[i] = testutil.NewPostBuilder().
+				WithID(postID).
+				WithTitle("Test Post "+string(rune('A'+i))).
+				WithAuthor("user"+string(rune('1'+i))).
+				WithScore(100+i*10).
+				WithSubreddit("testsub").
+				WithCreated(1609459200.0+float64(i*3600)).
+				Build()
+		}
+
+		// Convert posts to Things
+		children := make([]interface{}, len(posts))
+		for i, post := range posts {
+			children[i] = map[string]interface{}{
+				"kind": "t3",
+				"data": post,
+			}
+		}
+
+		listingData := map[string]interface{}{
+			"kind": "Listing",
+			"data": map[string]interface{}{
+				"after":    "t3_next",
+				"before":   "",
+				"children": children,
+			},
+		}
+		json.NewEncoder(w).Encode(listingData)
+	})
+	defer server.Close()
+
+	client := createPaginationTestClient(t, server.URL)
+	ctx := context.Background()
+
+	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			var pagination types.Pagination
 			if tc.limit > 0 {
@@ -498,32 +405,23 @@ func TestPaginationLimitBehavior(t *testing.T) {
 				Pagination: pagination,
 			})
 
-			if err != nil {
-				t.Fatalf("Failed to get posts: %v", err)
-			}
-
-			if len(resp.Posts) != tc.expected {
-				t.Errorf("Expected %d posts, got %d", tc.expected, len(resp.Posts))
-			}
+			testutil.AssertNoError(t, err)
+			testutil.AssertPostCount(t, resp, tc.expected)
 		})
 	}
 
-	if requestCount != len(testCases) {
-		t.Errorf("Expected %d requests, got %d", len(testCases), requestCount)
+	if requestCount != len(tests) {
+		t.Errorf("Expected %d requests, got %d", len(tests), requestCount)
 	}
 
 	t.Logf("Successfully tested different pagination limits")
 }
 
-// TestPaginationEmptyResults tests pagination with empty results
+// TestPaginationEmptyResults tests pagination with empty results.
 func TestPaginationEmptyResults(t *testing.T) {
 	var requestCount int
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := mockPaginationServer(func(w http.ResponseWriter, r *http.Request) {
 		requestCount++
-
-		w.Header().Set("X-Ratelimit-Remaining", "60")
-		w.Header().Set("X-Ratelimit-Reset", "60")
-		w.Header().Set("Content-Type", "application/json")
 
 		// Return empty listing
 		listingData := map[string]interface{}{
@@ -535,22 +433,10 @@ func TestPaginationEmptyResults(t *testing.T) {
 			},
 		}
 		json.NewEncoder(w).Encode(listingData)
-	}))
+	})
 	defer server.Close()
 
-	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
-	if err != nil {
-		t.Fatalf("Failed to create internal httpClient: %v", err)
-	}
-
-	client := &Reddit{
-		httpClient: internalClient,
-		parser:     internal.NewParser(),
-		validator:  internal.NewValidator(),
-		auth:       &mockTokenProvider{token: "test_token"},
-	}
-
+	client := createPaginationTestClient(t, server.URL)
 	ctx := context.Background()
 
 	resp, err := client.GetHot(ctx, &types.PostsRequest{
@@ -560,13 +446,8 @@ func TestPaginationEmptyResults(t *testing.T) {
 		},
 	})
 
-	if err != nil {
-		t.Fatalf("Failed to get posts: %v", err)
-	}
-
-	if len(resp.Posts) != 0 {
-		t.Errorf("Expected 0 posts, got %d", len(resp.Posts))
-	}
+	testutil.AssertNoError(t, err)
+	testutil.AssertPostCount(t, resp, 0)
 
 	if resp.AfterFullname != "" {
 		t.Errorf("Expected empty after fullname, got %s", resp.AfterFullname)
@@ -583,49 +464,9 @@ func TestPaginationEmptyResults(t *testing.T) {
 	t.Logf("Successfully handled empty pagination results")
 }
 
-// TestPaginationInvalidParameters tests pagination with invalid parameters
+// TestPaginationInvalidParameters tests pagination with invalid parameters.
 func TestPaginationInvalidParameters(t *testing.T) {
-	var requestCount int
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requestCount++
-
-		w.Header().Set("X-Ratelimit-Remaining", "60")
-		w.Header().Set("X-Ratelimit-Reset", "60")
-		w.Header().Set("Content-Type", "application/json")
-
-		// Return normal response for valid requests
-		posts := []map[string]interface{}{
-			createMockPost("post1", "Test Post", "testuser", 100, 1609459200.0),
-		}
-
-		listingData := map[string]interface{}{
-			"kind": "Listing",
-			"data": map[string]interface{}{
-				"after":    "",
-				"before":   "",
-				"children": posts,
-			},
-		}
-		json.NewEncoder(w).Encode(listingData)
-	}))
-	defer server.Close()
-
-	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
-	if err != nil {
-		t.Fatalf("Failed to create internal httpClient: %v", err)
-	}
-
-	client := &Reddit{
-		httpClient: internalClient,
-		parser:     internal.NewParser(),
-		validator:  internal.NewValidator(),
-		auth:       &mockTokenProvider{token: "test_token"},
-	}
-
-	ctx := context.Background()
-
-	testCases := []struct {
+	tests := []struct {
 		name      string
 		after     string
 		before    string
@@ -634,11 +475,47 @@ func TestPaginationInvalidParameters(t *testing.T) {
 		{"Valid after", "t3_post1", "", false},
 		{"Valid before", "", "t3_post1", false},
 		{"Both after and before", "t3_post1", "t3_post2", true},
-		{"Invalid after format", "invalid", "", true},  // Client-side validation rejects this
-		{"Invalid before format", "", "invalid", true}, // Client-side validation rejects this
+		{"Invalid after format", "invalid", "", true},
+		{"Invalid before format", "", "invalid", true},
 	}
 
-	for _, tc := range testCases {
+	var requestCount int
+	server := mockPaginationServer(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+
+		// Return normal response for valid requests
+		post := testutil.NewPostBuilder().
+			WithID("post1").
+			WithTitle("Test Post").
+			WithAuthor("testuser").
+			WithScore(100).
+			WithSubreddit("testsub").
+			WithCreated(1609459200.0).
+			Build()
+
+		children := []interface{}{
+			map[string]interface{}{
+				"kind": "t3",
+				"data": post,
+			},
+		}
+
+		listingData := map[string]interface{}{
+			"kind": "Listing",
+			"data": map[string]interface{}{
+				"after":    "",
+				"before":   "",
+				"children": children,
+			},
+		}
+		json.NewEncoder(w).Encode(listingData)
+	})
+	defer server.Close()
+
+	client := createPaginationTestClient(t, server.URL)
+	ctx := context.Background()
+
+	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			resp, err := client.GetHot(ctx, &types.PostsRequest{
 				Subreddit: "testsub",
@@ -649,13 +526,9 @@ func TestPaginationInvalidParameters(t *testing.T) {
 			})
 
 			if tc.shouldErr {
-				if err == nil {
-					t.Error("Expected error but got none")
-				}
+				testutil.AssertError(t, err)
 			} else {
-				if err != nil {
-					t.Errorf("Unexpected error: %v", err)
-				}
+				testutil.AssertNoError(t, err)
 				if resp == nil {
 					t.Error("Expected response but got nil")
 				}
@@ -666,22 +539,23 @@ func TestPaginationInvalidParameters(t *testing.T) {
 	t.Logf("Successfully tested pagination parameter validation")
 }
 
-// TestPaginationConsistency tests that pagination tokens remain consistent
+// TestPaginationConsistency tests that pagination tokens remain consistent.
 func TestPaginationConsistency(t *testing.T) {
 	var requestCount int
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := mockPaginationServer(func(w http.ResponseWriter, r *http.Request) {
 		requestCount++
-
-		w.Header().Set("X-Ratelimit-Remaining", "60")
-		w.Header().Set("X-Ratelimit-Reset", "60")
-		w.Header().Set("Content-Type", "application/json")
 
 		after := r.URL.Query().Get("after")
 
 		// Always return the same pagination tokens for consistency
-		posts := []map[string]interface{}{
-			createMockPost("post1", "Test Post", "testuser", 100, 1609459200.0),
-		}
+		post := testutil.NewPostBuilder().
+			WithID("post1").
+			WithTitle("Test Post").
+			WithAuthor("testuser").
+			WithScore(100).
+			WithSubreddit("testsub").
+			WithCreated(1609459200.0).
+			Build()
 
 		var nextAfter string
 		if after == "" {
@@ -692,31 +566,26 @@ func TestPaginationConsistency(t *testing.T) {
 			nextAfter = ""
 		}
 
+		children := []interface{}{
+			map[string]interface{}{
+				"kind": "t3",
+				"data": post,
+			},
+		}
+
 		listingData := map[string]interface{}{
 			"kind": "Listing",
 			"data": map[string]interface{}{
 				"after":    nextAfter,
 				"before":   after,
-				"children": posts,
+				"children": children,
 			},
 		}
 		json.NewEncoder(w).Encode(listingData)
-	}))
+	})
 	defer server.Close()
 
-	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
-	if err != nil {
-		t.Fatalf("Failed to create internal httpClient: %v", err)
-	}
-
-	client := &Reddit{
-		httpClient: internalClient,
-		parser:     internal.NewParser(),
-		validator:  internal.NewValidator(),
-		auth:       &mockTokenProvider{token: "test_token"},
-	}
-
+	client := createPaginationTestClient(t, server.URL)
 	ctx := context.Background()
 
 	// Get first page
@@ -727,10 +596,7 @@ func TestPaginationConsistency(t *testing.T) {
 		},
 	})
 
-	if err != nil {
-		t.Fatalf("Failed to get first page: %v", err)
-	}
-
+	testutil.AssertNoError(t, err)
 	firstAfter := resp1.AfterFullname
 
 	// Get second page using the after token
@@ -742,9 +608,7 @@ func TestPaginationConsistency(t *testing.T) {
 		},
 	})
 
-	if err != nil {
-		t.Fatalf("Failed to get second page: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	// Verify the before token matches our after token
 	if resp2.BeforeFullname != firstAfter {
@@ -760,9 +624,7 @@ func TestPaginationConsistency(t *testing.T) {
 		},
 	})
 
-	if err != nil {
-		t.Fatalf("Failed to get third page: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	// Verify the before token matches the second page's after token
 	if resp3.BeforeFullname != resp2.AfterFullname {
@@ -776,64 +638,78 @@ func TestPaginationConsistency(t *testing.T) {
 	t.Logf("Successfully verified pagination token consistency")
 }
 
-// TestPaginationWithComments tests pagination in comment threads
+// TestPaginationWithComments tests pagination in comment threads.
 func TestPaginationWithComments(t *testing.T) {
 	t.Skip("Pagination test needs investigation")
-	var requestCount int
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requestCount++
 
-		w.Header().Set("X-Ratelimit-Remaining", "60")
-		w.Header().Set("X-Ratelimit-Reset", "60")
-		w.Header().Set("Content-Type", "application/json")
+	tests := []struct {
+		name          string
+		limit         int
+		expectedCount int
+	}{
+		{"Limit 5 comments", 5, 5},
+		{"Limit 10 comments", 10, 10},
+	}
+
+	var requestCount int
+	server := mockPaginationServer(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
 
 		limit := r.URL.Query().Get("limit")
 		if limit == "" {
 			limit = "10"
 		}
 
-		// Create nested comment structure
-		postData := createMockPost("post1", "Test Post for Comments", "testauthor", 100, 1609459200.0)
+		// Create post
+		post := testutil.NewPostBuilder().
+			WithID("post1").
+			WithTitle("Test Post for Comments").
+			WithAuthor("testauthor").
+			WithScore(100).
+			WithSubreddit("testsub").
+			WithCreated(1609459200.0).
+			Build()
 
-		comments := make([]map[string]interface{}, 0)
-		commentCount := 0
+		// Create comments based on limit
+		commentCount := 10
 		if limit == "5" {
 			commentCount = 5
-		} else {
-			commentCount = 10
 		}
 
+		comments := make([]*types.Comment, commentCount)
 		for i := 0; i < commentCount; i++ {
 			commentID := "comment" + string(rune('0'+i))
-			score := 10 + i
-			created := 1609459200.0 + float64(i*3600)
-			comments = append(comments, map[string]interface{}{
-				"kind": "t1",
-				"data": map[string]interface{}{
-					"id":           commentID,
-					"name":         "t1_" + commentID,
-					"body":         "Test comment " + string(rune('1'+i)),
-					"body_html":    "<p>Test comment " + string(rune('1'+i)) + "</p>",
-					"score":        score,
-					"ups":          score,
-					"downs":        0,
-					"author":       "user" + string(rune('1'+i)),
-					"subreddit":    "testsub",
-					"subreddit_id": "t5_testsub",
-					"link_id":      "t3_post1",
-					"parent_id":    "t3_post1",
-					"created":      created,
-					"created_utc":  created,
-					"replies":      map[string]interface{}{"kind": "Listing", "data": map[string]interface{}{"children": []interface{}{}}},
-				},
-			})
+			comments[i] = testutil.NewCommentBuilder().
+				WithID(commentID).
+				WithBody("Test comment "+string(rune('1'+i))).
+				WithAuthor("user"+string(rune('1'+i))).
+				WithScore(10+i).
+				WithParentPost("post1").
+				WithSubreddit("testsub").
+				WithCreated(1609459200.0+float64(i*3600)).
+				Build()
 		}
 
+		// Build post listing
 		postListing := map[string]interface{}{
 			"kind": "Listing",
 			"data": map[string]interface{}{
-				"children": []interface{}{postData},
+				"children": []interface{}{
+					map[string]interface{}{
+						"kind": "t3",
+						"data": post,
+					},
+				},
 			},
+		}
+
+		// Build comments listing
+		commentChildren := make([]interface{}, len(comments))
+		for i, comment := range comments {
+			commentChildren[i] = map[string]interface{}{
+				"kind": "t1",
+				"data": comment,
+			}
 		}
 
 		commentsListing := map[string]interface{}{
@@ -841,74 +717,44 @@ func TestPaginationWithComments(t *testing.T) {
 			"data": map[string]interface{}{
 				"after":    "t1_next",
 				"before":   "",
-				"children": comments,
+				"children": commentChildren,
 			},
 		}
 
 		response := []interface{}{postListing, commentsListing}
 		json.NewEncoder(w).Encode(response)
-	}))
+	})
 	defer server.Close()
 
-	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
-	if err != nil {
-		t.Fatalf("Failed to create internal httpClient: %v", err)
-	}
-
-	client := &Reddit{
-		httpClient: internalClient,
-		parser:     internal.NewParser(),
-		validator:  internal.NewValidator(),
-		auth:       &mockTokenProvider{token: "test_token"},
-	}
-
+	client := createPaginationTestClient(t, server.URL)
 	ctx := context.Background()
 
-	// Test comment pagination
-	resp, err := client.GetComments(ctx, &types.CommentsRequest{
-		Subreddit: "testsub",
-		PostID:    "post1",
-		Pagination: types.Pagination{
-			Limit: 5,
-		},
-	})
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			resp, err := client.GetComments(ctx, &types.CommentsRequest{
+				Subreddit: "testsub",
+				PostID:    "post1",
+				Pagination: types.Pagination{
+					Limit: tc.limit,
+				},
+			})
 
-	if err != nil {
-		t.Fatalf("Failed to get comments: %v", err)
+			testutil.AssertNoError(t, err)
+
+			if resp.Post == nil {
+				t.Fatal("Expected post in response, got nil")
+			}
+
+			testutil.AssertCommentCount(t, resp, tc.expectedCount)
+
+			if resp.AfterFullname != "t1_next" {
+				t.Errorf("Expected after fullname 't1_next', got %s", resp.AfterFullname)
+			}
+		})
 	}
 
-	if resp.Post == nil {
-		t.Fatal("Expected post in response, got nil")
-	}
-
-	if len(resp.Comments) != 5 {
-		t.Errorf("Expected 5 comments, got %d", len(resp.Comments))
-	}
-
-	if resp.AfterFullname != "t1_next" {
-		t.Errorf("Expected after fullname 't1_next', got %s", resp.AfterFullname)
-	}
-
-	// Test with different limit
-	resp2, err := client.GetComments(ctx, &types.CommentsRequest{
-		Subreddit: "testsub",
-		PostID:    "post1",
-		Pagination: types.Pagination{
-			Limit: 10,
-		},
-	})
-
-	if err != nil {
-		t.Fatalf("Failed to get comments with limit 10: %v", err)
-	}
-
-	if len(resp2.Comments) != 10 {
-		t.Errorf("Expected 10 comments, got %d", len(resp2.Comments))
-	}
-
-	if requestCount != 2 {
-		t.Errorf("Expected 2 requests, got %d", requestCount)
+	if requestCount != len(tests) {
+		t.Errorf("Expected %d requests, got %d", len(tests), requestCount)
 	}
 
 	t.Logf("Successfully tested comment pagination")

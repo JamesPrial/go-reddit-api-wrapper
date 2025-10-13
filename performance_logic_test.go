@@ -2,17 +2,19 @@ package graw
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"runtime"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/jamesprial/go-reddit-api-wrapper/internal"
+	"github.com/jamesprial/go-reddit-api-wrapper/internal/testutil"
+	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 )
+
+// Note: mockTokenProvider is defined in reddit_test.go and shared across all test files
 
 // TestMemoryUsageEfficiency tests memory usage patterns and efficiency
 func TestMemoryUsageEfficiency(t *testing.T) {
@@ -20,56 +22,37 @@ func TestMemoryUsageEfficiency(t *testing.T) {
 	var requestCount int
 	var mu sync.Mutex
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// Create 50 posts using PostBuilder
+	posts := make([]*types.Post, 50)
+	for i := 0; i < 50; i++ {
+		posts[i] = testutil.NewPostBuilder().
+			WithID(fmt.Sprintf("post_%d", i)).
+			WithTitle(fmt.Sprintf("Test Post %d with some content", i)).
+			WithScore(100 + i).
+			WithAuthor(fmt.Sprintf("user_%d", i)).
+			WithSelfText(fmt.Sprintf("This is test content for post %d. ", i)).
+			WithSubreddit("testsubreddit").
+			WithNumComments(i + 1).
+			Build()
+	}
+
+	server := testutil.NewMockServer().
+		WithPosts("", "hot", posts...).
+		Start()
+	defer server.Close()
+
+	// Increment request counter for each request
+	originalHandler := server.Server().Config.Handler
+	server.Server().Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		requestCount++
 		mu.Unlock()
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-
-		// Return moderate-sized response
-		posts := make([]map[string]interface{}, 50)
-		for i := 0; i < 50; i++ {
-			posts[i] = map[string]interface{}{
-				"kind": "t3",
-				"data": map[string]interface{}{
-					"id":           fmt.Sprintf("post_%d", i),
-					"name":         fmt.Sprintf("t3_post_%d", i),
-					"title":        fmt.Sprintf("Test Post %d with some content", i),
-					"score":        100 + i,
-					"author":       fmt.Sprintf("user_%d", i),
-					"selftext":     fmt.Sprintf("This is test content for post %d. ", i),
-					"created":      1609459200.0 + float64(i),
-					"created_utc":  1609459200.0 + float64(i),
-					"num_comments": i + 1,
-					"permalink":    fmt.Sprintf("/r/testsubreddit/comments/post_%d/test_post/", i),
-					"subreddit":    "testsubreddit",
-					"url":          "https://reddit.com/r/testsubreddit/",
-					"ups":          100 + i,
-					"downs":        0,
-					"upvote_ratio": 0.95,
-				},
-			}
-		}
-
-		listingData := map[string]interface{}{
-			"kind": "Listing",
-			"data": map[string]interface{}{
-				"children": posts,
-				"after":    "",
-				"before":   "",
-			},
-		}
-		json.NewEncoder(w).Encode(listingData)
-	}))
-	defer server.Close()
+		originalHandler.ServeHTTP(w, r)
+	})
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
-	if err != nil {
-		t.Fatalf("Failed to create internal httpClient: %v", err)
-	}
+	internalClient, err := internal.NewClient(httpClient, server.URL(), "test/1.0", nil)
+	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
@@ -89,13 +72,8 @@ func TestMemoryUsageEfficiency(t *testing.T) {
 	const iterations = 10
 	for i := 0; i < iterations; i++ {
 		resp, err := client.GetHot(ctx, nil)
-		if err != nil {
-			t.Fatalf("Request %d failed: %v", i+1, err)
-		}
-
-		if len(resp.Posts) != 50 {
-			t.Errorf("Expected 50 posts, got %d", len(resp.Posts))
-		}
+		testutil.AssertNoError(t, err)
+		testutil.AssertPostCount(t, resp, 50)
 	}
 
 	// Measure memory after operations
@@ -133,54 +111,34 @@ func TestConcurrentPerformance(t *testing.T) {
 	var requestCount int
 	var mu sync.Mutex
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	post := testutil.NewPostBuilder().
+		WithID("test_post").
+		WithTitle("Test Post").
+		WithScore(100).
+		WithAuthor("testuser").
+		WithSubreddit("testsubreddit").
+		WithNumComments(10).
+		Build()
+
+	server := testutil.NewMockServer().
+		WithPosts("", "hot", post).
+		Start()
+	defer server.Close()
+
+	// Add request counter and simulated processing time
+	originalHandler := server.Server().Config.Handler
+	server.Server().Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		requestCount++
 		mu.Unlock()
-
 		// Simulate some processing time
 		time.Sleep(10 * time.Millisecond)
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-
-		postData := map[string]interface{}{
-			"kind": "t3",
-			"data": map[string]interface{}{
-				"id":           "test_post",
-				"name":         "t3_test_post",
-				"title":        "Test Post",
-				"score":        100,
-				"author":       "testuser",
-				"created":      1609459200.0,
-				"created_utc":  1609459200.0,
-				"num_comments": 10,
-				"permalink":    "/r/testsubreddit/comments/test_post/test_post/",
-				"subreddit":    "testsubreddit",
-				"url":          "https://reddit.com/r/testsubreddit/",
-				"ups":          100,
-				"downs":        0,
-				"upvote_ratio": 0.95,
-			},
-		}
-
-		listingData := map[string]interface{}{
-			"kind": "Listing",
-			"data": map[string]interface{}{
-				"children": []interface{}{postData},
-				"after":    "",
-				"before":   "",
-			},
-		}
-		json.NewEncoder(w).Encode(listingData)
-	}))
-	defer server.Close()
+		originalHandler.ServeHTTP(w, r)
+	})
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
-	if err != nil {
-		t.Fatalf("Failed to create internal httpClient: %v", err)
-	}
+	internalClient, err := internal.NewClient(httpClient, server.URL(), "test/1.0", nil)
+	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
@@ -244,59 +202,31 @@ func TestConcurrentPerformance(t *testing.T) {
 // TestParsingPerformance tests JSON parsing performance
 func TestParsingPerformance(t *testing.T) {
 	t.Skip("Performance test needs restructuring - mock data format issue")
-	// Create a large JSON response for testing
-	posts := make([]map[string]interface{}, 1000)
+
+	// Create 1000 posts using PostBuilder
+	posts := make([]*types.Post, 1000)
 	for i := 0; i < 1000; i++ {
-		posts[i] = map[string]interface{}{
-			"kind": "t3",
-			"data": map[string]interface{}{
-				"id":           fmt.Sprintf("post_%d", i),
-				"name":         fmt.Sprintf("t3_post_%d", i),
-				"title":        fmt.Sprintf("Test Post %d with a reasonably long title", i),
-				"score":        100 + i,
-				"author":       fmt.Sprintf("user_%d", i),
-				"selftext":     fmt.Sprintf("This is test content for post %d. It has some length to make parsing more realistic. ", i),
-				"created":      1609459200.0 + float64(i),
-				"created_utc":  1609459200.0 + float64(i),
-				"num_comments": i + 1,
-				"permalink":    fmt.Sprintf("/r/testsubreddit/comments/post_%d/test_post/", i),
-				"subreddit":    "testsubreddit",
-				"url":          "https://reddit.com/r/testsubreddit/",
-				"ups":          100 + i,
-				"downs":        0,
-				"upvote_ratio": 0.95,
-				"over_18":      false,
-				"stickied":     false,
-			},
-		}
+		posts[i] = testutil.NewPostBuilder().
+			WithID(fmt.Sprintf("post_%d", i)).
+			WithTitle(fmt.Sprintf("Test Post %d with a reasonably long title", i)).
+			WithScore(100 + i).
+			WithAuthor(fmt.Sprintf("user_%d", i)).
+			WithSelfText(fmt.Sprintf("This is test content for post %d. It has some length to make parsing more realistic. ", i)).
+			WithSubreddit("testsubreddit").
+			WithNumComments(i + 1).
+			WithOver18(false).
+			WithStickied(false).
+			Build()
 	}
 
-	listingData := map[string]interface{}{
-		"kind": "Listing",
-		"data": map[string]interface{}{
-			"children": posts,
-			"after":    "t3_next",
-			"before":   "",
-		},
-	}
-
-	jsonData, err := json.Marshal(listingData)
-	if err != nil {
-		t.Fatalf("Failed to marshal test data: %v", err)
-	}
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		w.Write(jsonData)
-	}))
+	server := testutil.NewMockServer().
+		WithPosts("", "hot", posts...).
+		Start()
 	defer server.Close()
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
-	if err != nil {
-		t.Fatalf("Failed to create internal httpClient: %v", err)
-	}
+	internalClient, err := internal.NewClient(httpClient, server.URL(), "test/1.0", nil)
+	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
@@ -317,24 +247,16 @@ func TestParsingPerformance(t *testing.T) {
 		parseTime := time.Since(start)
 		totalParseTime += parseTime
 
-		if err != nil {
-			t.Fatalf("Request %d failed: %v", i+1, err)
-		}
-
-		if len(resp.Posts) != 1000 {
-			t.Errorf("Expected 1000 posts, got %d", len(resp.Posts))
-		}
+		testutil.AssertNoError(t, err)
+		testutil.AssertPostCount(t, resp, 1000)
 	}
 
 	avgParseTime := totalParseTime / iterations
-	bytesPerSecond := float64(len(jsonData)) / avgParseTime.Seconds()
 
 	t.Logf("Parsing performance test:")
-	t.Logf("  JSON size: %d bytes", len(jsonData))
 	t.Logf("  Posts per response: %d", len(posts))
 	t.Logf("  Iterations: %d", iterations)
 	t.Logf("  Average parse time: %v", avgParseTime)
-	t.Logf("  Parsing speed: %.2f bytes/second", bytesPerSecond)
 	t.Logf("  Posts per second: %.2f", float64(len(posts))/avgParseTime.Seconds())
 
 	// Parsing should be reasonably fast (less than 100ms for 1000 posts)
@@ -349,46 +271,28 @@ func TestConnectionPooling(t *testing.T) {
 	var requestCount int
 	var mu sync.Mutex
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	post := testutil.NewPostBuilder().
+		WithID("test_post").
+		WithTitle("Test Post").
+		WithScore(100).
+		WithAuthor("testuser").
+		WithSubreddit("testsubreddit").
+		WithNumComments(10).
+		Build()
+
+	server := testutil.NewMockServer().
+		WithPosts("", "hot", post).
+		Start()
+	defer server.Close()
+
+	// Add request counter
+	originalHandler := server.Server().Config.Handler
+	server.Server().Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		requestCount++
 		mu.Unlock()
-
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Connection", "keep-alive")
-		w.WriteHeader(http.StatusOK)
-
-		postData := map[string]interface{}{
-			"kind": "t3",
-			"data": map[string]interface{}{
-				"id":           "test_post",
-				"name":         "t3_test_post",
-				"title":        "Test Post",
-				"score":        100,
-				"author":       "testuser",
-				"created":      1609459200.0,
-				"created_utc":  1609459200.0,
-				"num_comments": 10,
-				"permalink":    "/r/testsubreddit/comments/test_post/test_post/",
-				"subreddit":    "testsubreddit",
-				"url":          "https://reddit.com/r/testsubreddit/",
-				"ups":          100,
-				"downs":        0,
-				"upvote_ratio": 0.95,
-			},
-		}
-
-		listingData := map[string]interface{}{
-			"kind": "Listing",
-			"data": map[string]interface{}{
-				"children": []interface{}{postData},
-				"after":    "",
-				"before":   "",
-			},
-		}
-		json.NewEncoder(w).Encode(listingData)
-	}))
-	defer server.Close()
+		originalHandler.ServeHTTP(w, r)
+	})
 
 	// Create client with connection pooling
 	httpClient := &http.Client{
@@ -400,10 +304,8 @@ func TestConnectionPooling(t *testing.T) {
 		},
 	}
 
-	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
-	if err != nil {
-		t.Fatalf("Failed to create internal httpClient: %v", err)
-	}
+	internalClient, err := internal.NewClient(httpClient, server.URL(), "test/1.0", nil)
+	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
@@ -420,9 +322,7 @@ func TestConnectionPooling(t *testing.T) {
 
 	for i := 0; i < numRequests; i++ {
 		resp, err := client.GetHot(ctx, nil)
-		if err != nil {
-			t.Fatalf("Request %d failed: %v", i+1, err)
-		}
+		testutil.AssertNoError(t, err)
 
 		if len(resp.Posts) == 0 {
 			t.Errorf("Request %d: expected posts, got empty", i+1)
@@ -450,57 +350,39 @@ func TestConnectionPooling(t *testing.T) {
 // TestGoroutineScalability tests scalability with increasing goroutine count
 func TestGoroutineScalability(t *testing.T) {
 	t.Skip("Performance test needs restructuring - mock data format issue")
-	var requestCount int
-	var mu sync.Mutex
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		mu.Lock()
-		requestCount++
-		mu.Unlock()
+	post := testutil.NewPostBuilder().
+		WithID("test_post").
+		WithTitle("Test Post").
+		WithScore(100).
+		WithAuthor("testuser").
+		WithSubreddit("testsubreddit").
+		WithNumComments(10).
+		Build()
 
-		// Simulate minimal processing time
-		time.Sleep(1 * time.Millisecond)
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-
-		postData := map[string]interface{}{
-			"kind": "t3",
-			"data": map[string]interface{}{
-				"id":           "test_post",
-				"name":         "t3_test_post",
-				"title":        "Test Post",
-				"score":        100,
-				"author":       "testuser",
-				"created":      1609459200.0,
-				"created_utc":  1609459200.0,
-				"num_comments": 10,
-				"permalink":    "/r/testsubreddit/comments/test_post/test_post/",
-				"subreddit":    "testsubreddit",
-				"url":          "https://reddit.com/r/testsubreddit/",
-				"ups":          100,
-				"downs":        0,
-				"upvote_ratio": 0.95,
-			},
-		}
-
-		listingData := map[string]interface{}{
-			"kind": "Listing",
-			"data": map[string]interface{}{
-				"children": []interface{}{postData},
-				"after":    "",
-				"before":   "",
-			},
-		}
-		json.NewEncoder(w).Encode(listingData)
-	}))
+	server := testutil.NewMockServer().
+		WithPosts("", "hot", post).
+		Start()
 	defer server.Close()
 
+	var requestCountMu sync.Mutex
+	requestCounts := make(map[int]int)
+
+	// Track request counts per goroutine count
+	originalHandler := server.Server().Config.Handler
+	var currentGoroutineCount int
+	server.Server().Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCountMu.Lock()
+		requestCounts[currentGoroutineCount]++
+		requestCountMu.Unlock()
+		// Simulate minimal processing time
+		time.Sleep(1 * time.Millisecond)
+		originalHandler.ServeHTTP(w, r)
+	})
+
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
-	if err != nil {
-		t.Fatalf("Failed to create internal httpClient: %v", err)
-	}
+	internalClient, err := internal.NewClient(httpClient, server.URL(), "test/1.0", nil)
+	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
@@ -516,8 +398,7 @@ func TestGoroutineScalability(t *testing.T) {
 	const requestsPerGoroutine = 3
 
 	for _, numGoroutines := range goroutineCounts {
-		// Reset counters
-		requestCount = 0
+		currentGoroutineCount = numGoroutines
 		var wg sync.WaitGroup
 
 		start := time.Now()
@@ -552,8 +433,12 @@ func TestGoroutineScalability(t *testing.T) {
 		t.Logf("  Duration: %v", duration)
 		t.Logf("  Requests per second: %.2f", requestsPerSecond)
 
-		if requestCount != totalRequests {
-			t.Errorf("Expected %d requests, got %d", totalRequests, requestCount)
+		requestCountMu.Lock()
+		actualCount := requestCounts[numGoroutines]
+		requestCountMu.Unlock()
+
+		if actualCount != totalRequests {
+			t.Errorf("Expected %d requests, got %d", totalRequests, actualCount)
 		}
 	}
 }
@@ -561,54 +446,36 @@ func TestGoroutineScalability(t *testing.T) {
 // TestMemoryLeakDetection tests for memory leaks over time
 func TestMemoryLeakDetection(t *testing.T) {
 	t.Skip("Performance test needs restructuring - mock data format issue")
+
+	post := testutil.NewPostBuilder().
+		WithID("test_post").
+		WithTitle("Test Post").
+		WithScore(100).
+		WithAuthor("testuser").
+		WithSubreddit("testsubreddit").
+		WithNumComments(10).
+		Build()
+
+	server := testutil.NewMockServer().
+		WithPosts("", "hot", post).
+		Start()
+	defer server.Close()
+
 	var requestCount int
 	var mu sync.Mutex
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// Add request counter
+	originalHandler := server.Server().Config.Handler
+	server.Server().Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		requestCount++
 		mu.Unlock()
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-
-		postData := map[string]interface{}{
-			"kind": "t3",
-			"data": map[string]interface{}{
-				"id":           "test_post",
-				"name":         "t3_test_post",
-				"title":        "Test Post",
-				"score":        100,
-				"author":       "testuser",
-				"created":      1609459200.0,
-				"created_utc":  1609459200.0,
-				"num_comments": 10,
-				"permalink":    "/r/testsubreddit/comments/test_post/test_post/",
-				"subreddit":    "testsubreddit",
-				"url":          "https://reddit.com/r/testsubreddit/",
-				"ups":          100,
-				"downs":        0,
-				"upvote_ratio": 0.95,
-			},
-		}
-
-		listingData := map[string]interface{}{
-			"kind": "Listing",
-			"data": map[string]interface{}{
-				"children": []interface{}{postData},
-				"after":    "",
-				"before":   "",
-			},
-		}
-		json.NewEncoder(w).Encode(listingData)
-	}))
-	defer server.Close()
+		originalHandler.ServeHTTP(w, r)
+	})
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
-	if err != nil {
-		t.Fatalf("Failed to create internal httpClient: %v", err)
-	}
+	internalClient, err := internal.NewClient(httpClient, server.URL(), "test/1.0", nil)
+	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
@@ -640,9 +507,7 @@ func TestMemoryLeakDetection(t *testing.T) {
 		// Make requests
 		for i := 0; i < requestsPerIteration; i++ {
 			resp, err := client.GetHot(ctx, nil)
-			if err != nil {
-				t.Fatalf("Iteration %d, request %d failed: %v", iteration+1, i+1, err)
-			}
+			testutil.AssertNoError(t, err)
 
 			if len(resp.Posts) == 0 {
 				t.Errorf("Iteration %d, request %d: expected posts, got empty", iteration+1, i+1)
@@ -680,56 +545,37 @@ func TestCPUUsageEfficiency(t *testing.T) {
 	var requestCount int
 	var mu sync.Mutex
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// Create 100 posts using PostBuilder
+	posts := make([]*types.Post, 100)
+	for i := 0; i < 100; i++ {
+		posts[i] = testutil.NewPostBuilder().
+			WithID(fmt.Sprintf("post_%d", i)).
+			WithTitle(fmt.Sprintf("Test Post %d", i)).
+			WithScore(100 + i).
+			WithAuthor(fmt.Sprintf("user_%d", i)).
+			WithSelfText(fmt.Sprintf("Content for post %d", i)).
+			WithSubreddit("testsubreddit").
+			WithNumComments(i + 1).
+			Build()
+	}
+
+	server := testutil.NewMockServer().
+		WithPosts("", "hot", posts...).
+		Start()
+	defer server.Close()
+
+	// Add request counter
+	originalHandler := server.Server().Config.Handler
+	server.Server().Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		requestCount++
 		mu.Unlock()
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-
-		// Return moderately complex data
-		posts := make([]map[string]interface{}, 100)
-		for i := 0; i < 100; i++ {
-			posts[i] = map[string]interface{}{
-				"kind": "t3",
-				"data": map[string]interface{}{
-					"id":           fmt.Sprintf("post_%d", i),
-					"name":         fmt.Sprintf("t3_post_%d", i),
-					"title":        fmt.Sprintf("Test Post %d", i),
-					"score":        100 + i,
-					"author":       fmt.Sprintf("user_%d", i),
-					"selftext":     fmt.Sprintf("Content for post %d", i),
-					"created":      1609459200.0 + float64(i),
-					"created_utc":  1609459200.0 + float64(i),
-					"num_comments": i + 1,
-					"permalink":    fmt.Sprintf("/r/testsubreddit/comments/post_%d/test_post/", i),
-					"subreddit":    "testsubreddit",
-					"url":          "https://reddit.com/r/testsubreddit/",
-					"ups":          100 + i,
-					"downs":        0,
-					"upvote_ratio": 0.95,
-				},
-			}
-		}
-
-		listingData := map[string]interface{}{
-			"kind": "Listing",
-			"data": map[string]interface{}{
-				"children": posts,
-				"after":    "",
-				"before":   "",
-			},
-		}
-		json.NewEncoder(w).Encode(listingData)
-	}))
-	defer server.Close()
+		originalHandler.ServeHTTP(w, r)
+	})
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
-	if err != nil {
-		t.Fatalf("Failed to create internal httpClient: %v", err)
-	}
+	internalClient, err := internal.NewClient(httpClient, server.URL(), "test/1.0", nil)
+	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
@@ -746,13 +592,8 @@ func TestCPUUsageEfficiency(t *testing.T) {
 
 	for i := 0; i < numRequests; i++ {
 		resp, err := client.GetHot(ctx, nil)
-		if err != nil {
-			t.Fatalf("Request %d failed: %v", i+1, err)
-		}
-
-		if len(resp.Posts) != 100 {
-			t.Errorf("Expected 100 posts, got %d", len(resp.Posts))
-		}
+		testutil.AssertNoError(t, err)
+		testutil.AssertPostCount(t, resp, 100)
 	}
 
 	totalTime := time.Since(start)

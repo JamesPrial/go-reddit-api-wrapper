@@ -2,7 +2,6 @@ package graw
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -13,6 +12,7 @@ import (
 	"time"
 
 	"github.com/jamesprial/go-reddit-api-wrapper/internal"
+	"github.com/jamesprial/go-reddit-api-wrapper/internal/testutil"
 )
 
 // TestNetworkTimeoutRecovery tests recovery from network timeouts
@@ -20,6 +20,13 @@ func TestNetworkTimeoutRecovery(t *testing.T) {
 	var requestCount int
 	var mu sync.Mutex
 
+	// Create test data using builder
+	subreddit := testutil.NewSubreddit("testsub").
+		WithID("testsubid").
+		Build()
+
+	// We need to use raw httptest.NewServer here because we need to control timeout behavior
+	// MockServer doesn't support simulating timeouts with delays
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		requestCount++
@@ -34,44 +41,30 @@ func TestNetworkTimeoutRecovery(t *testing.T) {
 		if currentRequest == 1 {
 			// Simulate timeout by delaying response
 			time.Sleep(2 * time.Second)
-			w.WriteHeader(http.StatusOK)
-			subredditData := map[string]interface{}{
-				"kind": "t5",
-				"data": map[string]interface{}{
-					"id":           "testsubid",
-					"name":         "t5_testsubid",
-					"display_name": "testsub",
-					"subscribers":  100000,
-					"created_utc":  1609459200.0,
-					"created":      1609459200.0,
-				},
-			}
-			json.NewEncoder(w).Encode(subredditData)
-		} else {
-			// Normal response for subsequent requests
-			w.WriteHeader(http.StatusOK)
-			subredditData := map[string]interface{}{
-				"kind": "t5",
-				"data": map[string]interface{}{
-					"id":           "testsubid",
-					"name":         "t5_testsubid",
-					"display_name": "testsub",
-					"subscribers":  100000,
-					"created_utc":  1609459200.0,
-					"created":      1609459200.0,
-				},
-			}
-			json.NewEncoder(w).Encode(subredditData)
 		}
+
+		w.WriteHeader(http.StatusOK)
+
+		// Use MockServer to generate proper response
+		mockServer := testutil.NewMockServer().
+			WithSubreddit("testsub", subreddit)
+
+		// Manually construct the Thing response
+		thing := mockServer.Server() // This will be nil, so we need to do it manually
+		// Actually, let's just use the ToThing() method from builder
+		responseThing := testutil.NewSubreddit("testsub").
+			WithID("testsubid").
+			ToThing()
+
+		// Write the response
+		w.Write(responseThing.Data)
 	}))
 	defer server.Close()
 
 	// Create client with short timeout to trigger timeout on first request
 	httpClient := &http.Client{Timeout: 500 * time.Millisecond}
 	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
-	if err != nil {
-		t.Fatalf("Failed to create internal httpClient: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
@@ -84,10 +77,7 @@ func TestNetworkTimeoutRecovery(t *testing.T) {
 
 	// First request should timeout
 	_, err = client.GetSubreddit(ctx, "testsub")
-	if err == nil {
-		t.Error("Expected timeout error, but got none")
-	}
-
+	testutil.AssertError(t, err)
 	if !strings.Contains(err.Error(), "timeout") && !strings.Contains(err.Error(), "deadline") {
 		t.Errorf("Expected timeout error, got: %v", err)
 	}
@@ -95,9 +85,7 @@ func TestNetworkTimeoutRecovery(t *testing.T) {
 	// Create new client with longer timeout for recovery
 	httpClient2 := &http.Client{Timeout: 5 * time.Second}
 	internalClient2, err := internal.NewClient(httpClient2, server.URL, "test/1.0", nil)
-	if err != nil {
-		t.Fatalf("Failed to create recovery httpClient: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	recoveryClient := &Reddit{
 		httpClient: internalClient2,
@@ -107,13 +95,11 @@ func TestNetworkTimeoutRecovery(t *testing.T) {
 	}
 
 	// Second request should succeed
-	subreddit, err := recoveryClient.GetSubreddit(ctx, "testsub")
-	if err != nil {
-		t.Fatalf("Recovery request failed: %v", err)
-	}
+	result, err := recoveryClient.GetSubreddit(ctx, "testsub")
+	testutil.AssertNoError(t, err)
 
-	if subreddit.DisplayName != "testsub" {
-		t.Errorf("Expected 'testsub', got: %s", subreddit.DisplayName)
+	if result.DisplayName != "testsub" {
+		t.Errorf("Expected 'testsub', got: %s", result.DisplayName)
 	}
 
 	if requestCount < 2 {
@@ -125,30 +111,20 @@ func TestNetworkTimeoutRecovery(t *testing.T) {
 
 // TestConnectionRefusedRecovery tests recovery from connection refused errors
 func TestConnectionRefusedRecovery(t *testing.T) {
+	// Create test data using builder
+	subreddit := testutil.NewSubreddit("testsub").
+		WithID("testsubid").
+		Build()
+
 	// Start with a server that will be closed
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		subredditData := map[string]interface{}{
-			"kind": "t5",
-			"data": map[string]interface{}{
-				"id":           "testsubid",
-				"name":         "t5_testsubid",
-				"display_name": "testsub",
-				"subscribers":  100000,
-				"created_utc":  1609459200.0,
-				"created":      1609459200.0,
-			},
-		}
-		json.NewEncoder(w).Encode(subredditData)
-	}))
+	server := testutil.NewMockServer().
+		WithSubreddit("testsub", subreddit).
+		Start()
 
 	// Create client
 	httpClient := &http.Client{Timeout: 5 * time.Second}
-	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
-	if err != nil {
-		t.Fatalf("Failed to create internal httpClient: %v", err)
-	}
+	internalClient, err := internal.NewClient(httpClient, server.URL(), "test/1.0", nil)
+	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
@@ -164,40 +140,22 @@ func TestConnectionRefusedRecovery(t *testing.T) {
 
 	// Request should fail with connection refused error
 	_, err = client.GetSubreddit(ctx, "testsub")
-	if err == nil {
-		t.Error("Expected connection refused error, but got none")
-	}
-
+	testutil.AssertError(t, err)
 	if !strings.Contains(err.Error(), "connection refused") &&
 		!strings.Contains(err.Error(), "connect") {
 		t.Errorf("Expected connection refused error, got: %v", err)
 	}
 
 	// Start a new server for recovery
-	recoveryServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		subredditData := map[string]interface{}{
-			"kind": "t5",
-			"data": map[string]interface{}{
-				"id":           "testsubid",
-				"name":         "t5_testsubid",
-				"display_name": "testsub",
-				"subscribers":  100000,
-				"created_utc":  1609459200.0,
-				"created":      1609459200.0,
-			},
-		}
-		json.NewEncoder(w).Encode(subredditData)
-	}))
+	recoveryServer := testutil.NewMockServer().
+		WithSubreddit("testsub", subreddit).
+		Start()
 	defer recoveryServer.Close()
 
 	// Create new client pointing to recovery server
 	recoveryHttpClient := &http.Client{Timeout: 5 * time.Second}
-	recoveryInternalClient, err := internal.NewClient(recoveryHttpClient, recoveryServer.URL, "test/1.0", nil)
-	if err != nil {
-		t.Fatalf("Failed to create recovery internal httpClient: %v", err)
-	}
+	recoveryInternalClient, err := internal.NewClient(recoveryHttpClient, recoveryServer.URL(), "test/1.0", nil)
+	testutil.AssertNoError(t, err)
 
 	recoveryClient := &Reddit{
 		httpClient: recoveryInternalClient,
@@ -207,13 +165,11 @@ func TestConnectionRefusedRecovery(t *testing.T) {
 	}
 
 	// Recovery request should succeed
-	subreddit, err := recoveryClient.GetSubreddit(ctx, "testsub")
-	if err != nil {
-		t.Fatalf("Recovery request failed: %v", err)
-	}
+	result, err := recoveryClient.GetSubreddit(ctx, "testsub")
+	testutil.AssertNoError(t, err)
 
-	if subreddit.DisplayName != "testsub" {
-		t.Errorf("Expected 'testsub', got: %s", subreddit.DisplayName)
+	if result.DisplayName != "testsub" {
+		t.Errorf("Expected 'testsub', got: %s", result.DisplayName)
 	}
 
 	t.Logf("Successfully recovered from connection refused error")
@@ -224,9 +180,7 @@ func TestDNSFailureRecovery(t *testing.T) {
 	// Create client pointing to non-existent domain
 	httpClient := &http.Client{Timeout: 5 * time.Second}
 	internalClient, err := internal.NewClient(httpClient, "http://non-existent-domain-for-testing.invalid", "test/1.0", nil)
-	if err != nil {
-		t.Fatalf("Failed to create internal httpClient: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
@@ -239,41 +193,28 @@ func TestDNSFailureRecovery(t *testing.T) {
 
 	// Request should fail with DNS resolution error
 	_, err = client.GetSubreddit(ctx, "testsub")
-	if err == nil {
-		t.Error("Expected DNS resolution error, but got none")
-	}
-
+	testutil.AssertError(t, err)
 	if !strings.Contains(err.Error(), "no such host") &&
 		!strings.Contains(err.Error(), "dns") &&
 		!strings.Contains(err.Error(), "lookup") {
 		t.Errorf("Expected DNS resolution error, got: %v", err)
 	}
 
+	// Create test data using builder
+	subreddit := testutil.NewSubreddit("testsub").
+		WithID("testsubid").
+		Build()
+
 	// Create working server for recovery
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		subredditData := map[string]interface{}{
-			"kind": "t5",
-			"data": map[string]interface{}{
-				"id":           "testsubid",
-				"name":         "t5_testsubid",
-				"display_name": "testsub",
-				"subscribers":  100000,
-				"created_utc":  1609459200.0,
-				"created":      1609459200.0,
-			},
-		}
-		json.NewEncoder(w).Encode(subredditData)
-	}))
+	server := testutil.NewMockServer().
+		WithSubreddit("testsub", subreddit).
+		Start()
 	defer server.Close()
 
 	// Create new client pointing to working server
 	recoveryHttpClient := &http.Client{Timeout: 5 * time.Second}
-	recoveryInternalClient, err := internal.NewClient(recoveryHttpClient, server.URL, "test/1.0", nil)
-	if err != nil {
-		t.Fatalf("Failed to create recovery internal httpClient: %v", err)
-	}
+	recoveryInternalClient, err := internal.NewClient(recoveryHttpClient, server.URL(), "test/1.0", nil)
+	testutil.AssertNoError(t, err)
 
 	recoveryClient := &Reddit{
 		httpClient: recoveryInternalClient,
@@ -283,13 +224,11 @@ func TestDNSFailureRecovery(t *testing.T) {
 	}
 
 	// Recovery request should succeed
-	subreddit, err := recoveryClient.GetSubreddit(ctx, "testsub")
-	if err != nil {
-		t.Fatalf("Recovery request failed: %v", err)
-	}
+	result, err := recoveryClient.GetSubreddit(ctx, "testsub")
+	testutil.AssertNoError(t, err)
 
-	if subreddit.DisplayName != "testsub" {
-		t.Errorf("Expected 'testsub', got: %s", subreddit.DisplayName)
+	if result.DisplayName != "testsub" {
+		t.Errorf("Expected 'testsub', got: %s", result.DisplayName)
 	}
 
 	t.Logf("Successfully recovered from DNS resolution failure")
@@ -300,6 +239,12 @@ func TestHTTP5xxErrorRecovery(t *testing.T) {
 	var requestCount int
 	var mu sync.Mutex
 
+	// Create test data using builder
+	subreddit := testutil.NewSubreddit("testsub").
+		WithID("testsubid").
+		Build()
+
+	// Need httptest.NewServer to control response behavior per request
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		requestCount++
@@ -311,34 +256,20 @@ func TestHTTP5xxErrorRecovery(t *testing.T) {
 		// First few requests return 500, then succeed
 		if currentRequest <= 3 {
 			w.WriteHeader(http.StatusInternalServerError)
-			errorResponse := map[string]interface{}{
-				"error":   "Internal Server Error",
-				"message": "Simulated server error",
-			}
-			json.NewEncoder(w).Encode(errorResponse)
+			w.Write([]byte(`{"error":"Internal Server Error","message":"Simulated server error"}`))
 		} else {
 			w.WriteHeader(http.StatusOK)
-			subredditData := map[string]interface{}{
-				"kind": "t5",
-				"data": map[string]interface{}{
-					"id":           "testsubid",
-					"name":         "t5_testsubid",
-					"display_name": "testsub",
-					"subscribers":  100000,
-					"created_utc":  1609459200.0,
-					"created":      1609459200.0,
-				},
-			}
-			json.NewEncoder(w).Encode(subredditData)
+			thing := testutil.NewSubreddit("testsub").
+				WithID("testsubid").
+				ToThing()
+			w.Write(thing.Data)
 		}
 	}))
 	defer server.Close()
 
 	httpClient := &http.Client{Timeout: 5 * time.Second}
 	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
-	if err != nil {
-		t.Fatalf("Failed to create internal httpClient: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
@@ -352,10 +283,7 @@ func TestHTTP5xxErrorRecovery(t *testing.T) {
 	// First few requests should fail with 500 errors
 	for i := 0; i < 3; i++ {
 		_, err = client.GetSubreddit(ctx, "testsub")
-		if err == nil {
-			t.Errorf("Expected server error for request %d, but got none", i+1)
-		}
-
+		testutil.AssertError(t, err)
 		if !strings.Contains(err.Error(), "500") &&
 			!strings.Contains(err.Error(), "Internal Server Error") {
 			t.Errorf("Expected 500 error for request %d, got: %v", i+1, err)
@@ -363,13 +291,11 @@ func TestHTTP5xxErrorRecovery(t *testing.T) {
 	}
 
 	// Fourth request should succeed
-	subreddit, err := client.GetSubreddit(ctx, "testsub")
-	if err != nil {
-		t.Fatalf("Recovery request failed: %v", err)
-	}
+	result, err := client.GetSubreddit(ctx, "testsub")
+	testutil.AssertNoError(t, err)
 
-	if subreddit.DisplayName != "testsub" {
-		t.Errorf("Expected 'testsub', got: %s", subreddit.DisplayName)
+	if result.DisplayName != "testsub" {
+		t.Errorf("Expected 'testsub', got: %s", result.DisplayName)
 	}
 
 	if requestCount != 4 {
@@ -384,6 +310,12 @@ func TestHTTP429RateLimitRecovery(t *testing.T) {
 	var requestCount int
 	var mu sync.Mutex
 
+	// Create test data using builder
+	subreddit := testutil.NewSubreddit("testsub").
+		WithID("testsubid").
+		Build()
+
+	// Need httptest.NewServer to control response behavior per request
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		requestCount++
@@ -395,37 +327,23 @@ func TestHTTP429RateLimitRecovery(t *testing.T) {
 			w.Header().Set("X-RateLimit-Remaining", "0")
 			w.Header().Set("X-RateLimit-Reset", fmt.Sprintf("%d", time.Now().Add(1*time.Second).Unix()))
 			w.WriteHeader(http.StatusTooManyRequests)
-			errorResponse := map[string]interface{}{
-				"error":   "Too Many Requests",
-				"message": "Rate limit exceeded",
-			}
-			json.NewEncoder(w).Encode(errorResponse)
+			w.Write([]byte(`{"error":"Too Many Requests","message":"Rate limit exceeded"}`))
 		} else {
 			w.Header().Set("X-RateLimit-Remaining", "60")
 			w.Header().Set("X-RateLimit-Reset", fmt.Sprintf("%d", time.Now().Add(1*time.Hour).Unix()))
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
-			subredditData := map[string]interface{}{
-				"kind": "t5",
-				"data": map[string]interface{}{
-					"id":           "testsubid",
-					"name":         "t5_testsubid",
-					"display_name": "testsub",
-					"subscribers":  100000,
-					"created_utc":  1609459200.0,
-					"created":      1609459200.0,
-				},
-			}
-			json.NewEncoder(w).Encode(subredditData)
+			thing := testutil.NewSubreddit("testsub").
+				WithID("testsubid").
+				ToThing()
+			w.Write(thing.Data)
 		}
 	}))
 	defer server.Close()
 
 	httpClient := &http.Client{Timeout: 5 * time.Second}
 	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
-	if err != nil {
-		t.Fatalf("Failed to create internal httpClient: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
@@ -438,10 +356,7 @@ func TestHTTP429RateLimitRecovery(t *testing.T) {
 
 	// First request should be rate limited
 	_, err = client.GetSubreddit(ctx, "testsub")
-	if err == nil {
-		t.Error("Expected rate limit error, but got none")
-	}
-
+	testutil.AssertError(t, err)
 	if !strings.Contains(err.Error(), "429") &&
 		!strings.Contains(err.Error(), "Too Many Requests") {
 		t.Errorf("Expected rate limit error, got: %v", err)
@@ -451,13 +366,11 @@ func TestHTTP429RateLimitRecovery(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Second request should succeed
-	subreddit, err := client.GetSubreddit(ctx, "testsub")
-	if err != nil {
-		t.Fatalf("Recovery request failed: %v", err)
-	}
+	result, err := client.GetSubreddit(ctx, "testsub")
+	testutil.AssertNoError(t, err)
 
-	if subreddit.DisplayName != "testsub" {
-		t.Errorf("Expected 'testsub', got: %s", subreddit.DisplayName)
+	if result.DisplayName != "testsub" {
+		t.Errorf("Expected 'testsub', got: %s", result.DisplayName)
 	}
 
 	if requestCount != 2 {
@@ -473,6 +386,7 @@ func TestPartialResponseRecovery(t *testing.T) {
 	var requestCount int
 	var mu sync.Mutex
 
+	// Need httptest.NewServer to hijack connection for incomplete response
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		requestCount++
@@ -494,27 +408,17 @@ func TestPartialResponseRecovery(t *testing.T) {
 		} else {
 			// Send complete response
 			w.WriteHeader(http.StatusOK)
-			subredditData := map[string]interface{}{
-				"kind": "t5",
-				"data": map[string]interface{}{
-					"id":           "testsubid",
-					"name":         "t5_testsubid",
-					"display_name": "testsub",
-					"subscribers":  100000,
-					"created_utc":  1609459200.0,
-					"created":      1609459200.0,
-				},
-			}
-			json.NewEncoder(w).Encode(subredditData)
+			thing := testutil.NewSubreddit("testsub").
+				WithID("testsubid").
+				ToThing()
+			w.Write(thing.Data)
 		}
 	}))
 	defer server.Close()
 
 	httpClient := &http.Client{Timeout: 5 * time.Second}
 	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
-	if err != nil {
-		t.Fatalf("Failed to create internal httpClient: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
@@ -527,10 +431,7 @@ func TestPartialResponseRecovery(t *testing.T) {
 
 	// First request should fail due to incomplete response
 	_, err = client.GetSubreddit(ctx, "testsub")
-	if err == nil {
-		t.Error("Expected parse error, but got none")
-	}
-
+	testutil.AssertError(t, err)
 	if !strings.Contains(err.Error(), "parse") &&
 		!strings.Contains(err.Error(), "JSON") &&
 		!strings.Contains(err.Error(), "connection") {
@@ -538,13 +439,11 @@ func TestPartialResponseRecovery(t *testing.T) {
 	}
 
 	// Second request should succeed
-	subreddit, err := client.GetSubreddit(ctx, "testsub")
-	if err != nil {
-		t.Fatalf("Recovery request failed: %v", err)
-	}
+	result, err := client.GetSubreddit(ctx, "testsub")
+	testutil.AssertNoError(t, err)
 
-	if subreddit.DisplayName != "testsub" {
-		t.Errorf("Expected 'testsub', got: %s", subreddit.DisplayName)
+	if result.DisplayName != "testsub" {
+		t.Errorf("Expected 'testsub', got: %s", result.DisplayName)
 	}
 
 	if requestCount != 2 {
@@ -559,6 +458,7 @@ func TestIntermittentNetworkFailure(t *testing.T) {
 	var requestCount int
 	var mu sync.Mutex
 
+	// Need httptest.NewServer to control response per request
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		requestCount++
@@ -567,39 +467,23 @@ func TestIntermittentNetworkFailure(t *testing.T) {
 
 		w.Header().Set("Content-Type", "application/json")
 
-		// Simulate intermittent failures
+		// Simulate intermittent failures - every third request fails
 		if currentRequest%3 == 0 {
-			// Every third request fails
 			w.WriteHeader(http.StatusServiceUnavailable)
-			errorResponse := map[string]interface{}{
-				"error":   "Service Unavailable",
-				"message": "Simulated intermittent failure",
-			}
-			json.NewEncoder(w).Encode(errorResponse)
+			w.Write([]byte(`{"error":"Service Unavailable","message":"Simulated intermittent failure"}`))
 		} else {
-			// Other requests succeed
 			w.WriteHeader(http.StatusOK)
-			subredditData := map[string]interface{}{
-				"kind": "t5",
-				"data": map[string]interface{}{
-					"id":           "testsubid",
-					"name":         "t5_testsubid",
-					"display_name": "testsub",
-					"subscribers":  100000,
-					"created_utc":  1609459200.0,
-					"created":      1609459200.0,
-				},
-			}
-			json.NewEncoder(w).Encode(subredditData)
+			thing := testutil.NewSubreddit("testsub").
+				WithID("testsubid").
+				ToThing()
+			w.Write(thing.Data)
 		}
 	}))
 	defer server.Close()
 
 	httpClient := &http.Client{Timeout: 5 * time.Second}
 	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
-	if err != nil {
-		t.Fatalf("Failed to create internal httpClient: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
@@ -651,6 +535,7 @@ func TestNetworkRecoveryWithRetry(t *testing.T) {
 	var requestCount int
 	var mu sync.Mutex
 
+	// Need httptest.NewServer to control response per request
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		requestCount++
@@ -662,34 +547,20 @@ func TestNetworkRecoveryWithRetry(t *testing.T) {
 		// Fail first 2 requests, succeed on 3rd
 		if currentRequest <= 2 {
 			w.WriteHeader(http.StatusBadGateway)
-			errorResponse := map[string]interface{}{
-				"error":   "Bad Gateway",
-				"message": "Simulated temporary failure",
-			}
-			json.NewEncoder(w).Encode(errorResponse)
+			w.Write([]byte(`{"error":"Bad Gateway","message":"Simulated temporary failure"}`))
 		} else {
 			w.WriteHeader(http.StatusOK)
-			subredditData := map[string]interface{}{
-				"kind": "t5",
-				"data": map[string]interface{}{
-					"id":           "testsubid",
-					"name":         "t5_testsubid",
-					"display_name": "testsub",
-					"subscribers":  100000,
-					"created_utc":  1609459200.0,
-					"created":      1609459200.0,
-				},
-			}
-			json.NewEncoder(w).Encode(subredditData)
+			thing := testutil.NewSubreddit("testsub").
+				WithID("testsubid").
+				ToThing()
+			w.Write(thing.Data)
 		}
 	}))
 	defer server.Close()
 
 	httpClient := &http.Client{Timeout: 5 * time.Second}
 	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
-	if err != nil {
-		t.Fatalf("Failed to create internal httpClient: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
@@ -710,11 +581,11 @@ func TestNetworkRecoveryWithRetry(t *testing.T) {
 			time.Sleep(100 * time.Millisecond * time.Duration(attempt))
 		}
 
-		subreddit, err := client.GetSubreddit(ctx, "testsub")
+		result, err := client.GetSubreddit(ctx, "testsub")
 		if err == nil {
 			// Success!
-			if subreddit.DisplayName != "testsub" {
-				t.Errorf("Expected 'testsub', got: %s", subreddit.DisplayName)
+			if result.DisplayName != "testsub" {
+				t.Errorf("Expected 'testsub', got: %s", result.DisplayName)
 			}
 			t.Logf("Successfully recovered after %d attempts", attempt+1)
 			return
@@ -733,6 +604,7 @@ func TestContextCancellationDuringRecovery(t *testing.T) {
 	var requestCount int
 	var mu sync.Mutex
 
+	// Need httptest.NewServer to always return error for cancellation testing
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		requestCount++
@@ -742,19 +614,13 @@ func TestContextCancellationDuringRecovery(t *testing.T) {
 
 		// Always fail to test cancellation
 		w.WriteHeader(http.StatusInternalServerError)
-		errorResponse := map[string]interface{}{
-			"error":   "Internal Server Error",
-			"message": "Persistent failure for cancellation test",
-		}
-		json.NewEncoder(w).Encode(errorResponse)
+		w.Write([]byte(`{"error":"Internal Server Error","message":"Persistent failure for cancellation test"}`))
 	}))
 	defer server.Close()
 
 	httpClient := &http.Client{Timeout: 5 * time.Second}
 	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
-	if err != nil {
-		t.Fatalf("Failed to create internal httpClient: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,

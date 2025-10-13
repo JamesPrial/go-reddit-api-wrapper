@@ -5,23 +5,49 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/jamesprial/go-reddit-api-wrapper/internal/testutil"
+	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 )
+
+// MockHTTPClient is a mock implementation of the HTTPClient interface for testing.
+// Define it locally to avoid import cycles with testutil.
+type MockHTTPClient struct {
+	doFunc func(req *http.Request, v *types.Thing) error
+}
+
+func (m *MockHTTPClient) Do(req *http.Request, v *types.Thing) error {
+	if m.doFunc != nil {
+		return m.doFunc(req, v)
+	}
+	return nil
+}
 
 // TestTokenRefreshTimingEdgeCases tests edge cases around token refresh timing
 func TestTokenRefreshTimingEdgeCases(t *testing.T) {
 	var requestCount int64
 	var tokenExpiry int64
-	var currentTokenLifespan time.Duration // Used to communicate expected lifespan to mock server
+	var currentTokenLifespan time.Duration
 	var mu sync.Mutex
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	account := testutil.NewAccount("testuser").
+		WithID("user123").
+		Build()
+
+	server := testutil.NewMockServer().
+		WithAccount(account).
+		Start()
+	defer server.Close()
+
+	// Override the handler to intercept token requests
+	originalHandler := server.Server().Config.Handler
+	server.Server().Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt64(&requestCount, 1)
 
 		// Handle token requests
@@ -42,15 +68,12 @@ func TestTokenRefreshTimingEdgeCases(t *testing.T) {
 
 			switch grantType {
 			case "client_credentials":
-				// Initial token or refresh
 				mu.Lock()
 				lifespan := currentTokenLifespan
 				mu.Unlock()
 
-				// Use the test case's expected lifespan
 				expiresInSeconds := int(lifespan.Seconds())
 				if expiresInSeconds == 0 {
-					// Default to 1 hour if not set
 					expiresInSeconds = 3600
 					lifespan = 1 * time.Hour
 				}
@@ -69,7 +92,6 @@ func TestTokenRefreshTimingEdgeCases(t *testing.T) {
 				}
 
 			case "refresh_token":
-				// Refresh token flow
 				expiry := time.Now().Add(1 * time.Hour).Unix()
 				mu.Lock()
 				tokenExpiry = expiry
@@ -93,31 +115,9 @@ func TestTokenRefreshTimingEdgeCases(t *testing.T) {
 			return
 		}
 
-		// Handle API requests
-		w.Header().Set("X-Ratelimit-Remaining", "60")
-		w.Header().Set("X-Ratelimit-Reset", "123456789")
-		w.Header().Set("Content-Type", "application/json")
-
-		// Check authorization header
-		authHeader := r.Header.Get("Authorization")
-		if !strings.HasPrefix(authHeader, "Bearer ") {
-			w.WriteHeader(http.StatusUnauthorized)
-			json.NewEncoder(w).Encode(map[string]string{"error": "unauthorized"})
-			return
-		}
-
-		response := map[string]interface{}{
-			"kind": "t2",
-			"data": map[string]interface{}{
-				"id":          "user123",
-				"name":        "t2_testuser",
-				"created_utc": 1609459200.0,
-				"created":     1609459200.0,
-			},
-		}
-		json.NewEncoder(w).Encode(response)
-	}))
-	t.Cleanup(server.Close)
+		// Delegate to original handler for other requests
+		originalHandler.ServeHTTP(w, r)
+	})
 
 	t.Run("TokenExpiryEdgeCases", func(t *testing.T) {
 		testCases := []struct {
@@ -163,29 +163,21 @@ func TestTokenRefreshTimingEdgeCases(t *testing.T) {
 				atomic.StoreInt64(&requestCount, 0)
 				mu.Lock()
 				tokenExpiry = 0
-				mu.Unlock()
-
-				// Set token lifespan for this test case
-				mu.Lock()
 				currentTokenLifespan = tc.tokenLifespan
 				mu.Unlock()
 
-				// Create client with custom token lifespan
 				config := &Config{
 					ClientID:     "test_id",
 					ClientSecret: "test_secret",
 					UserAgent:    "test/1.0",
-					AuthURL:      server.URL,
-					BaseURL:      server.URL,
+					AuthURL:      server.URL(),
+					BaseURL:      server.URL(),
 					HTTPClient:   &http.Client{Timeout: 30 * time.Second},
 				}
 
 				client, err := NewClient(config)
-				if err != nil {
-					t.Fatalf("Failed to create client: %v", err)
-				}
+				testutil.AssertNoError(t, err)
 
-				// Log the test being performed
 				t.Logf("Testing %s: %s", tc.name, tc.description)
 
 				// Wait for the specified delay
@@ -196,9 +188,7 @@ func TestTokenRefreshTimingEdgeCases(t *testing.T) {
 				_, err = client.Me(context.Background())
 				requestDuration := time.Since(startTime)
 
-				if err != nil {
-					t.Errorf("Request failed: %v", err)
-				}
+				testutil.AssertNoError(t, err)
 
 				totalRequests := atomic.LoadInt64(&requestCount)
 
@@ -223,9 +213,19 @@ func TestTokenRefreshTimingEdgeCases(t *testing.T) {
 func TestConcurrentTokenRefreshRaceCondition(t *testing.T) {
 	var requestCount int64
 	var tokenRefreshCount int64
-	var mu sync.Mutex
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	account := testutil.NewAccount("testuser").
+		WithID("user123").
+		Build()
+
+	server := testutil.NewMockServer().
+		WithAccount(account).
+		Start()
+	defer server.Close()
+
+	// Override handler to intercept token requests
+	originalHandler := server.Server().Config.Handler
+	server.Server().Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt64(&requestCount, 1)
 
 		// Handle token requests
@@ -233,10 +233,7 @@ func TestConcurrentTokenRefreshRaceCondition(t *testing.T) {
 			// Simulate token refresh delay to increase chance of race condition
 			time.Sleep(100 * time.Millisecond)
 
-			mu.Lock()
-			tokenRefreshCount++
-			currentRefreshCount := tokenRefreshCount
-			mu.Unlock()
+			currentRefreshCount := atomic.AddInt64(&tokenRefreshCount, 1)
 
 			response := map[string]interface{}{
 				"access_token":  fmt.Sprintf("test_token_%d", currentRefreshCount),
@@ -251,23 +248,9 @@ func TestConcurrentTokenRefreshRaceCondition(t *testing.T) {
 			return
 		}
 
-		// Handle API requests
-		w.Header().Set("X-Ratelimit-Remaining", "60")
-		w.Header().Set("X-Ratelimit-Reset", "123456789")
-		w.Header().Set("Content-Type", "application/json")
-
-		response := map[string]interface{}{
-			"kind": "t2",
-			"data": map[string]interface{}{
-				"id":          "user123",
-				"name":        "t2_testuser",
-				"created_utc": 1609459200.0,
-				"created":     1609459200.0,
-			},
-		}
-		json.NewEncoder(w).Encode(response)
-	}))
-	t.Cleanup(server.Close)
+		// Delegate to original handler
+		originalHandler.ServeHTTP(w, r)
+	})
 
 	t.Run("ConcurrentTokenRefresh", func(t *testing.T) {
 		// Reset counters
@@ -278,15 +261,13 @@ func TestConcurrentTokenRefreshRaceCondition(t *testing.T) {
 			ClientID:     "test_id",
 			ClientSecret: "test_secret",
 			UserAgent:    "test/1.0",
-			AuthURL:      server.URL,
-			BaseURL:      server.URL,
+			AuthURL:      server.URL(),
+			BaseURL:      server.URL(),
 			HTTPClient:   &http.Client{Timeout: 30 * time.Second},
 		}
 
 		client, err := NewClient(config)
-		if err != nil {
-			t.Fatalf("Failed to create client: %v", err)
-		}
+		testutil.AssertNoError(t, err)
 
 		// Make multiple concurrent requests that should trigger token refresh
 		numGoroutines := 10
@@ -359,9 +340,20 @@ func TestConcurrentTokenRefreshRaceCondition(t *testing.T) {
 func TestAuthenticationFailureRecovery(t *testing.T) {
 	var requestCount int64
 	var authFailureCount int64
-	var mu sync.Mutex
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	account := testutil.NewAccount("testuser").
+		WithID("user123").
+		Build()
+
+	server := testutil.NewMockServer().
+		WithAccount(account).
+		Start()
+	defer server.Close()
+
+	// Override handler to intercept token requests
+	originalHandler := server.Server().Config.Handler
+	var mu sync.Mutex
+	server.Server().Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt64(&requestCount, 1)
 
 		// Handle token requests
@@ -395,23 +387,9 @@ func TestAuthenticationFailureRecovery(t *testing.T) {
 			return
 		}
 
-		// Handle API requests
-		w.Header().Set("X-Ratelimit-Remaining", "60")
-		w.Header().Set("X-Ratelimit-Reset", "123456789")
-		w.Header().Set("Content-Type", "application/json")
-
-		response := map[string]interface{}{
-			"kind": "t2",
-			"data": map[string]interface{}{
-				"id":          "user123",
-				"name":        "t2_testuser",
-				"created_utc": 1609459200.0,
-				"created":     1609459200.0,
-			},
-		}
-		json.NewEncoder(w).Encode(response)
-	}))
-	t.Cleanup(server.Close)
+		// Delegate to original handler
+		originalHandler.ServeHTTP(w, r)
+	})
 
 	t.Run("AuthFailureRecovery", func(t *testing.T) {
 		t.Skip("Auth retry logic not yet implemented in NewClient() - NewClient() authenticates immediately and returns error on auth failure")
@@ -424,23 +402,18 @@ func TestAuthenticationFailureRecovery(t *testing.T) {
 			ClientID:     "test_id",
 			ClientSecret: "test_secret",
 			UserAgent:    "test/1.0",
-			AuthURL:      server.URL,
-			BaseURL:      server.URL,
+			AuthURL:      server.URL(),
+			BaseURL:      server.URL(),
 			HTTPClient:   &http.Client{Timeout: 30 * time.Second},
 		}
 
 		client, err := NewClient(config)
-		if err != nil {
-			t.Fatalf("Failed to create client: %v", err)
-		}
+		testutil.AssertNoError(t, err)
 
 		// Initial request should fail due to auth failures
 		_, err = client.Me(context.Background())
-		if err == nil {
-			t.Error("Expected initial request to fail due to auth issues")
-		} else {
-			t.Logf("Initial request failed as expected: %v", err)
-		}
+		testutil.AssertError(t, err)
+		t.Logf("Initial request failed as expected: %v", err)
 
 		// Wait a bit and retry - should eventually succeed
 		var successCount int
@@ -493,7 +466,18 @@ func TestTokenCacheInvalidation(t *testing.T) {
 	var revokedTokens []string
 	var mu sync.Mutex
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	account := testutil.NewAccount("testuser").
+		WithID("user123").
+		Build()
+
+	server := testutil.NewMockServer().
+		WithAccount(account).
+		Start()
+	defer server.Close()
+
+	// Override handler to intercept token and API requests
+	originalHandler := server.Server().Config.Handler
+	server.Server().Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt64(&requestCount, 1)
 
 		// Handle token requests
@@ -513,25 +497,28 @@ func TestTokenCacheInvalidation(t *testing.T) {
 			return
 		}
 
-		// Handle API requests
-		w.Header().Set("X-Ratelimit-Remaining", "60")
-		w.Header().Set("X-Ratelimit-Reset", "123456789")
-		w.Header().Set("Content-Type", "application/json")
+		// Handle API requests - check for revoked tokens
+		if r.URL.Path == "/api/v1/me" {
+			authHeader := r.Header.Get("Authorization")
+			if !strings.HasPrefix(authHeader, "Bearer ") {
+				w.WriteHeader(http.StatusUnauthorized)
+				json.NewEncoder(w).Encode(map[string]string{"error": "unauthorized"})
+				return
+			}
 
-		// Check authorization header
-		authHeader := r.Header.Get("Authorization")
-		if !strings.HasPrefix(authHeader, "Bearer ") {
-			w.WriteHeader(http.StatusUnauthorized)
-			json.NewEncoder(w).Encode(map[string]string{"error": "unauthorized"})
-			return
-		}
+			token := strings.TrimPrefix(authHeader, "Bearer ")
 
-		token := strings.TrimPrefix(authHeader, "Bearer ")
+			mu.Lock()
+			isRevoked := false
+			for _, revoked := range revokedTokens {
+				if token == revoked {
+					isRevoked = true
+					break
+				}
+			}
+			mu.Unlock()
 
-		mu.Lock()
-		for _, revoked := range revokedTokens {
-			if token == revoked {
-				mu.Unlock()
+			if isRevoked {
 				w.WriteHeader(http.StatusUnauthorized)
 				json.NewEncoder(w).Encode(map[string]string{
 					"error":             "invalid_token",
@@ -540,20 +527,10 @@ func TestTokenCacheInvalidation(t *testing.T) {
 				return
 			}
 		}
-		mu.Unlock()
 
-		response := map[string]interface{}{
-			"kind": "t2",
-			"data": map[string]interface{}{
-				"id":          "user123",
-				"name":        "t2_testuser",
-				"created_utc": 1609459200.0,
-				"created":     1609459200.0,
-			},
-		}
-		json.NewEncoder(w).Encode(response)
-	}))
-	t.Cleanup(server.Close)
+		// Delegate to original handler
+		originalHandler.ServeHTTP(w, r)
+	})
 
 	t.Run("TokenCacheInvalidation", func(t *testing.T) {
 		// Reset counters
@@ -564,22 +541,17 @@ func TestTokenCacheInvalidation(t *testing.T) {
 			ClientID:     "test_id",
 			ClientSecret: "test_secret",
 			UserAgent:    "test/1.0",
-			AuthURL:      server.URL,
-			BaseURL:      server.URL,
+			AuthURL:      server.URL(),
+			BaseURL:      server.URL(),
 			HTTPClient:   &http.Client{Timeout: 30 * time.Second},
 		}
 
 		client, err := NewClient(config)
-		if err != nil {
-			t.Fatalf("Failed to create client: %v", err)
-		}
+		testutil.AssertNoError(t, err)
 
 		// Make initial request
 		_, err = client.Me(context.Background())
-		if err != nil {
-			t.Fatalf("Initial request failed: %v", err)
-		}
-
+		testutil.AssertNoError(t, err)
 		t.Logf("Initial request succeeded")
 
 		// Wait for token to expire
@@ -587,11 +559,8 @@ func TestTokenCacheInvalidation(t *testing.T) {
 
 		// Make another request - should trigger token refresh
 		_, err = client.Me(context.Background())
-		if err != nil {
-			t.Errorf("Request after token expiry failed: %v", err)
-		} else {
-			t.Logf("Request after token expiry succeeded (token refreshed)")
-		}
+		testutil.AssertNoError(t, err)
+		t.Logf("Request after token expiry succeeded (token refreshed)")
 
 		// Manually revoke current token (simulate server-side revocation)
 		mu.Lock()
@@ -600,11 +569,8 @@ func TestTokenCacheInvalidation(t *testing.T) {
 
 		// Make request with revoked token - should trigger new token refresh
 		_, err = client.Me(context.Background())
-		if err != nil {
-			t.Errorf("Request with revoked token failed: %v", err)
-		} else {
-			t.Logf("Request with revoked token succeeded (new token obtained)")
-		}
+		testutil.AssertNoError(t, err)
+		t.Logf("Request with revoked token succeeded (new token obtained)")
 
 		totalRequests := atomic.LoadInt64(&requestCount)
 		totalTokensIssued := atomic.LoadInt64(&tokenIssuedCount)
@@ -631,22 +597,33 @@ func TestMultiClientAuthBehavior(t *testing.T) {
 	var requestCount int64
 	var tokenRequests int64
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	account := testutil.NewAccount("testuser").
+		WithID("user123").
+		Build()
+
+	server := testutil.NewMockServer().
+		WithAccount(account).
+		Start()
+	defer server.Close()
+
+	// Override handler to intercept token requests
+	originalHandler := server.Server().Config.Handler
+	server.Server().Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt64(&requestCount, 1)
 
 		// Handle token requests
 		if strings.Contains(r.URL.Path, "/api/v1/access_token") {
-			atomic.AddInt64(&tokenRequests, 1)
+			currentTokenRequest := atomic.AddInt64(&tokenRequests, 1)
 
 			// Simulate some delay to make race conditions more likely
 			time.Sleep(50 * time.Millisecond)
 
 			response := map[string]interface{}{
-				"access_token":  fmt.Sprintf("shared_token_%d", tokenRequests),
+				"access_token":  fmt.Sprintf("shared_token_%d", currentTokenRequest),
 				"token_type":    "bearer",
 				"expires_in":    3600,
 				"scope":         "read",
-				"refresh_token": fmt.Sprintf("shared_refresh_%d", tokenRequests),
+				"refresh_token": fmt.Sprintf("shared_refresh_%d", currentTokenRequest),
 			}
 
 			w.Header().Set("Content-Type", "application/json")
@@ -654,23 +631,9 @@ func TestMultiClientAuthBehavior(t *testing.T) {
 			return
 		}
 
-		// Handle API requests
-		w.Header().Set("X-Ratelimit-Remaining", "60")
-		w.Header().Set("X-Ratelimit-Reset", "123456789")
-		w.Header().Set("Content-Type", "application/json")
-
-		response := map[string]interface{}{
-			"kind": "t2",
-			"data": map[string]interface{}{
-				"id":          "user123",
-				"name":        "t2_testuser",
-				"created_utc": 1609459200.0,
-				"created":     1609459200.0,
-			},
-		}
-		json.NewEncoder(w).Encode(response)
-	}))
-	t.Cleanup(server.Close)
+		// Delegate to original handler
+		originalHandler.ServeHTTP(w, r)
+	})
 
 	t.Run("MultiClientAuth", func(t *testing.T) {
 		// Reset counters
@@ -686,15 +649,13 @@ func TestMultiClientAuthBehavior(t *testing.T) {
 				ClientID:     "shared_id",
 				ClientSecret: "shared_secret",
 				UserAgent:    fmt.Sprintf("test/%d.0", i+1),
-				AuthURL:      server.URL,
-				BaseURL:      server.URL,
+				AuthURL:      server.URL(),
+				BaseURL:      server.URL(),
 				HTTPClient:   &http.Client{Timeout: 30 * time.Second},
 			}
 
 			client, err := NewClient(config)
-			if err != nil {
-				t.Fatalf("Failed to create client %d: %v", i, err)
-			}
+			testutil.AssertNoError(t, err)
 
 			clients[i] = client
 		}
@@ -768,9 +729,19 @@ func TestMultiClientAuthBehavior(t *testing.T) {
 // TestAuthSystemClockManipulation tests behavior with system clock changes
 func TestAuthSystemClockManipulation(t *testing.T) {
 	var requestCount int64
-	var mu sync.Mutex
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	account := testutil.NewAccount("testuser").
+		WithID("user123").
+		Build()
+
+	server := testutil.NewMockServer().
+		WithAccount(account).
+		Start()
+	defer server.Close()
+
+	// Override handler to intercept token requests
+	originalHandler := server.Server().Config.Handler
+	server.Server().Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt64(&requestCount, 1)
 
 		// Handle token requests
@@ -779,16 +750,12 @@ func TestAuthSystemClockManipulation(t *testing.T) {
 			serverTime := time.Now().Unix()
 			expiry := serverTime + 3600 // 1 hour from server time
 
-			mu.Lock()
-			_ = expiry // Store expiry (unused in this test but keeps variable)
-			mu.Unlock()
-
 			response := map[string]interface{}{
 				"access_token":  fmt.Sprintf("clock_token_%d", serverTime),
 				"token_type":    "bearer",
 				"expires_in":    3600,
 				"scope":         "read",
-				"refresh_token": fmt.Sprintf("clock_refresh_%d", serverTime),
+				"refresh_token": fmt.Sprintf("clock_refresh_%d", expiry),
 			}
 
 			w.Header().Set("Content-Type", "application/json")
@@ -796,69 +763,42 @@ func TestAuthSystemClockManipulation(t *testing.T) {
 			return
 		}
 
-		// Handle API requests
-		w.Header().Set("X-Ratelimit-Remaining", "60")
-		w.Header().Set("X-Ratelimit-Reset", "123456789")
-		w.Header().Set("Content-Type", "application/json")
-
-		response := map[string]interface{}{
-			"kind": "t2",
-			"data": map[string]interface{}{
-				"id":          "user123",
-				"name":        "t2_testuser",
-				"created_utc": 1609459200.0,
-				"created":     1609459200.0,
-			},
-		}
-		json.NewEncoder(w).Encode(response)
-	}))
-	t.Cleanup(server.Close)
+		// Delegate to original handler
+		originalHandler.ServeHTTP(w, r)
+	})
 
 	t.Run("SystemClockEdgeCases", func(t *testing.T) {
 		// Reset counters
 		atomic.StoreInt64(&requestCount, 0)
-		mu.Lock()
-		_ = 0 // Reset token expiry (unused in this test)
-		mu.Unlock()
 
 		config := &Config{
 			ClientID:     "test_id",
 			ClientSecret: "test_secret",
 			UserAgent:    "test/1.0",
-			AuthURL:      server.URL,
-			BaseURL:      server.URL,
+			AuthURL:      server.URL(),
+			BaseURL:      server.URL(),
 			HTTPClient:   &http.Client{Timeout: 30 * time.Second},
 		}
 
 		client, err := NewClient(config)
-		if err != nil {
-			t.Fatalf("Failed to create client: %v", err)
-		}
+		testutil.AssertNoError(t, err)
 
 		// Test 1: Normal operation
 		_, err = client.Me(context.Background())
-		if err != nil {
-			t.Errorf("Normal request failed: %v", err)
-		} else {
-			t.Logf("Normal request succeeded")
-		}
+		testutil.AssertNoError(t, err)
+		t.Logf("Normal request succeeded")
 
 		// Test 2: Simulate clock skew by waiting
 		time.Sleep(100 * time.Millisecond)
 
 		_, err = client.Me(context.Background())
-		if err != nil {
-			t.Errorf("Request after clock skew failed: %v", err)
-		} else {
-			t.Logf("Request after clock skew succeeded")
-		}
+		testutil.AssertNoError(t, err)
+		t.Logf("Request after clock skew succeeded")
 
 		// Test 3: Rapid successive requests
 		for i := 0; i < 5; i++ {
 			_, err = client.Me(context.Background())
-			if err != nil {
-				t.Errorf("Rapid request %d failed: %v", i+1, err)
-			}
+			testutil.AssertNoError(t, err)
 			time.Sleep(10 * time.Millisecond)
 		}
 

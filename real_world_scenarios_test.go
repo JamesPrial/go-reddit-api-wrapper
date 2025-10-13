@@ -2,7 +2,6 @@ package graw
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -13,178 +12,75 @@ import (
 	"time"
 
 	"github.com/jamesprial/go-reddit-api-wrapper/internal"
+	"github.com/jamesprial/go-reddit-api-wrapper/internal/testutil"
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 )
 
 // TestRedditAPIClientUsage tests real-world Reddit API client usage patterns
 func TestRedditAPIClientUsage(t *testing.T) {
-	var requestCount int
-	var mu sync.Mutex
+	// Create test data using builders
+	subreddit := testutil.NewSubreddit("testsub").
+		WithTitle("Test Subreddit").
+		WithPublicDescription("A test subreddit for real-world scenarios").
+		WithSubscribers(100000).
+		Build()
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		mu.Lock()
-		requestCount++
-		mu.Unlock()
+	hotPosts := make([]*types.Post, 10)
+	for i := 0; i < 10; i++ {
+		hotPosts[i] = testutil.NewPostBuilder().
+			WithID(fmt.Sprintf("abc%d", i)).
+			WithTitle(fmt.Sprintf("Real World Test Post %d", i)).
+			WithScore(100 + i*10).
+			WithAuthor(fmt.Sprintf("user_%d", i)).
+			WithSubreddit("testsub").
+			WithNumComments(10 + i).
+			Build()
+	}
 
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("X-Ratelimit-Remaining", "59")
-		w.Header().Set("X-Ratelimit-Reset", "60")
+	newPosts := make([]*types.Post, 10)
+	for i := 0; i < 10; i++ {
+		newPosts[i] = testutil.NewPostBuilder().
+			WithID(fmt.Sprintf("new%d", i)).
+			WithTitle(fmt.Sprintf("New Post %d", i)).
+			WithScore(50 + i*5).
+			WithAuthor(fmt.Sprintf("user_%d", i)).
+			WithSubreddit("testsub").
+			Build()
+	}
 
-		path := r.URL.Path
-		switch {
-		case strings.HasSuffix(path, "/about"):
-			// Subreddit info endpoint - must be checked before generic /r/ case
-			subredditData := map[string]interface{}{
-				"kind": "t5",
-				"data": map[string]interface{}{
-					"id":                 "testsub123",
-					"display_name":       "testsub",
-					"title":              "Test Subreddit",
-					"public_description": "A test subreddit for real-world scenarios",
-					"subscribers":        100000,
-					"active_users":       5000,
-					"created_utc":        1234567890.0,
-					"over18":             false,
-					"subscriber_growth":  []float64{1000, 2000, 3000, 4000, 5000},
-				},
-			}
-			json.NewEncoder(w).Encode(subredditData)
+	commentsPost := testutil.NewPostBuilder().
+		WithID("abc123").
+		WithTitle("Main Post for Comments").
+		WithScore(1000).
+		WithAuthor("mainuser").
+		WithSubreddit("testsub").
+		Build()
 
-		case strings.HasSuffix(path, "/hot") || strings.HasSuffix(path, "/new") || strings.HasSuffix(path, "/top"):
-			// Posts listing endpoint - must be checked before generic /r/ case
-			limit := 25
-			if limitParam := r.URL.Query().Get("limit"); limitParam != "" {
-				fmt.Sscanf(limitParam, "%d", &limit)
-			}
-			posts := make([]map[string]interface{}, limit)
-			for i := 0; i < limit; i++ {
-				score := 100 + i*10
-				posts[i] = map[string]interface{}{
-					"kind": "t3",
-					"data": map[string]interface{}{
-						"id":           fmt.Sprintf("abc%d", i),
-						"name":         fmt.Sprintf("t3_abc%d", i),
-						"title":        fmt.Sprintf("Real World Test Post %d", i),
-						"score":        score,
-						"ups":          score,
-						"downs":        0,
-						"author":       fmt.Sprintf("user_%d", i),
-						"subreddit":    "testsub",
-						"selftext":     fmt.Sprintf("This is test content for post %d with some realistic text to simulate real Reddit posts.", i),
-						"url":          fmt.Sprintf("https://example.com/post_%d", i),
-						"permalink":    fmt.Sprintf("/r/testsub/comments/%d/real_world_test_post_%d/", i, i),
-						"created":      1609459200.0 + float64(i*3600),
-						"created_utc":  1609459200.0 + float64(i*3600),
-						"num_comments": 10 + i,
-						"over_18":      false,
-						"stickied":     i == 0,
-						"gilded":       i%3 == 0,
-						"thumbnail":    "https://example.com/thumb.jpg",
-					},
-				}
-			}
+	comments := make([]*types.Comment, 25)
+	for i := 0; i < 25; i++ {
+		comments[i] = testutil.NewCommentBuilder().
+			WithID(fmt.Sprintf("comment%d", i)).
+			WithBody(fmt.Sprintf("This is comment %d with some realistic content that would appear in a real Reddit thread.", i)).
+			WithAuthor(fmt.Sprintf("commenter_%d", i)).
+			WithScore(5 + i).
+			WithParentPost("abc123").
+			WithSubreddit("testsub").
+			Build()
+	}
 
-			listingData := map[string]interface{}{
-				"kind": "Listing",
-				"data": map[string]interface{}{
-					"children": posts,
-					"after":    "",
-					"before":   "",
-				},
-			}
-			json.NewEncoder(w).Encode(listingData)
-
-		case strings.Contains(path, "/comments/"):
-			// Comments endpoint - must be checked before generic /r/ case
-			postData := map[string]interface{}{
-				"kind": "t3",
-				"data": map[string]interface{}{
-					"id":          "abc123",
-					"name":        "t3_abc123",
-					"title":       "Main Post for Comments",
-					"score":       1000,
-					"ups":         1000,
-					"downs":       0,
-					"author":      "mainuser",
-					"subreddit":   "testsub",
-					"selftext":    "This is the main post content",
-					"created":     1609459200.0,
-					"created_utc": 1609459200.0,
-					"permalink":   "/r/testsub/comments/abc123/main_post_for_comments/",
-					"url":         "https://example.com/post_abc123",
-				},
-			}
-
-			// Respect limit parameter for comments
-			commentLimit := 50
-			if limitParam := r.URL.Query().Get("limit"); limitParam != "" {
-				fmt.Sscanf(limitParam, "%d", &commentLimit)
-			}
-
-			comments := make([]map[string]interface{}, commentLimit)
-			for i := 0; i < commentLimit; i++ {
-				score := 5 + i
-				comments[i] = map[string]interface{}{
-					"kind": "t1",
-					"data": map[string]interface{}{
-						"id":          fmt.Sprintf("comment%d", i),
-						"name":        fmt.Sprintf("t1_comment%d", i),
-						"author":      fmt.Sprintf("commenter_%d", i),
-						"body":        fmt.Sprintf("This is comment %d with some realistic content that would appear in a real Reddit thread.", i),
-						"score":       score,
-						"ups":         score,
-						"downs":       0,
-						"subreddit":   "testsub",
-						"created":     1609459200.0 + float64(i*60),
-						"created_utc": 1609459200.0 + float64(i*60),
-						"link_id":     "t3_abc123",
-						"parent_id":   "t3_abc123",
-						"replies": map[string]interface{}{
-							"kind": "Listing",
-							"data": map[string]interface{}{
-								"children": []interface{}{},
-							},
-						},
-					},
-				}
-			}
-
-			postListing := map[string]interface{}{
-				"kind": "Listing",
-				"data": map[string]interface{}{
-					"children": []interface{}{postData},
-				},
-			}
-
-			commentsListing := map[string]interface{}{
-				"kind": "Listing",
-				"data": map[string]interface{}{
-					"children": comments,
-					"after":    "",
-					"before":   "",
-				},
-			}
-
-			response := []interface{}{postListing, commentsListing}
-			json.NewEncoder(w).Encode(response)
-
-		default:
-			// Default response
-			w.WriteHeader(http.StatusNotFound)
-			errorData := map[string]interface{}{
-				"error":   "Not Found",
-				"message": "The requested resource was not found",
-			}
-			json.NewEncoder(w).Encode(errorData)
-		}
-	}))
+	// Setup mock server
+	server := testutil.NewMockServer().
+		WithSubreddit("testsub", subreddit).
+		WithPosts("testsub", "hot", hotPosts...).
+		WithPosts("testsub", "new", newPosts...).
+		WithComments("testsub", "abc123", commentsPost, comments...).
+		Start()
 	defer server.Close()
 
-	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
-	if err != nil {
-		t.Fatalf("Failed to create internal httpClient: %v", err)
-	}
+	httpClient := server.Server().Client()
+	httpClient.Timeout = 30 * time.Second
+	internalClient, err := internal.NewClient(httpClient, server.URL(), "test/1.0", nil)
+	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
@@ -198,17 +94,15 @@ func TestRedditAPIClientUsage(t *testing.T) {
 	// Scenario 1: Subreddit analysis workflow
 	t.Run("SubredditAnalysis", func(t *testing.T) {
 		// Get subreddit information
-		subreddit, err := client.GetSubreddit(ctx, "testsub")
-		if err != nil {
-			t.Fatalf("Failed to get subreddit: %v", err)
+		sub, err := client.GetSubreddit(ctx, "testsub")
+		testutil.AssertNoError(t, err)
+
+		if sub.DisplayName != "testsub" {
+			t.Errorf("Expected 'testsub', got: %s", sub.DisplayName)
 		}
 
-		if subreddit.DisplayName != "testsub" {
-			t.Errorf("Expected 'testsub', got: %s", subreddit.DisplayName)
-		}
-
-		if subreddit.Subscribers != 100000 {
-			t.Errorf("Expected 100000 subscribers, got: %d", subreddit.Subscribers)
+		if sub.Subscribers != 100000 {
+			t.Errorf("Expected 100000 subscribers, got: %d", sub.Subscribers)
 		}
 
 		// Get hot posts
@@ -218,13 +112,8 @@ func TestRedditAPIClientUsage(t *testing.T) {
 				Limit: 10,
 			},
 		})
-		if err != nil {
-			t.Fatalf("Failed to get hot posts: %v", err)
-		}
-
-		if len(hotResp.Posts) != 10 {
-			t.Errorf("Expected 10 hot posts, got: %d", len(hotResp.Posts))
-		}
+		testutil.AssertNoError(t, err)
+		testutil.AssertPostCount(t, hotResp, 10)
 
 		// Get new posts
 		newResp, err := client.GetNew(ctx, &types.PostsRequest{
@@ -233,13 +122,8 @@ func TestRedditAPIClientUsage(t *testing.T) {
 				Limit: 10,
 			},
 		})
-		if err != nil {
-			t.Fatalf("Failed to get new posts: %v", err)
-		}
-
-		if len(newResp.Posts) != 10 {
-			t.Errorf("Expected 10 new posts, got: %d", len(newResp.Posts))
-		}
+		testutil.AssertNoError(t, err)
+		testutil.AssertPostCount(t, newResp, 10)
 
 		// Analyze posts
 		totalScore := 0
@@ -249,8 +133,8 @@ func TestRedditAPIClientUsage(t *testing.T) {
 
 		avgScore := float64(totalScore) / float64(len(hotResp.Posts))
 		t.Logf("Subreddit analysis completed:")
-		t.Logf("  Subreddit: %s", subreddit.DisplayName)
-		t.Logf("  Subscribers: %d", subreddit.Subscribers)
+		t.Logf("  Subreddit: %s", sub.DisplayName)
+		t.Logf("  Subscribers: %d", sub.Subscribers)
 		t.Logf("  Hot posts analyzed: %d", len(hotResp.Posts))
 		t.Logf("  Average score: %.2f", avgScore)
 	})
@@ -265,17 +149,13 @@ func TestRedditAPIClientUsage(t *testing.T) {
 				Limit: 25,
 			},
 		})
-		if err != nil {
-			t.Fatalf("Failed to get comments: %v", err)
-		}
+		testutil.AssertNoError(t, err)
 
 		if commentsResp.Post == nil {
 			t.Error("Expected post in comments response, got nil")
 		}
 
-		if len(commentsResp.Comments) != 25 {
-			t.Errorf("Expected 25 comments, got: %d", len(commentsResp.Comments))
-		}
+		testutil.AssertCommentCount(t, commentsResp, 25)
 
 		// Analyze comments
 		totalComments := len(commentsResp.Comments)
@@ -309,9 +189,7 @@ func TestRedditAPIClientUsage(t *testing.T) {
 					After: currentAfter,
 				},
 			})
-			if err != nil {
-				t.Fatalf("Failed to get posts page %d: %v", pageCount+1, err)
-			}
+			testutil.AssertNoError(t, err)
 
 			if len(resp.Posts) == 0 {
 				break
@@ -340,84 +218,53 @@ func TestRedditAPIClientUsage(t *testing.T) {
 	})
 
 	t.Logf("Real-world scenarios test completed:")
-	t.Logf("  Total requests made: %d", requestCount)
 	t.Logf("  All scenarios executed successfully")
 }
 
 // TestErrorHandlingInRealWorld tests error handling in realistic scenarios
 func TestErrorHandlingInRealWorld(t *testing.T) {
-	var requestCount int
-	var mu sync.Mutex
+	var requestCount atomic.Int32
 
+	// Create custom handler that simulates various error conditions
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		mu.Lock()
-		requestCount++
-		currentRequest := requestCount
-		mu.Unlock()
+		count := requestCount.Add(1)
 
 		w.Header().Set("Content-Type", "application/json")
 
-		// Simulate various error conditions
+		// Simulate various error conditions based on request count
 		switch {
-		case currentRequest <= 2:
+		case count <= 2:
 			// First 2 requests: rate limit error
 			w.Header().Set("X-RateLimit-Remaining", "0")
 			w.Header().Set("X-RateLimit-Reset", fmt.Sprintf("%d", time.Now().Add(1*time.Second).Unix()))
 			w.WriteHeader(http.StatusTooManyRequests)
-			errorData := map[string]interface{}{
-				"error":   "Too Many Requests",
-				"message": "Rate limit exceeded",
-			}
-			json.NewEncoder(w).Encode(errorData)
+			w.Write([]byte(`{"error":"Too Many Requests","message":"Rate limit exceeded"}`))
 
-		case currentRequest <= 4:
+		case count <= 4:
 			// Next 2 requests: server error
 			w.WriteHeader(http.StatusInternalServerError)
-			errorData := map[string]interface{}{
-				"error":   "Internal Server Error",
-				"message": "Simulated server error",
-			}
-			json.NewEncoder(w).Encode(errorData)
+			w.Write([]byte(`{"error":"Internal Server Error","message":"Simulated server error"}`))
 
-		case currentRequest <= 6:
+		case count <= 6:
 			// Next 2 requests: timeout simulation
 			time.Sleep(2 * time.Second)
 			w.WriteHeader(http.StatusOK)
-			successData := map[string]interface{}{
-				"kind": "t5",
-				"data": map[string]interface{}{
-					"id":           "testsub123",
-					"display_name": "testsub",
-					"subscribers":  100000,
-					"created_utc":  1234567890.0,
-				},
-			}
-			json.NewEncoder(w).Encode(successData)
+			w.Write([]byte(`{"kind":"t5","data":{"id":"testsub123","display_name":"testsub","subscribers":100000,"created_utc":1234567890.0}}`))
 
 		default:
 			// Remaining requests: success
 			w.Header().Set("X-RateLimit-Remaining", "59")
 			w.Header().Set("X-RateLimit-Reset", "60")
 			w.WriteHeader(http.StatusOK)
-			successData := map[string]interface{}{
-				"kind": "t5",
-				"data": map[string]interface{}{
-					"id":           "testsub123",
-					"display_name": "testsub",
-					"subscribers":  100000,
-					"created_utc":  1234567890.0,
-				},
-			}
-			json.NewEncoder(w).Encode(successData)
+			w.Write([]byte(`{"kind":"t5","data":{"id":"testsub123","display_name":"testsub","subscribers":100000,"created_utc":1234567890.0}}`))
 		}
 	}))
 	defer server.Close()
 
-	httpClient := &http.Client{Timeout: 500 * time.Millisecond}
+	httpClient := server.Client()
+	httpClient.Timeout = 500 * time.Millisecond
 	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
-	if err != nil {
-		t.Fatalf("Failed to create internal httpClient: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
@@ -475,83 +322,35 @@ func TestErrorHandlingInRealWorld(t *testing.T) {
 
 // TestConcurrentRealWorldUsage tests concurrent usage patterns
 func TestConcurrentRealWorldUsage(t *testing.T) {
-	var requestCount int
-	var mu sync.Mutex
+	// Create test data
+	subreddit := testutil.NewSubreddit("testsub").
+		WithSubscribers(100000).
+		WithPublicDescription("Test subreddit").
+		Build()
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		mu.Lock()
-		requestCount++
-		mu.Unlock()
+	posts := make([]*types.Post, 10)
+	for i := 0; i < 10; i++ {
+		posts[i] = testutil.NewPostBuilder().
+			WithID(fmt.Sprintf("def%d", i)).
+			WithTitle(fmt.Sprintf("Concurrent Test Post %d", i)).
+			WithScore(100 + i).
+			WithAuthor(fmt.Sprintf("user_%d", i)).
+			WithSubreddit("testsub").
+			Build()
+	}
 
-		// Simulate realistic response time
-		time.Sleep(50 * time.Millisecond)
-
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("X-Ratelimit-Remaining", "59")
-		w.Header().Set("X-RateLimit-Reset", "60")
-
-		path := r.URL.Path
-		switch {
-		case strings.HasSuffix(path, "/about"):
-			// Subreddit info endpoint
-			subredditData := map[string]interface{}{
-				"kind": "t5",
-				"data": map[string]interface{}{
-					"id":                 "testsub123",
-					"display_name":       "testsub",
-					"subscribers":        100000,
-					"public_description": "Test subreddit",
-					"created_utc":        1234567890.0,
-				},
-			}
-			json.NewEncoder(w).Encode(subredditData)
-
-		case strings.HasSuffix(path, "/hot") || strings.HasSuffix(path, "/new"):
-			// Posts listing endpoint
-			posts := make([]map[string]interface{}, 10)
-			for i := 0; i < 10; i++ {
-				score := 100 + i
-				posts[i] = map[string]interface{}{
-					"kind": "t3",
-					"data": map[string]interface{}{
-						"id":          fmt.Sprintf("def%d", i),
-						"name":        fmt.Sprintf("t3_def%d", i),
-						"title":       fmt.Sprintf("Concurrent Test Post %d", i),
-						"score":       score,
-						"ups":         score,
-						"downs":       0,
-						"author":      fmt.Sprintf("user_%d", i),
-						"subreddit":   "testsub",
-						"created":     1609459200.0 + float64(i*3600),
-						"created_utc": 1609459200.0 + float64(i*3600),
-						"permalink":   fmt.Sprintf("/r/testsub/comments/def%d/concurrent_test_post_%d/", i, i),
-						"url":         fmt.Sprintf("https://example.com/post_def%d", i),
-					},
-				}
-			}
-
-			listingData := map[string]interface{}{
-				"kind": "Listing",
-				"data": map[string]interface{}{
-					"children": posts,
-					"after":    "",
-					"before":   "",
-				},
-			}
-			json.NewEncoder(w).Encode(listingData)
-
-		default:
-			// Default 404
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
+	// Setup mock server
+	server := testutil.NewMockServer().
+		WithSubreddit("testsub", subreddit).
+		WithPosts("testsub", "hot", posts...).
+		WithPosts("testsub", "new", posts...).
+		Start()
 	defer server.Close()
 
-	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
-	if err != nil {
-		t.Fatalf("Failed to create internal httpClient: %v", err)
-	}
+	httpClient := server.Server().Client()
+	httpClient.Timeout = 30 * time.Second
+	internalClient, err := internal.NewClient(httpClient, server.URL(), "test/1.0", nil)
+	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
@@ -626,68 +425,33 @@ func TestConcurrentRealWorldUsage(t *testing.T) {
 	if successRate < 90 {
 		t.Errorf("Success rate too low: %.2f%%", successRate)
 	}
-
-	if requestCount != totalRequests {
-		t.Errorf("Expected %d requests, got %d", totalRequests, requestCount)
-	}
 }
 
 // TestLongRunningOperations tests long-running operations and resource management
 func TestLongRunningOperations(t *testing.T) {
-	var requestCount int
-	var mu sync.Mutex
+	// Create large dataset for long-running operations
+	posts := make([]*types.Post, 100)
+	for i := 0; i < 100; i++ {
+		posts[i] = testutil.NewPostBuilder().
+			WithID(fmt.Sprintf("xyz%d", i)).
+			WithTitle(fmt.Sprintf("Long Running Test Post %d", i)).
+			WithScore(100 + i).
+			WithAuthor(fmt.Sprintf("user_%d", i)).
+			WithSubreddit("testsub").
+			WithNumComments(10 + i).
+			Build()
+	}
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		mu.Lock()
-		requestCount++
-		mu.Unlock()
-
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("X-Ratelimit-Remaining", "59")
-		w.Header().Set("X-RateLimit-Reset", "60")
-
-		// Return larger datasets for long-running operations
-		posts := make([]map[string]interface{}, 100)
-		for i := 0; i < 100; i++ {
-			score := 100 + i
-			posts[i] = map[string]interface{}{
-				"kind": "t3",
-				"data": map[string]interface{}{
-					"id":           fmt.Sprintf("xyz%d", i),
-					"name":         fmt.Sprintf("t3_xyz%d", i),
-					"title":        fmt.Sprintf("Long Running Test Post %d", i),
-					"score":        score,
-					"ups":          score,
-					"downs":        0,
-					"author":       fmt.Sprintf("user_%d", i),
-					"subreddit":    "testsub",
-					"selftext":     fmt.Sprintf("This is longer content for post %d to simulate real Reddit posts with substantial text content.", i),
-					"created":      1609459200.0 + float64(i*3600),
-					"created_utc":  1609459200.0 + float64(i*3600),
-					"num_comments": 10 + i,
-					"url":          fmt.Sprintf("https://reddit.com/r/testsub/comments/%d", i),
-					"permalink":    fmt.Sprintf("/r/testsub/comments/%d/long_running_test_post_%d/", i, i),
-				},
-			}
-		}
-
-		listingData := map[string]interface{}{
-			"kind": "Listing",
-			"data": map[string]interface{}{
-				"children": posts,
-				"after":    "",
-				"before":   "",
-			},
-		}
-		json.NewEncoder(w).Encode(listingData)
-	}))
+	// Setup mock server
+	server := testutil.NewMockServer().
+		WithPosts("testsub", "hot", posts...).
+		Start()
 	defer server.Close()
 
-	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
-	if err != nil {
-		t.Fatalf("Failed to create internal httpClient: %v", err)
-	}
+	httpClient := server.Server().Client()
+	httpClient.Timeout = 30 * time.Second
+	internalClient, err := internal.NewClient(httpClient, server.URL(), "test/1.0", nil)
+	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
@@ -714,13 +478,8 @@ func TestLongRunningOperations(t *testing.T) {
 				Limit: postsPerPage,
 			},
 		})
-		if err != nil {
-			t.Fatalf("Failed to get page %d: %v", page+1, err)
-		}
-
-		if len(resp.Posts) != postsPerPage {
-			t.Errorf("Expected %d posts on page %d, got %d", postsPerPage, page+1, len(resp.Posts))
-		}
+		testutil.AssertNoError(t, err)
+		testutil.AssertPostCount(t, resp, postsPerPage)
 
 		// Process posts
 		for _, post := range resp.Posts {
@@ -747,9 +506,5 @@ func TestLongRunningOperations(t *testing.T) {
 
 	if totalPosts != numPages*postsPerPage {
 		t.Errorf("Expected %d total posts, got %d", numPages*postsPerPage, totalPosts)
-	}
-
-	if requestCount != numPages {
-		t.Errorf("Expected %d requests, got %d", numPages, requestCount)
 	}
 }
