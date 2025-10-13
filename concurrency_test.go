@@ -2,9 +2,12 @@ package graw
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -15,27 +18,11 @@ import (
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 )
 
-// mockTokenProvider implements the TokenProvider interface for testing
-type mockTokenProvider struct {
-	token string
-	err   error
-}
-
-func (m *mockTokenProvider) GetToken(ctx context.Context) (string, error) {
-	if m.err != nil {
-		return "", m.err
-	}
-	return m.token, nil
-}
-
-func (m *mockTokenProvider) InvalidateToken() {
-	// no-op for tests
-}
-
 // TestConcurrentClientUsage tests multiple clients using the API simultaneously
 func TestConcurrentClientUsage(t *testing.T) {
 	t.Skip("Concurrency test needs investigation")
 	var requestCount int64
+	var mu sync.Mutex
 
 	// Setup test data
 	subreddit := testutil.NewSubreddit("testsubreddit").
@@ -48,15 +35,43 @@ func TestConcurrentClientUsage(t *testing.T) {
 		WithTitle("Test Post").
 		WithScore(100).
 		WithAuthor("testuser").
-		WithSubreddit("testsubreddit").
 		Build()
 
-	// Create mock server
-	server := testutil.NewMockServer().
-		WithSubreddit("testsubreddit", subreddit).
-		WithPosts("testsubreddit", "hot", post).
-		WithRequestCounter(&requestCount).
-		Start()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt64(&requestCount, 1)
+
+		mu.Lock()
+		defer mu.Unlock()
+
+		w.Header().Set("X-Ratelimit-Remaining", "60")
+		w.Header().Set("X-Ratelimit-Reset", "60")
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case strings.Contains(r.URL.Path, "/r/testsubreddit/about.json"):
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"kind": "t5",
+				"data": subreddit,
+			})
+
+		case strings.Contains(r.URL.Path, "/r/testsubreddit/hot.json"):
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"kind": "Listing",
+				"data": map[string]interface{}{
+					"children": []interface{}{
+						map[string]interface{}{
+							"kind": "t3",
+							"data": post,
+						},
+					},
+				},
+			})
+
+		default:
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
+		}
+	}))
 	defer server.Close()
 
 	// Create multiple clients
@@ -139,6 +154,7 @@ func TestConcurrentClientUsage(t *testing.T) {
 func TestConcurrentSameClientOperations(t *testing.T) {
 	t.Skip("Concurrency test needs investigation")
 	var requestCount int64
+	var mu sync.Mutex
 
 	// Setup test data
 	subreddit := testutil.NewSubreddit("concurrent_test").
@@ -151,16 +167,46 @@ func TestConcurrentSameClientOperations(t *testing.T) {
 		WithTitle("Concurrent Post").
 		WithScore(100).
 		WithAuthor("testuser").
-		WithSubreddit("concurrent_test").
 		Build()
 
-	// Create mock server with processing delay
-	server := testutil.NewMockServer().
-		WithSubreddit("concurrent_test", subreddit).
-		WithPosts("concurrent_test", "hot", post).
-		WithRequestCounter(&requestCount).
-		WithDelay(10 * time.Millisecond).
-		Start()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt64(&requestCount, 1)
+
+		mu.Lock()
+		defer mu.Unlock()
+
+		// Simulate some processing time
+		time.Sleep(10 * time.Millisecond)
+
+		w.Header().Set("X-Ratelimit-Remaining", "60")
+		w.Header().Set("X-Ratelimit-Reset", "60")
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case strings.Contains(r.URL.Path, "/r/concurrent_test/about.json"):
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"kind": "t5",
+				"data": subreddit,
+			})
+
+		case strings.Contains(r.URL.Path, "/r/concurrent_test/hot.json"):
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"kind": "Listing",
+				"data": map[string]interface{}{
+					"children": []interface{}{
+						map[string]interface{}{
+							"kind": "t3",
+							"data": post,
+						},
+					},
+				},
+			})
+
+		default:
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
+		}
+	}))
 	defer server.Close()
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
@@ -242,6 +288,8 @@ func TestConcurrentSameClientOperations(t *testing.T) {
 func TestConcurrentRateLimitingBehavior(t *testing.T) {
 	var requestCount int64
 	var rateLimitHits int64
+	var mu sync.Mutex
+	lastRequestTime := time.Now()
 
 	// Setup test data
 	subreddit := testutil.NewSubreddit("ratelimit_test").
@@ -249,12 +297,35 @@ func TestConcurrentRateLimitingBehavior(t *testing.T) {
 		WithSubscribers(100000).
 		Build()
 
-	// Create mock server with rate limiting
-	server := testutil.NewMockServer().
-		WithRateLimiting(50*time.Millisecond, &rateLimitHits).
-		WithSubreddit("ratelimit_test", subreddit).
-		WithRequestCounter(&requestCount).
-		Start()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt64(&requestCount, 1)
+
+		mu.Lock()
+		currentTime := time.Now()
+		timeSinceLastRequest := currentTime.Sub(lastRequestTime)
+		lastRequestTime = currentTime
+
+		// Simulate rate limiting - if requests come too quickly, return 429
+		if timeSinceLastRequest < 50*time.Millisecond && atomic.LoadInt64(&requestCount) > 1 {
+			atomic.AddInt64(&rateLimitHits, 1)
+			w.Header().Set("X-RateLimit-Remaining", "0")
+			w.Header().Set("X-RateLimit-Reset", "1") // 1 second remaining
+			w.WriteHeader(http.StatusTooManyRequests)
+			mu.Unlock()
+			return
+		}
+		mu.Unlock()
+
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-RateLimit-Remaining", "100")
+		w.Header().Set("X-RateLimit-Reset", "3600") // 1 hour = 3600 seconds remaining
+		w.WriteHeader(http.StatusOK)
+
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"kind": "t5",
+			"data": subreddit,
+		})
+	}))
 	defer server.Close()
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
@@ -312,6 +383,7 @@ func TestConcurrentRateLimitingBehavior(t *testing.T) {
 func TestConcurrentContextCancellation(t *testing.T) {
 	var requestCount int64
 	var activeRequests int64
+	var mu sync.Mutex
 
 	// Setup test data
 	subreddit := testutil.NewSubreddit("cancellation_test").
@@ -319,13 +391,25 @@ func TestConcurrentContextCancellation(t *testing.T) {
 		WithSubscribers(100000).
 		Build()
 
-	// Create mock server with slow responses
-	server := testutil.NewMockServer().
-		WithSubreddit("cancellation_test", subreddit).
-		WithRequestCounter(&requestCount).
-		WithActiveRequestCounter(&activeRequests).
-		WithDelay(200 * time.Millisecond).
-		Start()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt64(&requestCount, 1)
+		atomic.AddInt64(&activeRequests, 1)
+		defer atomic.AddInt64(&activeRequests, -1)
+
+		// Simulate slow response
+		time.Sleep(200 * time.Millisecond)
+
+		mu.Lock()
+		defer mu.Unlock()
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"kind": "t5",
+			"data": subreddit,
+		})
+	}))
 	defer server.Close()
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
@@ -390,6 +474,7 @@ func TestConcurrentContextCancellation(t *testing.T) {
 func TestConcurrentResourceContention(t *testing.T) {
 	t.Skip("Resource contention test takes too long")
 	var requestCount int64
+	var mu sync.Mutex
 
 	// Setup test data
 	subreddit := testutil.NewSubreddit("contention_test").
@@ -397,14 +482,23 @@ func TestConcurrentResourceContention(t *testing.T) {
 		WithSubscribers(100000).
 		Build()
 
-	// Create mock server with variable response times
-	server := testutil.NewMockServer().
-		WithSubreddit("contention_test", subreddit).
-		WithRequestCounter(&requestCount).
-		WithVariableDelay(func(count int64) time.Duration {
-			return time.Duration(count%10) * time.Millisecond
-		}).
-		Start()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt64(&requestCount, 1)
+
+		mu.Lock()
+		defer mu.Unlock()
+
+		// Simulate resource contention with variable response times
+		time.Sleep(time.Duration(atomic.LoadInt64(&requestCount)%10) * time.Millisecond)
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"kind": "t5",
+			"data": subreddit,
+		})
+	}))
 	defer server.Close()
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
@@ -474,6 +568,7 @@ func TestConcurrentResourceContention(t *testing.T) {
 func TestConcurrentMixedOperations(t *testing.T) {
 	t.Skip("Concurrency test needs investigation")
 	var requestCount int64
+	var mu sync.Mutex
 
 	// Setup test data
 	subreddit := testutil.NewSubreddit("mixed_test_sub").
@@ -488,8 +583,6 @@ func TestConcurrentMixedOperations(t *testing.T) {
 		WithAuthor("testuser").
 		WithSubreddit("mixed_test_sub").
 		WithNumComments(50).
-		WithURL("https://reddit.com/r/mixed_test_sub/comments/mixedpost1").
-		WithPermalink("/r/mixed_test_sub/comments/mixedpost1/mixed_post/").
 		Build()
 
 	comment := testutil.NewCommentBuilder().
@@ -502,13 +595,68 @@ func TestConcurrentMixedOperations(t *testing.T) {
 		WithSubreddit("mixed_test_sub").
 		Build()
 
-	// Create mock server
-	server := testutil.NewMockServer().
-		WithSubreddit("mixed_test_sub", subreddit).
-		WithPosts("mixed_test_sub", "hot", post).
-		WithComments("mixed_test_sub", "mixedpost1", post, comment).
-		WithRequestCounter(&requestCount).
-		Start()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt64(&requestCount, 1)
+
+		mu.Lock()
+		defer mu.Unlock()
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+
+		switch {
+		case strings.Contains(r.URL.Path, "/r/mixed_test_sub/about.json"):
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"kind": "t5",
+				"data": subreddit,
+			})
+
+		case strings.Contains(r.URL.Path, "/r/mixed_test_sub/hot.json"):
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"kind": "Listing",
+				"data": map[string]interface{}{
+					"children": []interface{}{
+						map[string]interface{}{
+							"kind": "t3",
+							"data": post,
+						},
+					},
+				},
+			})
+
+		case strings.Contains(r.URL.Path, "/r/mixed_test_sub/comments/mixedpost1.json"):
+			postListing := map[string]interface{}{
+				"kind": "Listing",
+				"data": map[string]interface{}{
+					"children": []interface{}{
+						map[string]interface{}{
+							"kind": "t3",
+							"data": post,
+						},
+					},
+				},
+			}
+
+			commentsListing := map[string]interface{}{
+				"kind": "Listing",
+				"data": map[string]interface{}{
+					"children": []interface{}{
+						map[string]interface{}{
+							"kind": "t1",
+							"data": comment,
+						},
+					},
+				},
+			}
+
+			response := []interface{}{postListing, commentsListing}
+			json.NewEncoder(w).Encode(response)
+
+		default:
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
+		}
+	}))
 	defer server.Close()
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}

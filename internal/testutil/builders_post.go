@@ -2,6 +2,7 @@ package testutil
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
@@ -127,10 +128,11 @@ func (pb *PostBuilder) WithAuthor(author string) *PostBuilder {
 }
 
 // WithSubreddit sets the subreddit name and automatically updates the SubredditID
-// to "t5_" + subreddit to match Reddit's fullname format.
+// to "t5_" + lowercase(subreddit) to match Reddit's fullname format.
 func (pb *PostBuilder) WithSubreddit(sub string) *PostBuilder {
 	pb.post.Subreddit = sub
-	pb.post.SubredditID = "t5_" + sub
+	// Reddit subreddit IDs are always lowercase
+	pb.post.SubredditID = "t5_" + strings.ToLower(sub)
 	return pb
 }
 

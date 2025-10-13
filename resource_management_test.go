@@ -163,7 +163,7 @@ func TestMemoryResourceManagement(t *testing.T) {
 			children[i] = postList[i].ToThing()
 		}
 
-		listing := map[string]interface{}{
+		_ = map[string]interface{}{
 			"kind": "Listing",
 			"data": map[string]interface{}{
 				"children": children,

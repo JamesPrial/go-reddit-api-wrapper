@@ -49,9 +49,8 @@ func TestNetworkTimeoutRecovery(t *testing.T) {
 		mockServer := testutil.NewMockServer().
 			WithSubreddit("testsub", subreddit)
 
-		// Manually construct the Thing response
-		thing := mockServer.Server() // This will be nil, so we need to do it manually
-		// Actually, let's just use the ToThing() method from builder
+		// Manually construct the Thing response using builder
+		_ = mockServer // Not needed, just use builder directly
 		responseThing := testutil.NewSubreddit("testsub").
 			WithID("testsubid").
 			ToThing()
@@ -239,11 +238,6 @@ func TestHTTP5xxErrorRecovery(t *testing.T) {
 	var requestCount int
 	var mu sync.Mutex
 
-	// Create test data using builder
-	subreddit := testutil.NewSubreddit("testsub").
-		WithID("testsubid").
-		Build()
-
 	// Need httptest.NewServer to control response behavior per request
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
@@ -309,11 +303,6 @@ func TestHTTP5xxErrorRecovery(t *testing.T) {
 func TestHTTP429RateLimitRecovery(t *testing.T) {
 	var requestCount int
 	var mu sync.Mutex
-
-	// Create test data using builder
-	subreddit := testutil.NewSubreddit("testsub").
-		WithID("testsubid").
-		Build()
 
 	// Need httptest.NewServer to control response behavior per request
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

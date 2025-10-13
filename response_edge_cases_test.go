@@ -11,24 +11,57 @@ import (
 	"time"
 
 	"github.com/jamesprial/go-reddit-api-wrapper/internal"
+	"github.com/jamesprial/go-reddit-api-wrapper/internal/testutil"
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 )
 
+// customResponseServer is a helper for creating test servers with custom response handlers.
+// This allows full control over the HTTP response for testing edge cases.
+type customResponseServer struct {
+	server  *httptest.Server
+	handler http.HandlerFunc
+}
+
+// newCustomResponseServer creates a new test server with a custom handler function.
+// The handler receives the ResponseWriter and Request and can write any response.
+func newCustomResponseServer(handler http.HandlerFunc) *customResponseServer {
+	srv := &customResponseServer{
+		handler: handler,
+	}
+	srv.server = httptest.NewServer(handler)
+	return srv
+}
+
+// Close shuts down the test server.
+func (s *customResponseServer) Close() {
+	if s.server != nil {
+		s.server.Close()
+	}
+}
+
+// URL returns the base URL of the test server.
+func (s *customResponseServer) URL() string {
+	if s.server != nil {
+		return s.server.URL
+	}
+	return ""
+}
+
 // TestMalformedJSONResponse tests handling of malformed JSON responses
 func TestMalformedJSONResponse(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	t.Parallel()
+
+	customServer := newCustomResponseServer(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		// Return malformed JSON
+		// Return malformed JSON (unterminated array)
 		w.Write([]byte(`{"kind": "Listing", "data": {"children": [`))
-	}))
-	defer server.Close()
+	})
+	defer customServer.Close()
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
-	if err != nil {
-		t.Fatalf("Failed to create internal httpClient: %v", err)
-	}
+	internalClient, err := internal.NewClient(httpClient, customServer.URL(), "test/1.0", nil)
+	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
@@ -41,33 +74,29 @@ func TestMalformedJSONResponse(t *testing.T) {
 
 	// Test that malformed JSON is handled gracefully
 	_, err = client.GetSubreddit(ctx, "testsub")
-	if err == nil {
-		t.Error("Expected error for malformed JSON, but got none")
-	}
+	testutil.AssertError(t, err)
 
-	// Check if the error is a parse error
+	// Check if the error mentions parsing or JSON issues
 	if !strings.Contains(err.Error(), "parse") && !strings.Contains(err.Error(), "JSON") {
 		t.Errorf("Expected parse error, got: %v", err)
 	}
-
-	t.Logf("Successfully handled malformed JSON response: %v", err)
 }
 
 // TestEmptyResponse tests handling of completely empty responses
 func TestEmptyResponse(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	t.Parallel()
+
+	customServer := newCustomResponseServer(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		// Return completely empty response
 		w.Write([]byte(""))
-	}))
-	defer server.Close()
+	})
+	defer customServer.Close()
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
-	if err != nil {
-		t.Fatalf("Failed to create internal httpClient: %v", err)
-	}
+	internalClient, err := internal.NewClient(httpClient, customServer.URL(), "test/1.0", nil)
+	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
@@ -79,16 +108,14 @@ func TestEmptyResponse(t *testing.T) {
 	ctx := context.Background()
 
 	_, err = client.GetSubreddit(ctx, "testsub")
-	if err == nil {
-		t.Error("Expected error for empty response, but got none")
-	}
-
-	t.Logf("Successfully handled empty response: %v", err)
+	testutil.AssertError(t, err)
 }
 
 // TestUnexpectedResponseStructure tests handling of unexpected JSON structures
 func TestUnexpectedResponseStructure(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	t.Parallel()
+
+	customServer := newCustomResponseServer(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 
@@ -100,14 +127,12 @@ func TestUnexpectedResponseStructure(t *testing.T) {
 			},
 		}
 		json.NewEncoder(w).Encode(unexpectedStruct)
-	}))
-	defer server.Close()
+	})
+	defer customServer.Close()
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
-	if err != nil {
-		t.Fatalf("Failed to create internal httpClient: %v", err)
-	}
+	internalClient, err := internal.NewClient(httpClient, customServer.URL(), "test/1.0", nil)
+	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
@@ -119,16 +144,14 @@ func TestUnexpectedResponseStructure(t *testing.T) {
 	ctx := context.Background()
 
 	_, err = client.GetSubreddit(ctx, "testsub")
-	if err == nil {
-		t.Error("Expected error for unexpected response structure, but got none")
-	}
-
-	t.Logf("Successfully handled unexpected response structure: %v", err)
+	testutil.AssertError(t, err)
 }
 
 // TestNullFieldsInResponse tests handling of null fields in otherwise valid responses
 func TestNullFieldsInResponse(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	t.Parallel()
+
+	customServer := newCustomResponseServer(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 
@@ -144,14 +167,12 @@ func TestNullFieldsInResponse(t *testing.T) {
 			},
 		}
 		json.NewEncoder(w).Encode(responseWithNulls)
-	}))
-	defer server.Close()
+	})
+	defer customServer.Close()
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
-	if err != nil {
-		t.Fatalf("Failed to create internal httpClient: %v", err)
-	}
+	internalClient, err := internal.NewClient(httpClient, customServer.URL(), "test/1.0", nil)
+	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
@@ -163,11 +184,9 @@ func TestNullFieldsInResponse(t *testing.T) {
 	ctx := context.Background()
 
 	subreddit, err := client.GetSubreddit(ctx, "testsub")
-	if err != nil {
-		t.Fatalf("Unexpected error handling null fields: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
-	// Verify that null fields are handled gracefully
+	// Verify that null fields are handled gracefully (become zero values)
 	if subreddit.DisplayName != "" {
 		t.Errorf("Expected empty display name for null field, got: %s", subreddit.DisplayName)
 	}
@@ -180,50 +199,34 @@ func TestNullFieldsInResponse(t *testing.T) {
 	if subreddit.PublicDescription != "valid description" {
 		t.Errorf("Expected 'valid description', got: %s", subreddit.PublicDescription)
 	}
-
-	t.Logf("Successfully handled null fields in response")
 }
 
 // TestVeryLargeResponse tests handling of very large responses
 func TestVeryLargeResponse(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
+	t.Parallel()
 
-		// Create a very large response
-		posts := make([]map[string]interface{}, 1000)
-		for i := 0; i < 1000; i++ {
-			posts[i] = map[string]interface{}{
-				"kind": "t3",
-				"data": map[string]interface{}{
-					"id":           fmt.Sprintf("post_%d", i),
-					"title":        fmt.Sprintf("Very Long Title With Lots of Text to Make the Response Bigger %d", i),
-					"score":        i,
-					"author":       fmt.Sprintf("user_%d", i),
-					"selftext":     strings.Repeat("This is a very long selftext to make the response larger. ", 100),
-					"created_utc":  1609459200.0 + float64(i),
-					"num_comments": i,
-				},
-			}
-		}
+	// Create a very large response using builders
+	posts := make([]*types.Post, 1000)
+	for i := 0; i < 1000; i++ {
+		posts[i] = testutil.NewPostBuilder().
+			WithID(fmt.Sprintf("post_%d", i)).
+			WithTitle(fmt.Sprintf("Very Long Title With Lots of Text to Make the Response Bigger %d", i)).
+			WithScore(i).
+			WithAuthor(fmt.Sprintf("user_%d", i)).
+			WithSelfText(strings.Repeat("This is a very long selftext to make the response larger. ", 100)).
+			WithCreated(1609459200.0 + float64(i)).
+			WithNumComments(i).
+			Build()
+	}
 
-		largeResponse := map[string]interface{}{
-			"kind": "Listing",
-			"data": map[string]interface{}{
-				"children": posts,
-				"after":    "",
-				"before":   "",
-			},
-		}
-		json.NewEncoder(w).Encode(largeResponse)
-	}))
+	server := testutil.NewMockServer().
+		WithPosts("largesub", "hot", posts...).
+		Start()
 	defer server.Close()
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
-	if err != nil {
-		t.Fatalf("Failed to create internal httpClient: %v", err)
-	}
+	internalClient, err := internal.NewClient(httpClient, server.URL(), "test/1.0", nil)
+	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
@@ -244,13 +247,8 @@ func TestVeryLargeResponse(t *testing.T) {
 	})
 	duration := time.Since(start)
 
-	if err != nil {
-		t.Fatalf("Failed to handle large response: %v", err)
-	}
-
-	if len(resp.Posts) != 1000 {
-		t.Errorf("Expected 1000 posts, got %d", len(resp.Posts))
-	}
+	testutil.AssertNoError(t, err)
+	testutil.AssertPostCount(t, resp, 1000)
 
 	// Verify some data was parsed correctly
 	if resp.Posts[0].Title == "" {
@@ -262,31 +260,24 @@ func TestVeryLargeResponse(t *testing.T) {
 
 // TestUnicodeAndSpecialCharacters tests handling of unicode and special characters
 func TestUnicodeAndSpecialCharacters(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
+	t.Parallel()
 
-		// Return response with unicode and special characters
-		unicodeResponse := map[string]interface{}{
-			"kind": "t5",
-			"data": map[string]interface{}{
-				"display_name":       "测试🚀",
-				"title":              "Tëst wïth üñïçødé ñð spëçïål chäräçtërs 🌟",
-				"description":        "描述 avec des caractères spéciaux: éàèùçñëüöäß",
-				"public_description": "Test with emojis: 🎉🎊🎈🎁 and math: ∑∏∫∆∇∂",
-				"subscribers":        100000,
-				"over18":             false,
-			},
-		}
-		json.NewEncoder(w).Encode(unicodeResponse)
-	}))
+	// Create subreddit with unicode and special characters using builder
+	subreddit := testutil.NewSubreddit("测试🚀").
+		WithTitle("Tëst wïth üñïçødé ñð spëçïål chäräçtërs 🌟").
+		WithDescription("描述 avec des caractères spéciaux: éàèùçñëüöäß").
+		WithSubscribers(100000).
+		Build()
+	subreddit.PublicDescription = "Test with emojis: 🎉🎊🎈🎁 and math: ∑∏∫∆∇∂"
+
+	server := testutil.NewMockServer().
+		WithSubreddit("unicode_test", subreddit).
+		Start()
 	defer server.Close()
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
-	if err != nil {
-		t.Fatalf("Failed to create internal httpClient: %v", err)
-	}
+	internalClient, err := internal.NewClient(httpClient, server.URL(), "test/1.0", nil)
+	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
@@ -297,30 +288,28 @@ func TestUnicodeAndSpecialCharacters(t *testing.T) {
 
 	ctx := context.Background()
 
-	subreddit, err := client.GetSubreddit(ctx, "unicode_test")
-	if err != nil {
-		t.Fatalf("Failed to handle unicode characters: %v", err)
-	}
+	result, err := client.GetSubreddit(ctx, "unicode_test")
+	testutil.AssertNoError(t, err)
 
 	// Verify unicode characters are preserved
-	if subreddit.DisplayName != "测试🚀" {
-		t.Errorf("Expected '测试🚀', got: %s", subreddit.DisplayName)
+	if result.DisplayName != "测试🚀" {
+		t.Errorf("Expected '测试🚀', got: %s", result.DisplayName)
 	}
 
-	if !strings.Contains(subreddit.Title, "üñïçødé") {
-		t.Errorf("Expected unicode characters in title, got: %s", subreddit.Title)
+	if !strings.Contains(result.Title, "üñïçødé") {
+		t.Errorf("Expected unicode characters in title, got: %s", result.Title)
 	}
 
-	if !strings.Contains(subreddit.PublicDescription, "🎉") {
-		t.Errorf("Expected emojis in description, got: %s", subreddit.PublicDescription)
+	if !strings.Contains(result.PublicDescription, "🎉") {
+		t.Errorf("Expected emojis in description, got: %s", result.PublicDescription)
 	}
-
-	t.Logf("Successfully handled unicode and special characters")
 }
 
 // TestResponseWithExtraFields tests handling of responses with extra/unknown fields
 func TestResponseWithExtraFields(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	t.Parallel()
+
+	customServer := newCustomResponseServer(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 
@@ -342,14 +331,12 @@ func TestResponseWithExtraFields(t *testing.T) {
 			},
 		}
 		json.NewEncoder(w).Encode(responseWithExtras)
-	}))
-	defer server.Close()
+	})
+	defer customServer.Close()
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
-	if err != nil {
-		t.Fatalf("Failed to create internal httpClient: %v", err)
-	}
+	internalClient, err := internal.NewClient(httpClient, customServer.URL(), "test/1.0", nil)
+	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
@@ -361,9 +348,7 @@ func TestResponseWithExtraFields(t *testing.T) {
 	ctx := context.Background()
 
 	subreddit, err := client.GetSubreddit(ctx, "testsub")
-	if err != nil {
-		t.Fatalf("Failed to handle response with extra fields: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	// Verify known fields are parsed correctly
 	if subreddit.DisplayName != "testsub" {
@@ -373,13 +358,13 @@ func TestResponseWithExtraFields(t *testing.T) {
 	if subreddit.Subscribers != 100000 {
 		t.Errorf("Expected 100000 subscribers, got: %d", subreddit.Subscribers)
 	}
-
-	t.Logf("Successfully handled response with extra fields")
 }
 
 // TestResponseWithWrongTypes tests handling of responses with wrong data types
 func TestResponseWithWrongTypes(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	t.Parallel()
+
+	customServer := newCustomResponseServer(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 
@@ -395,14 +380,12 @@ func TestResponseWithWrongTypes(t *testing.T) {
 			},
 		}
 		json.NewEncoder(w).Encode(responseWithWrongTypes)
-	}))
-	defer server.Close()
+	})
+	defer customServer.Close()
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
-	if err != nil {
-		t.Fatalf("Failed to create internal httpClient: %v", err)
-	}
+	internalClient, err := internal.NewClient(httpClient, customServer.URL(), "test/1.0", nil)
+	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
@@ -414,22 +397,20 @@ func TestResponseWithWrongTypes(t *testing.T) {
 	ctx := context.Background()
 
 	subreddit, err := client.GetSubreddit(ctx, "testsub")
-	if err != nil {
-		t.Fatalf("Failed to handle response with wrong types: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	// Verify that type conversion was attempted or handled gracefully
 	// The exact behavior depends on the parser implementation
 	if subreddit.PublicDescription != "A test subreddit" {
 		t.Errorf("Expected 'A test subreddit', got: %s", subreddit.PublicDescription)
 	}
-
-	t.Logf("Successfully handled response with wrong data types")
 }
 
 // TestPartialResponse tests handling of partial/incomplete responses
 func TestPartialResponse(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	t.Parallel()
+
+	customServer := newCustomResponseServer(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 
@@ -443,14 +424,12 @@ func TestPartialResponse(t *testing.T) {
 			},
 		}
 		json.NewEncoder(w).Encode(partialResponse)
-	}))
-	defer server.Close()
+	})
+	defer customServer.Close()
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
-	if err != nil {
-		t.Fatalf("Failed to create internal httpClient: %v", err)
-	}
+	internalClient, err := internal.NewClient(httpClient, customServer.URL(), "test/1.0", nil)
+	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
@@ -462,9 +441,7 @@ func TestPartialResponse(t *testing.T) {
 	ctx := context.Background()
 
 	subreddit, err := client.GetSubreddit(ctx, "testsub")
-	if err != nil {
-		t.Fatalf("Failed to handle partial response: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	// Verify that available fields are parsed
 	if subreddit.DisplayName != "testsub" {
@@ -479,13 +456,13 @@ func TestPartialResponse(t *testing.T) {
 	if subreddit.Subscribers != 0 {
 		t.Errorf("Expected 0 subscribers for missing field, got: %d", subreddit.Subscribers)
 	}
-
-	t.Logf("Successfully handled partial response")
 }
 
 // TestResponseWithNewlinesAndWhitespace tests handling of responses with unusual whitespace
 func TestResponseWithNewlinesAndWhitespace(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	t.Parallel()
+
+	customServer := newCustomResponseServer(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 
@@ -501,14 +478,12 @@ func TestResponseWithNewlinesAndWhitespace(t *testing.T) {
 			}
 		}`
 		w.Write([]byte(whitespaceResponse))
-	}))
-	defer server.Close()
+	})
+	defer customServer.Close()
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
-	if err != nil {
-		t.Fatalf("Failed to create internal httpClient: %v", err)
-	}
+	internalClient, err := internal.NewClient(httpClient, customServer.URL(), "test/1.0", nil)
+	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
@@ -520,9 +495,7 @@ func TestResponseWithNewlinesAndWhitespace(t *testing.T) {
 	ctx := context.Background()
 
 	subreddit, err := client.GetSubreddit(ctx, "testsub")
-	if err != nil {
-		t.Fatalf("Failed to handle response with unusual whitespace: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	// Verify whitespace is handled correctly
 	if subreddit.DisplayName != "testsub" {
@@ -532,32 +505,29 @@ func TestResponseWithNewlinesAndWhitespace(t *testing.T) {
 	if !strings.Contains(subreddit.PublicDescription, "with newlines") {
 		t.Errorf("Expected newlines in description, got: %s", subreddit.PublicDescription)
 	}
-
-	t.Logf("Successfully handled response with unusual whitespace")
 }
 
 // TestResponseStreamError tests handling of response stream errors
 func TestResponseStreamError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	t.Parallel()
+
+	customServer := newCustomResponseServer(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 
 		// Start writing JSON but cut off mid-stream
 		w.Write([]byte(`{"kind": "Listing", "data": {"children": [{"kind": "t3", "data": {"id": "post1"`))
 		// Close connection abruptly
-		hj, ok := w.(http.Hijacker)
-		if ok {
+		if hj, ok := w.(http.Hijacker); ok {
 			conn, _, _ := hj.Hijack()
 			conn.Close()
 		}
-	}))
-	defer server.Close()
+	})
+	defer customServer.Close()
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
-	if err != nil {
-		t.Fatalf("Failed to create internal httpClient: %v", err)
-	}
+	internalClient, err := internal.NewClient(httpClient, customServer.URL(), "test/1.0", nil)
+	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
@@ -571,9 +541,7 @@ func TestResponseStreamError(t *testing.T) {
 	_, err = client.GetHot(ctx, &types.PostsRequest{
 		Subreddit: "testsub",
 	})
-	if err == nil {
-		t.Error("Expected error for stream interruption, but got none")
-	}
+	testutil.AssertError(t, err)
 
 	// Check if it's a connection/read error
 	if !strings.Contains(err.Error(), "connection") &&
@@ -581,24 +549,22 @@ func TestResponseStreamError(t *testing.T) {
 		!strings.Contains(err.Error(), "parse") {
 		t.Errorf("Expected connection/read/parse error, got: %v", err)
 	}
-
-	t.Logf("Successfully handled response stream error: %v", err)
 }
 
 // TestResponseWithInvalidContentType tests handling of responses with invalid content types
 func TestResponseWithInvalidContentType(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	t.Parallel()
+
+	customServer := newCustomResponseServer(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain") // Wrong content type
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"kind": "t5", "data": {"display_name": "testsub"}}`))
-	}))
-	defer server.Close()
+	})
+	defer customServer.Close()
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
-	if err != nil {
-		t.Fatalf("Failed to create internal httpClient: %v", err)
-	}
+	internalClient, err := internal.NewClient(httpClient, customServer.URL(), "test/1.0", nil)
+	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,

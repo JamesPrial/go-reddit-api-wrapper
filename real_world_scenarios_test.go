@@ -21,7 +21,7 @@ func TestRedditAPIClientUsage(t *testing.T) {
 	// Create test data using builders
 	subreddit := testutil.NewSubreddit("testsub").
 		WithTitle("Test Subreddit").
-		WithPublicDescription("A test subreddit for real-world scenarios").
+		WithDescription("A test subreddit for real-world scenarios").
 		WithSubscribers(100000).
 		Build()
 
@@ -325,7 +325,7 @@ func TestConcurrentRealWorldUsage(t *testing.T) {
 	// Create test data
 	subreddit := testutil.NewSubreddit("testsub").
 		WithSubscribers(100000).
-		WithPublicDescription("Test subreddit").
+		WithDescription("Test subreddit").
 		Build()
 
 	posts := make([]*types.Post, 10)

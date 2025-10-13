@@ -285,7 +285,7 @@ type MoreBuilder struct {
 // NewMore creates a new MoreBuilder with default values.
 // Default values:
 //   - ID: "more123"
-//   - Name: "more_more123"
+//   - Name: "t1_more123"
 //   - Children: empty slice
 func NewMore() *MoreBuilder {
 	id := "more123"
@@ -293,17 +293,18 @@ func NewMore() *MoreBuilder {
 		data: &types.MoreData{
 			ThingData: types.ThingData{
 				ID:   id,
-				Name: "more_" + id,
+				Name: "t1_" + id,
 			},
 			Children: []string{},
 		},
 	}
 }
 
-// WithID sets the More object's ID and automatically updates the Name field to "more_" + id.
+// WithID sets the More object's ID and automatically updates the Name field to "t1_" + id.
+// Note: Reddit uses "t1_" prefix for more objects even though they represent comment continuations.
 func (b *MoreBuilder) WithID(id string) *MoreBuilder {
 	b.data.ID = id
-	b.data.Name = "more_" + id
+	b.data.Name = "t1_" + id
 	return b
 }
 
@@ -346,6 +347,173 @@ func (b *MoreBuilder) ToThing() *types.Thing {
 // ToJSON returns the MoreData as a json.RawMessage.
 // This is useful for embedding in mock HTTP responses or test fixtures.
 func (b *MoreBuilder) ToJSON() json.RawMessage {
+	data, _ := json.Marshal(b.data)
+	return data
+}
+
+// ListingBuilder provides a fluent API for constructing Listing test data.
+// Listings are Reddit's standard response format for paginated content.
+//
+// Example usage:
+//
+//	listing := NewListingBuilder().
+//		WithAfter("t3_abc123").
+//		WithBefore("t3_xyz789").
+//		AddChild(testutil.NewPostBuilder().WithID("post1").ToThing()).
+//		Build()
+type ListingBuilder struct {
+	data *types.ListingData
+}
+
+// NewListingBuilder creates a new ListingBuilder with default empty values.
+func NewListingBuilder() *ListingBuilder {
+	return &ListingBuilder{
+		data: &types.ListingData{
+			BeforeFullname: "",
+			AfterFullname:  "",
+			Modhash:        "",
+			Children:       []*types.Thing{},
+		},
+	}
+}
+
+// WithAfter sets the after pagination fullname.
+func (b *ListingBuilder) WithAfter(after string) *ListingBuilder {
+	b.data.AfterFullname = after
+	return b
+}
+
+// WithBefore sets the before pagination fullname.
+func (b *ListingBuilder) WithBefore(before string) *ListingBuilder {
+	b.data.BeforeFullname = before
+	return b
+}
+
+// WithModhash sets the modhash value.
+func (b *ListingBuilder) WithModhash(modhash string) *ListingBuilder {
+	b.data.Modhash = modhash
+	return b
+}
+
+// AddChild adds a Thing child to the listing.
+func (b *ListingBuilder) AddChild(child *types.Thing) *ListingBuilder {
+	b.data.Children = append(b.data.Children, child)
+	return b
+}
+
+// WithChildren sets all children at once, replacing any existing children.
+func (b *ListingBuilder) WithChildren(children []*types.Thing) *ListingBuilder {
+	b.data.Children = children
+	return b
+}
+
+// Build returns the constructed ListingData.
+func (b *ListingBuilder) Build() *ListingBuilder {
+	return b
+}
+
+// ToThing wraps the ListingData in a Thing with kind "Listing" and properly marshaled data.
+func (b *ListingBuilder) ToThing() *types.Thing {
+	dataJSON, _ := json.Marshal(b.data)
+	return &types.Thing{
+		Kind: "Listing",
+		Data: dataJSON,
+	}
+}
+
+// ToJSON returns the ListingData as a json.RawMessage.
+func (b *ListingBuilder) ToJSON() json.RawMessage {
+	data, _ := json.Marshal(b.data)
+	return data
+}
+
+// MessageBuilder provides a fluent API for constructing Message test data.
+//
+// Example usage:
+//
+//	message := NewMessageBuilder().
+//		WithID("msg123").
+//		WithAuthor("sender").
+//		WithBody("Message body").
+//		WithSubject("Test Subject").
+//		Build()
+type MessageBuilder struct {
+	data *types.MessageData
+}
+
+// NewMessageBuilder creates a new MessageBuilder with default values.
+func NewMessageBuilder() *MessageBuilder {
+	now := float64(time.Now().Unix())
+	return &MessageBuilder{
+		data: &types.MessageData{
+			ThingData: types.ThingData{
+				ID:   "msg123",
+				Name: "t4_msg123",
+			},
+			Created: types.Created{
+				Created:    now,
+				CreatedUTC: now,
+			},
+			Author:   "testuser",
+			Body:     "Test message",
+			BodyHTML: "&lt;div class=\"md\"&gt;&lt;p&gt;Test message&lt;/p&gt;\n&lt;/div&gt;",
+			Subject:  "Test Subject",
+		},
+	}
+}
+
+// WithID sets the message ID and automatically generates the Name field as "t4_" + ID.
+func (b *MessageBuilder) WithID(id string) *MessageBuilder {
+	b.data.ID = id
+	b.data.Name = "t4_" + id
+	return b
+}
+
+// WithAuthor sets the message author username.
+func (b *MessageBuilder) WithAuthor(author string) *MessageBuilder {
+	b.data.Author = author
+	return b
+}
+
+// WithBody sets the message body text.
+func (b *MessageBuilder) WithBody(body string) *MessageBuilder {
+	b.data.Body = body
+	return b
+}
+
+// WithSubject sets the message subject.
+func (b *MessageBuilder) WithSubject(subject string) *MessageBuilder {
+	b.data.Subject = subject
+	return b
+}
+
+// WithCreated sets both Created and CreatedUTC to the given Unix timestamp.
+func (b *MessageBuilder) WithCreated(timestamp float64) *MessageBuilder {
+	b.data.Created.Created = timestamp
+	b.data.Created.CreatedUTC = timestamp
+	return b
+}
+
+// Build returns the constructed MessageData.
+func (b *MessageBuilder) Build() *types.MessageData {
+	return b.data
+}
+
+// ToThing wraps the MessageData in a Thing with kind "t4" and properly marshaled data.
+func (b *MessageBuilder) ToThing() *types.Thing {
+	dataJSON, _ := json.Marshal(b.data)
+	return &types.Thing{
+		ThingData: types.ThingData{
+			ID:   b.data.ID,
+			Name: b.data.Name,
+		},
+		Kind: "t4",
+		Data: dataJSON,
+	}
+}
+
+// ToJSON returns the MessageData as a json.RawMessage.
+func (b *MessageBuilder) ToJSON() json.RawMessage {
 	data, _ := json.Marshal(b.data)
 	return data
 }
