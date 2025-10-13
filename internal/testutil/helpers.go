@@ -251,31 +251,9 @@ func intPtr(i int) *int {
 	return &i
 }
 
-// MockHTTPClient is a mock implementation of the HTTPClient interface for testing.
-// It allows tests to control the behavior of HTTP operations without making real network calls.
+// NOTE: MockHTTPClient has been removed to avoid import cycles and type mismatches.
+// Test files should define their own mock HTTP client implementations that match
+// the exact interface required by the Reddit client.
 //
-// Example:
-//
-//	mock := &testutil.MockHTTPClient{
-//	    NewRequestFunc: func(ctx context.Context, method, path string, body io.Reader, params ...url.Values) (*http.Request, error) {
-//	        return http.NewRequestWithContext(ctx, method, "http://example.com/"+path, body)
-//	    },
-//	    DoFunc: func(req *http.Request, v *types.Thing) error {
-//	        *v = types.Thing{Kind: "Listing", Data: json.RawMessage(`{"children":[]}`)}
-//	        return nil
-//	    },
-//	}
-type MockHTTPClient struct {
-	// NewRequestFunc is called by NewRequest
-	NewRequestFunc func(ctx context.Context, method, path string, body interface{}, params ...interface{}) (*http.Request, error)
-	// DoFunc is called by Do
-	DoFunc func(req *http.Request, v *types.Thing) error
-	// DoThingArrayFunc is called by DoThingArray
-	DoThingArrayFunc func(req *http.Request) ([]*types.Thing, error)
-	// DoMoreChildrenFunc is called by DoMoreChildren
-	DoMoreChildrenFunc func(req *http.Request) ([]*types.Thing, error)
-}
-
-// Note: The actual method signatures for MockHTTPClient would need to match
-// the exact interface definition from the main package. The above is a template
-// that should be adjusted based on the actual HTTPClient interface.
+// See reddit_test.go for an example of how to define a mockHTTPClient that works
+// with the actual client interfaces without causing import cycles.
