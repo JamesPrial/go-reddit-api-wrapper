@@ -6,6 +6,8 @@ import (
 
 	pkgerrs "github.com/jamesprial/go-reddit-api-wrapper/pkg/errors"
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
+
+	"github.com/jamesprial/go-reddit-api-wrapper/internal/testutil"
 )
 
 func TestValidator_ValidateSubredditName(t *testing.T) {
@@ -50,21 +52,12 @@ func TestValidator_ValidateSubredditName(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			err := v.ValidateSubredditName(tt.input)
 			if tt.wantError {
-				if err == nil {
-					t.Errorf("expected error containing %q, got nil", tt.errorMsg)
-					return
-				}
-				if !strings.Contains(err.Error(), tt.errorMsg) {
-					t.Errorf("expected error containing %q, got %q", tt.errorMsg, err.Error())
-				}
-				// Verify it's a ConfigError
-				if _, ok := err.(*pkgerrs.ConfigError); !ok {
-					t.Errorf("expected *pkgerrs.ConfigError, got %T", err)
-				}
+				testutil.AssertError(t, err)
+				testutil.AssertStringContains(t, err.Error(), tt.errorMsg)
+				var configErr *pkgerrs.ConfigError
+				testutil.AssertErrorType(t, err, &configErr)
 			} else {
-				if err != nil {
-					t.Errorf("expected no error, got %v", err)
-				}
+				testutil.AssertNoError(t, err)
 			}
 		})
 	}
@@ -97,21 +90,12 @@ func TestValidator_ValidatePagination(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			err := v.ValidatePagination(tt.pagination)
 			if tt.wantError {
-				if err == nil {
-					t.Errorf("expected error containing %q, got nil", tt.errorMsg)
-					return
-				}
-				if !strings.Contains(err.Error(), tt.errorMsg) {
-					t.Errorf("expected error containing %q, got %q", tt.errorMsg, err.Error())
-				}
-				// Verify it's a ConfigError
-				if _, ok := err.(*pkgerrs.ConfigError); !ok {
-					t.Errorf("expected *pkgerrs.ConfigError, got %T", err)
-				}
+				testutil.AssertError(t, err)
+				testutil.AssertStringContains(t, err.Error(), tt.errorMsg)
+				var configErr *pkgerrs.ConfigError
+				testutil.AssertErrorType(t, err, &configErr)
 			} else {
-				if err != nil {
-					t.Errorf("expected no error, got %v", err)
-				}
+				testutil.AssertNoError(t, err)
 			}
 		})
 	}
@@ -165,21 +149,12 @@ func TestValidator_ValidateCommentIDs(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			err := v.ValidateCommentIDs(tt.ids)
 			if tt.wantError {
-				if err == nil {
-					t.Errorf("expected error containing %q, got nil", tt.errorMsg)
-					return
-				}
-				if !strings.Contains(err.Error(), tt.errorMsg) {
-					t.Errorf("expected error containing %q, got %q", tt.errorMsg, err.Error())
-				}
-				// Verify it's a ConfigError
-				if _, ok := err.(*pkgerrs.ConfigError); !ok {
-					t.Errorf("expected *pkgerrs.ConfigError, got %T", err)
-				}
+				testutil.AssertError(t, err)
+				testutil.AssertStringContains(t, err.Error(), tt.errorMsg)
+				var configErr *pkgerrs.ConfigError
+				testutil.AssertErrorType(t, err, &configErr)
 			} else {
-				if err != nil {
-					t.Errorf("expected no error, got %v", err)
-				}
+				testutil.AssertNoError(t, err)
 			}
 		})
 	}
@@ -211,17 +186,10 @@ func TestValidator_ValidateUserAgent(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			err := v.ValidateUserAgent(tt.ua)
 			if tt.wantError {
-				if err == nil {
-					t.Errorf("expected error containing %q, got nil", tt.errorMsg)
-					return
-				}
-				if !strings.Contains(err.Error(), tt.errorMsg) {
-					t.Errorf("expected error containing %q, got %q", tt.errorMsg, err.Error())
-				}
+				testutil.AssertError(t, err)
+				testutil.AssertStringContains(t, err.Error(), tt.errorMsg)
 			} else {
-				if err != nil {
-					t.Errorf("expected no error, got %v", err)
-				}
+				testutil.AssertNoError(t, err)
 			}
 		})
 	}
@@ -263,21 +231,12 @@ func TestValidator_ValidateLinkID(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			normalized, err := v.ValidateLinkID(tt.linkID)
 			if tt.wantError {
-				if err == nil {
-					t.Errorf("expected error containing %q, got nil", tt.errorMsg)
-					return
-				}
-				if !strings.Contains(err.Error(), tt.errorMsg) {
-					t.Errorf("expected error containing %q, got %q", tt.errorMsg, err.Error())
-				}
-				// Verify it's a ConfigError
-				if _, ok := err.(*pkgerrs.ConfigError); !ok {
-					t.Errorf("expected *pkgerrs.ConfigError, got %T", err)
-				}
+				testutil.AssertError(t, err)
+				testutil.AssertStringContains(t, err.Error(), tt.errorMsg)
+				var configErr *pkgerrs.ConfigError
+				testutil.AssertErrorType(t, err, &configErr)
 			} else {
-				if err != nil {
-					t.Errorf("expected no error, got %v", err)
-				}
+				testutil.AssertNoError(t, err)
 				if normalized != tt.wantNormalized {
 					t.Errorf("expected normalized %q, got %q", tt.wantNormalized, normalized)
 				}
@@ -315,17 +274,122 @@ func TestValidateCommentID(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			err := validateCommentID(tt.id)
 			if tt.wantError {
-				if err == nil {
-					t.Errorf("expected error containing %q, got nil", tt.errorMsg)
-					return
-				}
-				if !strings.Contains(err.Error(), tt.errorMsg) {
-					t.Errorf("expected error containing %q, got %q", tt.errorMsg, err.Error())
-				}
+				testutil.AssertError(t, err)
+				testutil.AssertStringContains(t, err.Error(), tt.errorMsg)
 			} else {
-				if err != nil {
-					t.Errorf("expected no error, got %v", err)
-				}
+				testutil.AssertNoError(t, err)
+			}
+		})
+	}
+}
+
+func TestValidator_ValidatePostID(t *testing.T) {
+	v := NewValidator()
+
+	tests := []struct {
+		name      string
+		postID    string
+		wantError bool
+		errorMsg  string
+	}{
+		// Valid cases
+		{name: "valid lowercase", postID: "abc123", wantError: false},
+		{name: "valid all numbers", postID: "123456", wantError: false},
+		{name: "valid all letters", postID: "abcdef", wantError: false},
+
+		// Invalid cases
+		{name: "empty", postID: "", wantError: true, errorMsg: "required"},
+		{name: "uppercase", postID: "ABC123", wantError: true, errorMsg: "invalid format"},
+		{name: "mixed case", postID: "AbC123", wantError: true, errorMsg: "invalid format"},
+		{name: "with underscore", postID: "abc_123", wantError: true, errorMsg: "invalid format"},
+		{name: "with dash", postID: "abc-123", wantError: true, errorMsg: "invalid format"},
+		{name: "with space", postID: "abc 123", wantError: true, errorMsg: "invalid format"},
+		{name: "too long", postID: strings.Repeat("a", 101), wantError: true, errorMsg: "too long"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := v.ValidatePostID(tt.postID)
+			if tt.wantError {
+				testutil.AssertError(t, err)
+				testutil.AssertStringContains(t, err.Error(), tt.errorMsg)
+			} else {
+				testutil.AssertNoError(t, err)
+			}
+		})
+	}
+}
+
+func TestValidator_ValidatePaginationToken(t *testing.T) {
+	v := NewValidator()
+
+	tests := []struct {
+		name      string
+		token     string
+		wantError bool
+		errorMsg  string
+	}{
+		// Valid cases
+		{name: "valid comment", token: "t1_abc123", wantError: false},
+		{name: "valid post", token: "t3_def456", wantError: false},
+		{name: "valid subreddit", token: "t5_xyz789", wantError: false},
+
+		// Invalid cases
+		{name: "empty", token: "", wantError: true, errorMsg: "cannot be empty"},
+		{name: "no prefix", token: "abc123", wantError: true, errorMsg: "invalid fullname format"},
+		{name: "wrong prefix", token: "t0_abc123", wantError: true, errorMsg: "invalid fullname format"},
+		{name: "uppercase ID", token: "t3_ABC123", wantError: true, errorMsg: "invalid fullname format"},
+		{name: "no underscore", token: "t3abc123", wantError: true, errorMsg: "invalid fullname format"},
+		{name: "missing ID", token: "t3_", wantError: true, errorMsg: "invalid fullname format"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := v.ValidatePaginationToken(tt.token)
+			if tt.wantError {
+				testutil.AssertError(t, err)
+				testutil.AssertStringContains(t, err.Error(), tt.errorMsg)
+			} else {
+				testutil.AssertNoError(t, err)
+			}
+		})
+	}
+}
+
+func TestValidator_ValidateURL(t *testing.T) {
+	v := NewValidator()
+
+	tests := []struct {
+		name      string
+		url       string
+		wantError bool
+		errorMsg  string
+	}{
+		// Valid cases
+		{name: "valid http", url: "http://example.com", wantError: false},
+		{name: "valid https", url: "https://example.com", wantError: false},
+		{name: "valid with path", url: "https://example.com/path", wantError: false},
+		{name: "valid with query", url: "https://example.com?key=value", wantError: false},
+		{name: "valid with port", url: "https://example.com:8080", wantError: false},
+
+		// Invalid cases
+		{name: "empty", url: "", wantError: true, errorMsg: "cannot be empty"},
+		{name: "invalid scheme", url: "javascript:alert(1)", wantError: true, errorMsg: "must use http or https scheme"},
+		{name: "file scheme", url: "file:///etc/passwd", wantError: true, errorMsg: "must use http or https scheme"},
+		{name: "no scheme", url: "example.com", wantError: true, errorMsg: "must use http or https scheme"},
+		{name: "no host", url: "https://", wantError: true, errorMsg: "must have a valid host"},
+		{name: "with newline", url: "https://example.com\nX-Injected: header", wantError: true, errorMsg: "invalid"},
+		{name: "with carriage return", url: "https://example.com\rX-Injected: header", wantError: true, errorMsg: "invalid"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := v.ValidateURL(tt.url)
+			if tt.wantError {
+				testutil.AssertError(t, err)
+				testutil.AssertStringContains(t, err.Error(), tt.errorMsg)
+			} else {
+				testutil.AssertNoError(t, err)
 			}
 		})
 	}
@@ -368,140 +432,5 @@ func BenchmarkValidator_ValidateLinkID(b *testing.B) {
 	linkID := "abc123"
 	for i := 0; i < b.N; i++ {
 		_, _ = v.ValidateLinkID(linkID)
-	}
-}
-
-// Tests for new validation methods
-
-func TestValidator_ValidatePostID(t *testing.T) {
-	v := NewValidator()
-
-	tests := []struct {
-		name      string
-		postID    string
-		wantError bool
-		errorMsg  string
-	}{
-		// Valid cases
-		{name: "valid lowercase", postID: "abc123", wantError: false},
-		{name: "valid all numbers", postID: "123456", wantError: false},
-		{name: "valid all letters", postID: "abcdef", wantError: false},
-
-		// Invalid cases
-		{name: "empty", postID: "", wantError: true, errorMsg: "required"},
-		{name: "uppercase", postID: "ABC123", wantError: true, errorMsg: "invalid format"},
-		{name: "mixed case", postID: "AbC123", wantError: true, errorMsg: "invalid format"},
-		{name: "with underscore", postID: "abc_123", wantError: true, errorMsg: "invalid format"},
-		{name: "with dash", postID: "abc-123", wantError: true, errorMsg: "invalid format"},
-		{name: "with space", postID: "abc 123", wantError: true, errorMsg: "invalid format"},
-		{name: "too long", postID: strings.Repeat("a", 101), wantError: true, errorMsg: "too long"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := v.ValidatePostID(tt.postID)
-			if tt.wantError {
-				if err == nil {
-					t.Errorf("expected error containing %q, got nil", tt.errorMsg)
-					return
-				}
-				if !strings.Contains(err.Error(), tt.errorMsg) {
-					t.Errorf("expected error containing %q, got %q", tt.errorMsg, err.Error())
-				}
-			} else {
-				if err != nil {
-					t.Errorf("expected no error, got %v", err)
-				}
-			}
-		})
-	}
-}
-
-func TestValidator_ValidatePaginationToken(t *testing.T) {
-	v := NewValidator()
-
-	tests := []struct {
-		name      string
-		token     string
-		wantError bool
-		errorMsg  string
-	}{
-		// Valid cases
-		{name: "valid comment", token: "t1_abc123", wantError: false},
-		{name: "valid post", token: "t3_def456", wantError: false},
-		{name: "valid subreddit", token: "t5_xyz789", wantError: false},
-
-		// Invalid cases
-		{name: "empty", token: "", wantError: true, errorMsg: "cannot be empty"},
-		{name: "no prefix", token: "abc123", wantError: true, errorMsg: "invalid fullname format"},
-		{name: "wrong prefix", token: "t0_abc123", wantError: true, errorMsg: "invalid fullname format"},
-		{name: "uppercase ID", token: "t3_ABC123", wantError: true, errorMsg: "invalid fullname format"},
-		{name: "no underscore", token: "t3abc123", wantError: true, errorMsg: "invalid fullname format"},
-		{name: "missing ID", token: "t3_", wantError: true, errorMsg: "invalid fullname format"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := v.ValidatePaginationToken(tt.token)
-			if tt.wantError {
-				if err == nil {
-					t.Errorf("expected error containing %q, got nil", tt.errorMsg)
-					return
-				}
-				if !strings.Contains(err.Error(), tt.errorMsg) {
-					t.Errorf("expected error containing %q, got %q", tt.errorMsg, err.Error())
-				}
-			} else {
-				if err != nil {
-					t.Errorf("expected no error, got %v", err)
-				}
-			}
-		})
-	}
-}
-
-func TestValidator_ValidateURL(t *testing.T) {
-	v := NewValidator()
-
-	tests := []struct {
-		name      string
-		url       string
-		wantError bool
-		errorMsg  string
-	}{
-		// Valid cases
-		{name: "valid http", url: "http://example.com", wantError: false},
-		{name: "valid https", url: "https://example.com", wantError: false},
-		{name: "valid with path", url: "https://example.com/path", wantError: false},
-		{name: "valid with query", url: "https://example.com?key=value", wantError: false},
-		{name: "valid with port", url: "https://example.com:8080", wantError: false},
-
-		// Invalid cases
-		{name: "empty", url: "", wantError: true, errorMsg: "cannot be empty"},
-		{name: "invalid scheme", url: "javascript:alert(1)", wantError: true, errorMsg: "must use http or https scheme"},
-		{name: "file scheme", url: "file:///etc/passwd", wantError: true, errorMsg: "must use http or https scheme"},
-		{name: "no scheme", url: "example.com", wantError: true, errorMsg: "must use http or https scheme"},
-		{name: "no host", url: "https://", wantError: true, errorMsg: "must have a valid host"},
-		{name: "with newline", url: "https://example.com\nX-Injected: header", wantError: true, errorMsg: "invalid"},
-		{name: "with carriage return", url: "https://example.com\rX-Injected: header", wantError: true, errorMsg: "invalid"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := v.ValidateURL(tt.url)
-			if tt.wantError {
-				if err == nil {
-					t.Errorf("expected error containing %q, got nil", tt.errorMsg)
-					return
-				}
-				if !strings.Contains(err.Error(), tt.errorMsg) {
-					t.Errorf("expected error containing %q, got %q", tt.errorMsg, err.Error())
-				}
-			} else {
-				if err != nil {
-					t.Errorf("expected no error, got %v", err)
-				}
-			}
-		})
 	}
 }
