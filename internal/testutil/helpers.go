@@ -3,73 +3,16 @@ package testutil
 
 import (
 	"context"
-	"net/http"
-	"net/http/httptest"
 
-	"github.com/jamesprial/go-reddit-api-wrapper"
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 )
 
-// NewTestClient creates a Reddit client configured to use the provided mock server.
-// The client is set up with a mock auth provider that returns "test-token" and
-// uses the mock server's URL as the base URL. This is useful for integration-style
-// tests where you need a full client connected to a mock HTTP server.
+// NOTE: NewTestClient and NewTestClientWithMocks have been removed to avoid import cycles.
+// The main package (graw) cannot be imported from internal/testutil because it would create
+// a circular dependency. Instead, test files should create their own client factory functions
+// using the builders and MockServer from this package.
 //
-// Example:
-//
-//	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-//	    w.WriteHeader(http.StatusOK)
-//	    w.Write([]byte(`{"kind":"Listing","data":{"children":[]}}`))
-//	}))
-//	defer server.Close()
-//
-//	client := testutil.NewTestClient(server)
-//	posts, err := client.GetHot(ctx, nil)
-func NewTestClient(mockServer *httptest.Server) *graw.Reddit {
-	config := &graw.Config{
-		ClientID:     "test-client-id",
-		ClientSecret: "test-client-secret",
-		UserAgent:    "test-agent/1.0",
-		BaseURL:      mockServer.URL,
-		AuthURL:      mockServer.URL,
-		HTTPClient:   mockServer.Client(),
-		RateLimitConfig: &graw.RateLimitConfig{
-			RequestsPerMinute: 100000, // Effectively disable rate limiting for tests
-			Burst:             1000,
-		},
-	}
-
-	// Create client - note: this will fail auth if mock server doesn't handle it
-	// In real tests, you should set up the mock server to handle auth requests
-	client, err := graw.NewClient(config)
-	if err != nil {
-		// Return a partially constructed client for tests that need to inject mocks
-		panic("NewTestClient requires mock server to handle auth endpoint: " + err.Error())
-	}
-
-	return client
-}
-
-// NewTestClientWithMocks creates a Reddit client with custom HTTP client and auth provider.
-// This is a lower-level factory that gives you full control over the client's dependencies.
-// Use this when you need specific mock behavior or when testing error conditions.
-//
-// Example:
-//
-//	mockHTTP := &MockHTTPClient{
-//	    DoFunc: func(req *http.Request, v *types.Thing) error {
-//	        // Custom mock behavior
-//	        return nil
-//	    },
-//	}
-//	mockAuth := &testutil.MockTokenProvider{Token: "custom-token"}
-//	client := testutil.NewTestClientWithMocks(mockHTTP, mockAuth)
-func NewTestClientWithMocks(httpClient graw.HTTPClient, auth graw.TokenProvider) *graw.Reddit {
-	// Note: This function signature expects internal interfaces that may not be exportable.
-	// For now, we document it but may need to revisit the implementation based on
-	// actual package structure and visibility requirements.
-	panic("NewTestClientWithMocks: not yet implemented - requires access to internal Reddit constructor")
-}
+// See reddit_test.go for an example of how to create test clients without import cycles.
 
 // DefaultPost returns a fully populated Post with realistic default values.
 // This is useful for tests that need a complete post object without caring

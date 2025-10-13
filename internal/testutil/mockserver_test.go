@@ -38,7 +38,7 @@ func TestMockServer_Posts(t *testing.T) {
 	defer server.Close()
 
 	// Make request
-	resp, err := http.Get(server.URL + "/r/golang/hot")
+	resp, err := http.Get(server.URL() + "/r/golang/hot")
 	if err != nil {
 		t.Fatalf("Failed to make request: %v", err)
 	}
@@ -102,7 +102,7 @@ func TestMockServer_Subreddit(t *testing.T) {
 	defer server.Close()
 
 	// Make request
-	resp, err := http.Get(server.URL + "/r/golang/about")
+	resp, err := http.Get(server.URL() + "/r/golang/about")
 	if err != nil {
 		t.Fatalf("Failed to make request: %v", err)
 	}
@@ -179,7 +179,7 @@ func TestMockServer_Comments(t *testing.T) {
 	defer server.Close()
 
 	// Make request
-	resp, err := http.Get(server.URL + "/r/golang/comments/abc123")
+	resp, err := http.Get(server.URL() + "/r/golang/comments/abc123")
 	if err != nil {
 		t.Fatalf("Failed to make request: %v", err)
 	}
@@ -245,7 +245,7 @@ func TestMockServer_Account(t *testing.T) {
 	defer server.Close()
 
 	// Make request
-	resp, err := http.Get(server.URL + "/api/v1/me")
+	resp, err := http.Get(server.URL() + "/api/v1/me")
 	if err != nil {
 		t.Fatalf("Failed to make request: %v", err)
 	}
@@ -286,7 +286,7 @@ func TestMockServer_Error(t *testing.T) {
 	defer server.Close()
 
 	// Make request
-	resp, err := http.Get(server.URL + "/r/private/hot")
+	resp, err := http.Get(server.URL() + "/r/private/hot")
 	if err != nil {
 		t.Fatalf("Failed to make request: %v", err)
 	}
@@ -319,7 +319,7 @@ func TestMockServer_EmptyListing(t *testing.T) {
 	defer server.Close()
 
 	// Make request to unconfigured endpoint
-	resp, err := http.Get(server.URL + "/r/unknown/hot")
+	resp, err := http.Get(server.URL() + "/r/unknown/hot")
 	if err != nil {
 		t.Fatalf("Failed to make request: %v", err)
 	}
