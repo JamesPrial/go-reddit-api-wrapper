@@ -58,16 +58,22 @@ func TestRedditAPIClientUsage(t *testing.T) {
 			}
 			posts := make([]map[string]interface{}, limit)
 			for i := 0; i < limit; i++ {
+				score := 100 + i*10
 				posts[i] = map[string]interface{}{
 					"kind": "t3",
 					"data": map[string]interface{}{
 						"id":           fmt.Sprintf("abc%d", i),
+						"name":         fmt.Sprintf("t3_abc%d", i),
 						"title":        fmt.Sprintf("Real World Test Post %d", i),
-						"score":        100 + i*10,
+						"score":        score,
+						"ups":          score,
+						"downs":        0,
 						"author":       fmt.Sprintf("user_%d", i),
+						"subreddit":    "testsub",
 						"selftext":     fmt.Sprintf("This is test content for post %d with some realistic text to simulate real Reddit posts.", i),
 						"url":          fmt.Sprintf("https://example.com/post_%d", i),
 						"permalink":    fmt.Sprintf("/r/testsub/comments/%d/real_world_test_post_%d/", i, i),
+						"created":      1609459200.0 + float64(i*3600),
 						"created_utc":  1609459200.0 + float64(i*3600),
 						"num_comments": 10 + i,
 						"over_18":      false,
@@ -94,24 +100,45 @@ func TestRedditAPIClientUsage(t *testing.T) {
 				"kind": "t3",
 				"data": map[string]interface{}{
 					"id":          "abc123",
+					"name":        "t3_abc123",
 					"title":       "Main Post for Comments",
 					"score":       1000,
+					"ups":         1000,
+					"downs":       0,
 					"author":      "mainuser",
+					"subreddit":   "testsub",
 					"selftext":    "This is the main post content",
+					"created":     1609459200.0,
 					"created_utc": 1609459200.0,
+					"permalink":   "/r/testsub/comments/abc123/main_post_for_comments/",
+					"url":         "https://example.com/post_abc123",
 				},
 			}
 
-			comments := make([]map[string]interface{}, 50)
-			for i := 0; i < 50; i++ {
+			// Respect limit parameter for comments
+			commentLimit := 50
+			if limitParam := r.URL.Query().Get("limit"); limitParam != "" {
+				fmt.Sscanf(limitParam, "%d", &commentLimit)
+			}
+
+			comments := make([]map[string]interface{}, commentLimit)
+			for i := 0; i < commentLimit; i++ {
+				score := 5 + i
 				comments[i] = map[string]interface{}{
 					"kind": "t1",
 					"data": map[string]interface{}{
-						"id":          fmt.Sprintf("t1_%d", i),
+						"id":          fmt.Sprintf("comment%d", i),
+						"name":        fmt.Sprintf("t1_comment%d", i),
 						"author":      fmt.Sprintf("commenter_%d", i),
 						"body":        fmt.Sprintf("This is comment %d with some realistic content that would appear in a real Reddit thread.", i),
-						"score":       5 + i,
+						"score":       score,
+						"ups":         score,
+						"downs":       0,
+						"subreddit":   "testsub",
+						"created":     1609459200.0 + float64(i*60),
 						"created_utc": 1609459200.0 + float64(i*60),
+						"link_id":     "t3_abc123",
+						"parent_id":   "t3_abc123",
 						"replies": map[string]interface{}{
 							"kind": "Listing",
 							"data": map[string]interface{}{
@@ -133,7 +160,7 @@ func TestRedditAPIClientUsage(t *testing.T) {
 				"kind": "Listing",
 				"data": map[string]interface{}{
 					"children": comments,
-					"after":    "t1_next_page",
+					"after":    "",
 					"before":   "",
 				},
 			}
@@ -483,14 +510,22 @@ func TestConcurrentRealWorldUsage(t *testing.T) {
 			// Posts listing endpoint
 			posts := make([]map[string]interface{}, 10)
 			for i := 0; i < 10; i++ {
+				score := 100 + i
 				posts[i] = map[string]interface{}{
 					"kind": "t3",
 					"data": map[string]interface{}{
 						"id":          fmt.Sprintf("def%d", i),
+						"name":        fmt.Sprintf("t3_def%d", i),
 						"title":       fmt.Sprintf("Concurrent Test Post %d", i),
-						"score":       100 + i,
+						"score":       score,
+						"ups":         score,
+						"downs":       0,
 						"author":      fmt.Sprintf("user_%d", i),
+						"subreddit":   "testsub",
+						"created":     1609459200.0 + float64(i*3600),
 						"created_utc": 1609459200.0 + float64(i*3600),
+						"permalink":   fmt.Sprintf("/r/testsub/comments/def%d/concurrent_test_post_%d/", i, i),
+						"url":         fmt.Sprintf("https://example.com/post_def%d", i),
 					},
 				}
 			}
@@ -614,14 +649,20 @@ func TestLongRunningOperations(t *testing.T) {
 		// Return larger datasets for long-running operations
 		posts := make([]map[string]interface{}, 100)
 		for i := 0; i < 100; i++ {
+			score := 100 + i
 			posts[i] = map[string]interface{}{
 				"kind": "t3",
 				"data": map[string]interface{}{
 					"id":           fmt.Sprintf("xyz%d", i),
+					"name":         fmt.Sprintf("t3_xyz%d", i),
 					"title":        fmt.Sprintf("Long Running Test Post %d", i),
-					"score":        100 + i,
+					"score":        score,
+					"ups":          score,
+					"downs":        0,
 					"author":       fmt.Sprintf("user_%d", i),
+					"subreddit":    "testsub",
 					"selftext":     fmt.Sprintf("This is longer content for post %d to simulate real Reddit posts with substantial text content.", i),
+					"created":      1609459200.0 + float64(i*3600),
 					"created_utc":  1609459200.0 + float64(i*3600),
 					"num_comments": 10 + i,
 					"url":          fmt.Sprintf("https://reddit.com/r/testsub/comments/%d", i),
