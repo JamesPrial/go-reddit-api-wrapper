@@ -88,10 +88,10 @@ func TestConcurrentClientUsage(t *testing.T) {
 		}
 
 		clients[i] = &Reddit{
-			httpClient:    internalClient,
-			parser:    internal.NewParser(),
-			validator: internal.NewValidator(),
-			auth:      &mockTokenProvider{token: "test_token"},
+			httpClient: internalClient,
+			parser:     internal.NewParser(),
+			validator:  internal.NewValidator(),
+			auth:       &mockTokenProvider{token: "test_token"},
 		}
 	}
 
@@ -228,10 +228,10 @@ func TestConcurrentSameClientOperations(t *testing.T) {
 	}
 
 	client := &Reddit{
-		httpClient:    internalClient,
-		parser:    internal.NewParser(),
-		validator: internal.NewValidator(),
-		auth:      &mockTokenProvider{token: "test_token"},
+		httpClient: internalClient,
+		parser:     internal.NewParser(),
+		validator:  internal.NewValidator(),
+		auth:       &mockTokenProvider{token: "test_token"},
 	}
 
 	// Test concurrent operations on the same client
@@ -352,10 +352,10 @@ func TestConcurrentRateLimitingBehavior(t *testing.T) {
 	}
 
 	client := &Reddit{
-		httpClient:    internalClient,
-		parser:    internal.NewParser(),
-		validator: internal.NewValidator(),
-		auth:      &mockTokenProvider{token: "test_token"},
+		httpClient: internalClient,
+		parser:     internal.NewParser(),
+		validator:  internal.NewValidator(),
+		auth:       &mockTokenProvider{token: "test_token"},
 	}
 
 	// Test rapid concurrent requests
@@ -441,10 +441,10 @@ func TestConcurrentContextCancellation(t *testing.T) {
 	}
 
 	client := &Reddit{
-		httpClient:    internalClient,
-		parser:    internal.NewParser(),
-		validator: internal.NewValidator(),
-		auth:      &mockTokenProvider{token: "test_token"},
+		httpClient: internalClient,
+		parser:     internal.NewParser(),
+		validator:  internal.NewValidator(),
+		auth:       &mockTokenProvider{token: "test_token"},
 	}
 
 	// Test context cancellation
@@ -535,10 +535,10 @@ func TestConcurrentResourceContention(t *testing.T) {
 	}
 
 	client := &Reddit{
-		httpClient:    internalClient,
-		parser:    internal.NewParser(),
-		validator: internal.NewValidator(),
-		auth:      &mockTokenProvider{token: "test_token"},
+		httpClient: internalClient,
+		parser:     internal.NewParser(),
+		validator:  internal.NewValidator(),
+		auth:       &mockTokenProvider{token: "test_token"},
 	}
 
 	// Test high concurrency with resource contention
@@ -632,31 +632,31 @@ func TestConcurrentMixedOperations(t *testing.T) {
 				{
 					"kind": "t3",
 					"data": map[string]interface{}{
-						"id":            postID,
-						"name":          "t3_" + postID,
-						"title":         fmt.Sprintf("Mixed Post %d", atomic.LoadInt64(&requestCount)),
-						"score":         score,
-						"ups":           score,
-						"downs":         0,
-						"author":        "testuser",
-						"subreddit":     "mixed_test_sub",
-						"subreddit_id":  "t5_mixed",
-						"created":       created,
-						"created_utc":   created,
-						"num_comments":  50,
-						"url":           "https://reddit.com/r/mixed_test_sub/comments/" + postID,
-						"permalink":     "/r/mixed_test_sub/comments/" + postID + "/mixed_post/",
-						"upvote_ratio":  0.95,
-						"is_self":       false,
-						"selftext":      "",
-						"domain":        "example.com",
-						"over_18":       false,
-						"thumbnail":     "",
-						"clicked":       false,
-						"hidden":        false,
-						"saved":         false,
-						"locked":        false,
-						"stickied":      false,
+						"id":           postID,
+						"name":         "t3_" + postID,
+						"title":        fmt.Sprintf("Mixed Post %d", atomic.LoadInt64(&requestCount)),
+						"score":        score,
+						"ups":          score,
+						"downs":        0,
+						"author":       "testuser",
+						"subreddit":    "mixed_test_sub",
+						"subreddit_id": "t5_mixed",
+						"created":      created,
+						"created_utc":  created,
+						"num_comments": 50,
+						"url":          "https://reddit.com/r/mixed_test_sub/comments/" + postID,
+						"permalink":    "/r/mixed_test_sub/comments/" + postID + "/mixed_post/",
+						"upvote_ratio": 0.95,
+						"is_self":      false,
+						"selftext":     "",
+						"domain":       "example.com",
+						"over_18":      false,
+						"thumbnail":    "",
+						"clicked":      false,
+						"hidden":       false,
+						"saved":        false,
+						"locked":       false,
+						"stickied":     false,
 					},
 				},
 			}
@@ -675,31 +675,31 @@ func TestConcurrentMixedOperations(t *testing.T) {
 			postData := map[string]interface{}{
 				"kind": "t3",
 				"data": map[string]interface{}{
-					"id":            postID,
-					"name":          "t3_" + postID,
-					"title":         "Mixed Post 1",
-					"score":         score,
-					"ups":           score,
-					"downs":         0,
-					"author":        "testuser",
-					"subreddit":     "mixed_test_sub",
-					"subreddit_id":  "t5_mixed",
-					"created":       created,
-					"created_utc":   created,
-					"num_comments":  50,
-					"url":           "https://reddit.com/r/mixed_test_sub/comments/" + postID,
-					"permalink":     "/r/mixed_test_sub/comments/" + postID + "/mixed_post/",
-					"upvote_ratio":  0.95,
-					"is_self":       false,
-					"selftext":      "",
-					"domain":        "example.com",
-					"over_18":       false,
-					"thumbnail":     "",
-					"clicked":       false,
-					"hidden":        false,
-					"saved":         false,
-					"locked":        false,
-					"stickied":      false,
+					"id":           postID,
+					"name":         "t3_" + postID,
+					"title":        "Mixed Post 1",
+					"score":        score,
+					"ups":          score,
+					"downs":        0,
+					"author":       "testuser",
+					"subreddit":    "mixed_test_sub",
+					"subreddit_id": "t5_mixed",
+					"created":      created,
+					"created_utc":  created,
+					"num_comments": 50,
+					"url":          "https://reddit.com/r/mixed_test_sub/comments/" + postID,
+					"permalink":    "/r/mixed_test_sub/comments/" + postID + "/mixed_post/",
+					"upvote_ratio": 0.95,
+					"is_self":      false,
+					"selftext":     "",
+					"domain":       "example.com",
+					"over_18":      false,
+					"thumbnail":    "",
+					"clicked":      false,
+					"hidden":       false,
+					"saved":        false,
+					"locked":       false,
+					"stickied":     false,
 				},
 			}
 
@@ -759,10 +759,10 @@ func TestConcurrentMixedOperations(t *testing.T) {
 	}
 
 	client := &Reddit{
-		httpClient:    internalClient,
-		parser:    internal.NewParser(),
-		validator: internal.NewValidator(),
-		auth:      &mockTokenProvider{token: "test_token"},
+		httpClient: internalClient,
+		parser:     internal.NewParser(),
+		validator:  internal.NewValidator(),
+		auth:       &mockTokenProvider{token: "test_token"},
 	}
 
 	// Test mixed operations concurrently

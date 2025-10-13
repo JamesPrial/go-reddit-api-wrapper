@@ -187,10 +187,10 @@ func TestRedditAPIClientUsage(t *testing.T) {
 	}
 
 	client := &Reddit{
-		httpClient:    internalClient,
-		parser:    internal.NewParser(),
-		validator: internal.NewValidator(),
-		auth:      &mockTokenProvider{token: "test_token"},
+		httpClient: internalClient,
+		parser:     internal.NewParser(),
+		validator:  internal.NewValidator(),
+		auth:       &mockTokenProvider{token: "test_token"},
 	}
 
 	ctx := context.Background()
@@ -420,10 +420,10 @@ func TestErrorHandlingInRealWorld(t *testing.T) {
 	}
 
 	client := &Reddit{
-		httpClient:    internalClient,
-		parser:    internal.NewParser(),
-		validator: internal.NewValidator(),
-		auth:      &mockTokenProvider{token: "test_token"},
+		httpClient: internalClient,
+		parser:     internal.NewParser(),
+		validator:  internal.NewValidator(),
+		auth:       &mockTokenProvider{token: "test_token"},
 	}
 
 	ctx := context.Background()
@@ -554,10 +554,10 @@ func TestConcurrentRealWorldUsage(t *testing.T) {
 	}
 
 	client := &Reddit{
-		httpClient:    internalClient,
-		parser:    internal.NewParser(),
-		validator: internal.NewValidator(),
-		auth:      &mockTokenProvider{token: "test_token"},
+		httpClient: internalClient,
+		parser:     internal.NewParser(),
+		validator:  internal.NewValidator(),
+		auth:       &mockTokenProvider{token: "test_token"},
 	}
 
 	ctx := context.Background()
@@ -690,10 +690,10 @@ func TestLongRunningOperations(t *testing.T) {
 	}
 
 	client := &Reddit{
-		httpClient:    internalClient,
-		parser:    internal.NewParser(),
-		validator: internal.NewValidator(),
-		auth:      &mockTokenProvider{token: "test_token"},
+		httpClient: internalClient,
+		parser:     internal.NewParser(),
+		validator:  internal.NewValidator(),
+		auth:       &mockTokenProvider{token: "test_token"},
 	}
 
 	ctx := context.Background()

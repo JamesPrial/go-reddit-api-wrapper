@@ -31,10 +31,10 @@ func TestConnectionResourceManagement(t *testing.T) {
 		postData := map[string]interface{}{
 			"kind": "t3",
 			"data": map[string]interface{}{
-				"id":      "test_post",
-				"title":   "Test Post",
-				"score":   100,
-				"author":  "testuser",
+				"id":          "test_post",
+				"title":       "Test Post",
+				"score":       100,
+				"author":      "testuser",
 				"created_utc": 1609459200.0,
 			},
 		}
@@ -76,10 +76,10 @@ func TestConnectionResourceManagement(t *testing.T) {
 		}
 
 		client := &Reddit{
-			httpClient:    internalClient,
-			parser:    internal.NewParser(),
-			validator: internal.NewValidator(),
-			auth:      &mockTokenProvider{token: "test_token"},
+			httpClient: internalClient,
+			parser:     internal.NewParser(),
+			validator:  internal.NewValidator(),
+			auth:       &mockTokenProvider{token: "test_token"},
 		}
 		clients = append(clients, client)
 	}
@@ -181,10 +181,10 @@ func TestMemoryResourceManagement(t *testing.T) {
 	}
 
 	client := &Reddit{
-		httpClient:    internalClient,
-		parser:    internal.NewParser(),
-		validator: internal.NewValidator(),
-		auth:      &mockTokenProvider{token: "test_token"},
+		httpClient: internalClient,
+		parser:     internal.NewParser(),
+		validator:  internal.NewValidator(),
+		auth:       &mockTokenProvider{token: "test_token"},
 	}
 
 	ctx := context.Background()
@@ -269,10 +269,10 @@ func TestGoroutineResourceManagement(t *testing.T) {
 		postData := map[string]interface{}{
 			"kind": "t3",
 			"data": map[string]interface{}{
-				"id":      "test_post",
-				"title":   "Test Post",
-				"score":   100,
-				"author":  "testuser",
+				"id":          "test_post",
+				"title":       "Test Post",
+				"score":       100,
+				"author":      "testuser",
 				"created_utc": 1609459200.0,
 			},
 		}
@@ -296,10 +296,10 @@ func TestGoroutineResourceManagement(t *testing.T) {
 	}
 
 	client := &Reddit{
-		httpClient:    internalClient,
-		parser:    internal.NewParser(),
-		validator: internal.NewValidator(),
-		auth:      &mockTokenProvider{token: "test_token"},
+		httpClient: internalClient,
+		parser:     internal.NewParser(),
+		validator:  internal.NewValidator(),
+		auth:       &mockTokenProvider{token: "test_token"},
 	}
 
 	ctx := context.Background()
@@ -384,10 +384,10 @@ func TestContextResourceManagement(t *testing.T) {
 		postData := map[string]interface{}{
 			"kind": "t3",
 			"data": map[string]interface{}{
-				"id":      "test_post",
-				"title":   "Test Post",
-				"score":   100,
-				"author":  "testuser",
+				"id":          "test_post",
+				"title":       "Test Post",
+				"score":       100,
+				"author":      "testuser",
 				"created_utc": 1609459200.0,
 			},
 		}
@@ -411,10 +411,10 @@ func TestContextResourceManagement(t *testing.T) {
 	}
 
 	client := &Reddit{
-		httpClient:    internalClient,
-		parser:    internal.NewParser(),
-		validator: internal.NewValidator(),
-		auth:      &mockTokenProvider{token: "test_token"},
+		httpClient: internalClient,
+		parser:     internal.NewParser(),
+		validator:  internal.NewValidator(),
+		auth:       &mockTokenProvider{token: "test_token"},
 	}
 
 	// Test context cancellation
@@ -465,10 +465,10 @@ func TestFileDescriptorResourceManagement(t *testing.T) {
 		postData := map[string]interface{}{
 			"kind": "t3",
 			"data": map[string]interface{}{
-				"id":      "test_post",
-				"title":   "Test Post",
-				"score":   100,
-				"author":  "testuser",
+				"id":          "test_post",
+				"title":       "Test Post",
+				"score":       100,
+				"author":      "testuser",
 				"created_utc": 1609459200.0,
 			},
 		}
@@ -506,10 +506,10 @@ func TestFileDescriptorResourceManagement(t *testing.T) {
 		}
 
 		client := &Reddit{
-			httpClient:    internalClient,
-			parser:    internal.NewParser(),
-			validator: internal.NewValidator(),
-			auth:      &mockTokenProvider{token: "test_token"},
+			httpClient: internalClient,
+			parser:     internal.NewParser(),
+			validator:  internal.NewValidator(),
+			auth:       &mockTokenProvider{token: "test_token"},
 		}
 		clients = append(clients, client)
 	}
@@ -586,11 +586,11 @@ func TestBufferResourceManagement(t *testing.T) {
 		postData := map[string]interface{}{
 			"kind": "t3",
 			"data": map[string]interface{}{
-				"id":       fmt.Sprintf("post_%d", requestCount),
-				"title":    "Test Post",
-				"score":    100,
-				"author":   "testuser",
-				"content":  string(content),
+				"id":          fmt.Sprintf("post_%d", requestCount),
+				"title":       "Test Post",
+				"score":       100,
+				"author":      "testuser",
+				"content":     string(content),
 				"created_utc": 1609459200.0,
 			},
 		}
@@ -614,10 +614,10 @@ func TestBufferResourceManagement(t *testing.T) {
 	}
 
 	client := &Reddit{
-		httpClient:    internalClient,
-		parser:    internal.NewParser(),
-		validator: internal.NewValidator(),
-		auth:      &mockTokenProvider{token: "test_token"},
+		httpClient: internalClient,
+		parser:     internal.NewParser(),
+		validator:  internal.NewValidator(),
+		auth:       &mockTokenProvider{token: "test_token"},
 	}
 
 	ctx := context.Background()
@@ -672,10 +672,10 @@ func TestResourceLeakDetection(t *testing.T) {
 		postData := map[string]interface{}{
 			"kind": "t3",
 			"data": map[string]interface{}{
-				"id":      "test_post",
-				"title":   "Test Post",
-				"score":   100,
-				"author":  "testuser",
+				"id":          "test_post",
+				"title":       "Test Post",
+				"score":       100,
+				"author":      "testuser",
 				"created_utc": 1609459200.0,
 			},
 		}
@@ -722,10 +722,10 @@ func TestResourceLeakDetection(t *testing.T) {
 			}
 
 			client := &Reddit{
-				httpClient:    internalClient,
-				parser:    internal.NewParser(),
-				validator: internal.NewValidator(),
-				auth:      &mockTokenProvider{token: "test_token"},
+				httpClient: internalClient,
+				parser:     internal.NewParser(),
+				validator:  internal.NewValidator(),
+				auth:       &mockTokenProvider{token: "test_token"},
 			}
 			clients = append(clients, client)
 		}

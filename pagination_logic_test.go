@@ -17,31 +17,31 @@ func createMockPost(id, title, author string, score int, created float64) map[st
 	return map[string]interface{}{
 		"kind": "t3",
 		"data": map[string]interface{}{
-			"id":            id,
-			"name":          "t3_" + id,
-			"title":         title,
-			"score":         score,
-			"ups":           score,
-			"downs":         0,
-			"author":        author,
-			"subreddit":     "testsub",
-			"subreddit_id":  "t5_testsub",
-			"created":       created,
-			"created_utc":   created,
-			"num_comments":  5,
-			"url":           "https://reddit.com/r/testsub/comments/" + id,
-			"permalink":     "/r/testsub/comments/" + id + "/test_post/",
-			"upvote_ratio":  0.95,
-			"is_self":       false,
-			"selftext":      "",
-			"domain":        "example.com",
-			"over_18":       false,
-			"thumbnail":     "",
-			"clicked":       false,
-			"hidden":        false,
-			"saved":         false,
-			"locked":        false,
-			"stickied":      false,
+			"id":           id,
+			"name":         "t3_" + id,
+			"title":        title,
+			"score":        score,
+			"ups":          score,
+			"downs":        0,
+			"author":       author,
+			"subreddit":    "testsub",
+			"subreddit_id": "t5_testsub",
+			"created":      created,
+			"created_utc":  created,
+			"num_comments": 5,
+			"url":          "https://reddit.com/r/testsub/comments/" + id,
+			"permalink":    "/r/testsub/comments/" + id + "/test_post/",
+			"upvote_ratio": 0.95,
+			"is_self":      false,
+			"selftext":     "",
+			"domain":       "example.com",
+			"over_18":      false,
+			"thumbnail":    "",
+			"clicked":      false,
+			"hidden":       false,
+			"saved":        false,
+			"locked":       false,
+			"stickied":     false,
 		},
 	}
 }
@@ -76,31 +76,31 @@ func TestPaginationForwardNavigation(t *testing.T) {
 				posts = append(posts, map[string]interface{}{
 					"kind": "t3",
 					"data": map[string]interface{}{
-						"id":            postID,
-						"name":          "t3_" + postID,
-						"title":         "Test Post " + string(rune('A'+i)),
-						"score":         score,
-						"ups":           score,
-						"downs":         0,
-						"author":        "user" + string(rune('1'+i)),
-						"subreddit":     "testsub",
-						"subreddit_id":  "t5_testsub",
-						"created":       created,
-						"created_utc":   created,
-						"num_comments":  5 + i,
-						"url":           "https://reddit.com/r/testsub/comments/" + postID,
-						"permalink":     "/r/testsub/comments/" + postID + "/test_post/",
-						"upvote_ratio":  0.95,
-						"is_self":       false,
-						"selftext":      "",
-						"domain":        "example.com",
-						"over_18":       false,
-						"thumbnail":     "",
-						"clicked":       false,
-						"hidden":        false,
-						"saved":         false,
-						"locked":        false,
-						"stickied":      false,
+						"id":           postID,
+						"name":         "t3_" + postID,
+						"title":        "Test Post " + string(rune('A'+i)),
+						"score":        score,
+						"ups":          score,
+						"downs":        0,
+						"author":       "user" + string(rune('1'+i)),
+						"subreddit":    "testsub",
+						"subreddit_id": "t5_testsub",
+						"created":      created,
+						"created_utc":  created,
+						"num_comments": 5 + i,
+						"url":          "https://reddit.com/r/testsub/comments/" + postID,
+						"permalink":    "/r/testsub/comments/" + postID + "/test_post/",
+						"upvote_ratio": 0.95,
+						"is_self":      false,
+						"selftext":     "",
+						"domain":       "example.com",
+						"over_18":      false,
+						"thumbnail":    "",
+						"clicked":      false,
+						"hidden":       false,
+						"saved":        false,
+						"locked":       false,
+						"stickied":     false,
 					},
 				})
 			}
@@ -114,31 +114,31 @@ func TestPaginationForwardNavigation(t *testing.T) {
 				posts = append(posts, map[string]interface{}{
 					"kind": "t3",
 					"data": map[string]interface{}{
-						"id":            postID,
-						"name":          "t3_" + postID,
-						"title":         "Test Post " + string(rune('A'+i)),
-						"score":         score,
-						"ups":           score,
-						"downs":         0,
-						"author":        "user" + string(rune('1'+i)),
-						"subreddit":     "testsub",
-						"subreddit_id":  "t5_testsub",
-						"created":       created,
-						"created_utc":   created,
-						"num_comments":  5 + i,
-						"url":           "https://reddit.com/r/testsub/comments/" + postID,
-						"permalink":     "/r/testsub/comments/" + postID + "/test_post/",
-						"upvote_ratio":  0.95,
-						"is_self":       false,
-						"selftext":      "",
-						"domain":        "example.com",
-						"over_18":       false,
-						"thumbnail":     "",
-						"clicked":       false,
-						"hidden":        false,
-						"saved":         false,
-						"locked":        false,
-						"stickied":      false,
+						"id":           postID,
+						"name":         "t3_" + postID,
+						"title":        "Test Post " + string(rune('A'+i)),
+						"score":        score,
+						"ups":          score,
+						"downs":        0,
+						"author":       "user" + string(rune('1'+i)),
+						"subreddit":    "testsub",
+						"subreddit_id": "t5_testsub",
+						"created":      created,
+						"created_utc":  created,
+						"num_comments": 5 + i,
+						"url":          "https://reddit.com/r/testsub/comments/" + postID,
+						"permalink":    "/r/testsub/comments/" + postID + "/test_post/",
+						"upvote_ratio": 0.95,
+						"is_self":      false,
+						"selftext":     "",
+						"domain":       "example.com",
+						"over_18":      false,
+						"thumbnail":    "",
+						"clicked":      false,
+						"hidden":       false,
+						"saved":        false,
+						"locked":       false,
+						"stickied":     false,
 					},
 				})
 			}
@@ -152,31 +152,31 @@ func TestPaginationForwardNavigation(t *testing.T) {
 				posts = append(posts, map[string]interface{}{
 					"kind": "t3",
 					"data": map[string]interface{}{
-						"id":            postID,
-						"name":          "t3_" + postID,
-						"title":         "Test Post " + string(rune('A'+i)),
-						"score":         score,
-						"ups":           score,
-						"downs":         0,
-						"author":        "user" + string(rune('1'+i)),
-						"subreddit":     "testsub",
-						"subreddit_id":  "t5_testsub",
-						"created":       created,
-						"created_utc":   created,
-						"num_comments":  5 + i,
-						"url":           "https://reddit.com/r/testsub/comments/" + postID,
-						"permalink":     "/r/testsub/comments/" + postID + "/test_post/",
-						"upvote_ratio":  0.95,
-						"is_self":       false,
-						"selftext":      "",
-						"domain":        "example.com",
-						"over_18":       false,
-						"thumbnail":     "",
-						"clicked":       false,
-						"hidden":        false,
-						"saved":         false,
-						"locked":        false,
-						"stickied":      false,
+						"id":           postID,
+						"name":         "t3_" + postID,
+						"title":        "Test Post " + string(rune('A'+i)),
+						"score":        score,
+						"ups":          score,
+						"downs":        0,
+						"author":       "user" + string(rune('1'+i)),
+						"subreddit":    "testsub",
+						"subreddit_id": "t5_testsub",
+						"created":      created,
+						"created_utc":  created,
+						"num_comments": 5 + i,
+						"url":          "https://reddit.com/r/testsub/comments/" + postID,
+						"permalink":    "/r/testsub/comments/" + postID + "/test_post/",
+						"upvote_ratio": 0.95,
+						"is_self":      false,
+						"selftext":     "",
+						"domain":       "example.com",
+						"over_18":      false,
+						"thumbnail":    "",
+						"clicked":      false,
+						"hidden":       false,
+						"saved":        false,
+						"locked":       false,
+						"stickied":     false,
 					},
 				})
 			}
@@ -202,10 +202,10 @@ func TestPaginationForwardNavigation(t *testing.T) {
 	}
 
 	client := &Reddit{
-		httpClient:    internalClient,
-		parser:    internal.NewParser(),
-		validator: internal.NewValidator(),
-		auth:      &mockTokenProvider{token: "test_token"},
+		httpClient: internalClient,
+		parser:     internal.NewParser(),
+		validator:  internal.NewValidator(),
+		auth:       &mockTokenProvider{token: "test_token"},
 	}
 
 	ctx := context.Background()
@@ -337,10 +337,10 @@ func TestPaginationBackwardNavigation(t *testing.T) {
 	}
 
 	client := &Reddit{
-		httpClient:    internalClient,
-		parser:    internal.NewParser(),
-		validator: internal.NewValidator(),
-		auth:      &mockTokenProvider{token: "test_token"},
+		httpClient: internalClient,
+		parser:     internal.NewParser(),
+		validator:  internal.NewValidator(),
+		auth:       &mockTokenProvider{token: "test_token"},
 	}
 
 	ctx := context.Background()
@@ -465,10 +465,10 @@ func TestPaginationLimitBehavior(t *testing.T) {
 	}
 
 	client := &Reddit{
-		httpClient:    internalClient,
-		parser:    internal.NewParser(),
-		validator: internal.NewValidator(),
-		auth:      &mockTokenProvider{token: "test_token"},
+		httpClient: internalClient,
+		parser:     internal.NewParser(),
+		validator:  internal.NewValidator(),
+		auth:       &mockTokenProvider{token: "test_token"},
 	}
 
 	ctx := context.Background()
@@ -545,10 +545,10 @@ func TestPaginationEmptyResults(t *testing.T) {
 	}
 
 	client := &Reddit{
-		httpClient:    internalClient,
-		parser:    internal.NewParser(),
-		validator: internal.NewValidator(),
-		auth:      &mockTokenProvider{token: "test_token"},
+		httpClient: internalClient,
+		parser:     internal.NewParser(),
+		validator:  internal.NewValidator(),
+		auth:       &mockTokenProvider{token: "test_token"},
 	}
 
 	ctx := context.Background()
@@ -617,10 +617,10 @@ func TestPaginationInvalidParameters(t *testing.T) {
 	}
 
 	client := &Reddit{
-		httpClient:    internalClient,
-		parser:    internal.NewParser(),
-		validator: internal.NewValidator(),
-		auth:      &mockTokenProvider{token: "test_token"},
+		httpClient: internalClient,
+		parser:     internal.NewParser(),
+		validator:  internal.NewValidator(),
+		auth:       &mockTokenProvider{token: "test_token"},
 	}
 
 	ctx := context.Background()
@@ -711,10 +711,10 @@ func TestPaginationConsistency(t *testing.T) {
 	}
 
 	client := &Reddit{
-		httpClient:    internalClient,
-		parser:    internal.NewParser(),
-		validator: internal.NewValidator(),
-		auth:      &mockTokenProvider{token: "test_token"},
+		httpClient: internalClient,
+		parser:     internal.NewParser(),
+		validator:  internal.NewValidator(),
+		auth:       &mockTokenProvider{token: "test_token"},
 	}
 
 	ctx := context.Background()
@@ -857,10 +857,10 @@ func TestPaginationWithComments(t *testing.T) {
 	}
 
 	client := &Reddit{
-		httpClient:    internalClient,
-		parser:    internal.NewParser(),
-		validator: internal.NewValidator(),
-		auth:      &mockTokenProvider{token: "test_token"},
+		httpClient: internalClient,
+		parser:     internal.NewParser(),
+		validator:  internal.NewValidator(),
+		auth:       &mockTokenProvider{token: "test_token"},
 	}
 
 	ctx := context.Background()

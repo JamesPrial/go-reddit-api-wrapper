@@ -137,6 +137,18 @@ func (e *Edited) UnmarshalJSON(data []byte) error {
 	return fmt.Errorf("invalid value for 'edited' field: %s", string(data))
 }
 
+// MarshalJSON implements json.Marshaler to output the Edited field correctly.
+// Returns false if not edited, true if edited without timestamp, or the timestamp if available.
+func (e Edited) MarshalJSON() ([]byte, error) {
+	if !e.IsEdited {
+		return []byte("false"), nil
+	}
+	if e.Timestamp > 0 {
+		return json.Marshal(e.Timestamp)
+	}
+	return []byte("true"), nil
+}
+
 // trimSpace safely trims whitespace from JSON data
 func trimSpace(data []byte) []byte {
 	start := 0

@@ -231,11 +231,11 @@ func TestValidator_ValidateLinkID(t *testing.T) {
 	v := NewValidator()
 
 	tests := []struct {
-		name             string
-		linkID           string
-		wantNormalized   string
-		wantError        bool
-		errorMsg         string
+		name           string
+		linkID         string
+		wantNormalized string
+		wantError      bool
+		errorMsg       string
 	}{
 		// Valid cases - no prefix
 		{name: "valid without prefix", linkID: "abc123", wantNormalized: "t3_abc123", wantError: false},

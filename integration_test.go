@@ -29,7 +29,7 @@ func getTestClient(t *testing.T) *Reddit {
 	username := os.Getenv("REDDIT_USERNAME")
 	password := os.Getenv("REDDIT_PASSWORD")
 
-	if clientID == "" || clientSecret == ""  {
+	if clientID == "" || clientSecret == "" {
 		t.Skip("Skipping integration test: REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET must be set")
 	}
 

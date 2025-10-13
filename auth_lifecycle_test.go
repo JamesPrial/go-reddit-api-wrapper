@@ -170,7 +170,6 @@ func TestTokenRefreshTimingEdgeCases(t *testing.T) {
 				currentTokenLifespan = tc.tokenLifespan
 				mu.Unlock()
 
-
 				// Create client with custom token lifespan
 				config := &Config{
 					ClientID:     "test_id",
