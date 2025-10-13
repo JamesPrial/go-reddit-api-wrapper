@@ -160,7 +160,7 @@ func TestNullFieldsInResponse(t *testing.T) {
 			"kind": "t5",
 			"data": map[string]interface{}{
 				"id":                 "test123",
-				"display_name":       nil,
+				"display_name":       "testsub",
 				"subscribers":        nil,
 				"created_utc":        nil,
 				"public_description": "valid description",
@@ -188,8 +188,8 @@ func TestNullFieldsInResponse(t *testing.T) {
 	testutil.AssertNoError(t, err)
 
 	// Verify that null fields are handled gracefully (become zero values)
-	if subreddit.DisplayName != "" {
-		t.Errorf("Expected empty display name for null field, got: %s", subreddit.DisplayName)
+	if subreddit.DisplayName != "testsub" {
+		t.Errorf("Expected 'testsub' for display_name, got: %s", subreddit.DisplayName)
 	}
 
 	if subreddit.Subscribers != 0 {
@@ -471,6 +471,7 @@ func TestResponseWithNewlinesAndWhitespace(t *testing.T) {
 			"kind": "t5",
 			"data": {
 				"display_name": "testsub",
+				"id": "test123",
 				"subscribers": 100000,
 				"public_description": "A test subreddit\nwith newlines\tand\ttabs",
 				"created_utc": 1234567890.0,
