@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jamesprial/go-reddit-api-wrapper/internal/testutil"
 	pkgerrs "github.com/jamesprial/go-reddit-api-wrapper/pkg/errors"
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 	"golang.org/x/time/rate"
@@ -18,9 +19,7 @@ import (
 
 func TestNewClient_DefaultRateLimiter(t *testing.T) {
 	client, err := NewClient(nil, "https://example.com/api/", "agent", nil)
-	if err != nil {
-		t.Fatalf("NewClient returned error: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	if client.limiter == nil {
 		t.Fatalf("expected limiter to be initialized")
@@ -37,21 +36,14 @@ func TestNewClient_DefaultRateLimiter(t *testing.T) {
 
 func TestNewClient_InvalidBaseURL(t *testing.T) {
 	_, err := NewClient(nil, "://bad", "agent", nil)
-	if err == nil {
-		t.Fatal("expected error for invalid base URL")
-	}
-
+	testutil.AssertError(t, err)
 	var clientErr *pkgerrs.ClientError
-	if !errors.As(err, &clientErr) {
-		t.Fatalf("expected ClientError, got %T", err)
-	}
+	testutil.AssertErrorType(t, err, &clientErr)
 }
 
 func TestNewClient_BaseURLHandling(t *testing.T) {
 	client, err := NewClient(nil, "https://example.com/api", "agent", nil)
-	if err != nil {
-		t.Fatalf("NewClient returned error: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	if got := client.BaseURL.String(); got != "https://example.com/api/" {
 		t.Fatalf("expected base URL to gain trailing slash, got %q", got)
@@ -65,14 +57,10 @@ func TestNewClient_BaseURLHandling(t *testing.T) {
 func TestClient_NewRequestSetsHeaders(t *testing.T) {
 	httpClient := &http.Client{}
 	c, err := NewClient(httpClient, "https://example.com", "my-agent", nil)
-	if err != nil {
-		t.Fatalf("NewClient returned error: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	req, err := c.NewRequest(context.Background(), http.MethodGet, "resource", nil)
-	if err != nil {
-		t.Fatalf("NewRequest returned error: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	// Authorization header is now set by the caller, not by NewRequest
 	if got := req.Header.Get("User-Agent"); got != "my-agent" {
@@ -86,38 +74,25 @@ func TestClient_NewRequestSetsHeaders(t *testing.T) {
 
 func TestClient_NewRequestInvalidPath(t *testing.T) {
 	c, err := NewClient(nil, "https://example.com", "agent", nil)
-	if err != nil {
-		t.Fatalf("NewClient returned error: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	_, err = c.NewRequest(context.Background(), http.MethodGet, "%zz", nil)
-	if err == nil {
-		t.Fatal("expected error constructing request with invalid path")
-	}
-
+	testutil.AssertError(t, err)
 	var clientErr *pkgerrs.ClientError
-	if !errors.As(err, &clientErr) {
-		t.Fatalf("expected ClientError, got %T", err)
-	}
+	testutil.AssertErrorType(t, err, &clientErr)
 }
 
 func TestClient_NewRequestPreservesBody(t *testing.T) {
 	c, err := NewClient(nil, "https://example.com", "agent", nil)
-	if err != nil {
-		t.Fatalf("NewClient returned error: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	body := []byte("payload")
 	req, err := c.NewRequest(context.Background(), http.MethodPost, "resource", bytes.NewBuffer(body))
-	if err != nil {
-		t.Fatalf("NewRequest returned error: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 	defer req.Body.Close()
 
 	got, err := io.ReadAll(req.Body)
-	if err != nil {
-		t.Fatalf("failed reading request body: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 	if string(got) != string(body) {
 		t.Fatalf("expected body %q, got %q", body, got)
 	}
@@ -125,18 +100,14 @@ func TestClient_NewRequestPreservesBody(t *testing.T) {
 
 func TestClient_NewRequestWithQueryParams(t *testing.T) {
 	c, err := NewClient(nil, "https://example.com", "agent", nil)
-	if err != nil {
-		t.Fatalf("NewClient returned error: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	params := make(map[string][]string)
 	params["limit"] = []string{"10"}
 	params["sort"] = []string{"hot"}
 
 	req, err := c.NewRequest(context.Background(), http.MethodGet, "resource", nil, params)
-	if err != nil {
-		t.Fatalf("NewRequest returned error: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	query := req.URL.Query()
 	if query.Get("limit") != "10" {
@@ -149,17 +120,13 @@ func TestClient_NewRequestWithQueryParams(t *testing.T) {
 
 func TestClient_NewRequestWithMultipleValuesForSameKey(t *testing.T) {
 	c, err := NewClient(nil, "https://example.com", "agent", nil)
-	if err != nil {
-		t.Fatalf("NewClient returned error: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	params := make(map[string][]string)
 	params["id"] = []string{"abc", "def", "ghi"}
 
 	req, err := c.NewRequest(context.Background(), http.MethodGet, "resource", nil, params)
-	if err != nil {
-		t.Fatalf("NewRequest returned error: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	query := req.URL.Query()
 	ids := query["id"]
@@ -176,14 +143,10 @@ func TestClient_NewRequestWithMultipleValuesForSameKey(t *testing.T) {
 
 func TestClient_NewRequestWithEmptyParams(t *testing.T) {
 	c, err := NewClient(nil, "https://example.com", "agent", nil)
-	if err != nil {
-		t.Fatalf("NewClient returned error: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	req, err := c.NewRequest(context.Background(), http.MethodGet, "resource", nil, make(map[string][]string))
-	if err != nil {
-		t.Fatalf("NewRequest returned error: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	if req.URL.RawQuery != "" {
 		t.Errorf("expected empty query string, got %q", req.URL.RawQuery)
@@ -199,19 +162,14 @@ func TestClient_DoDecodesResponse(t *testing.T) {
 
 	httpClient := server.Client()
 	c, err := NewClient(httpClient, server.URL+"/", "agent", nil)
-	if err != nil {
-		t.Fatalf("NewClient returned error: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	req, err := c.NewRequest(context.Background(), http.MethodGet, "test", nil)
-	if err != nil {
-		t.Fatalf("NewRequest returned error: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	var thing types.Thing
-	if err := c.Do(req, &thing); err != nil {
-		t.Fatalf("Do returned error: %v", err)
-	}
+	err = c.Do(req, &thing)
+	testutil.AssertNoError(t, err)
 
 	if thing.Kind != "t3" {
 		t.Errorf("expected kind 't3', got %q", thing.Kind)
@@ -234,26 +192,18 @@ func TestClient_DoTransportErrorWrapped(t *testing.T) {
 	})}
 
 	c, err := NewClient(httpClient, "https://example.com/", "agent", nil)
-	if err != nil {
-		t.Fatalf("NewClient returned error: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	req, err := c.NewRequest(context.Background(), http.MethodGet, "resource", nil)
-	if err != nil {
-		t.Fatalf("NewRequest returned error: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	err = c.Do(req, nil)
-	if err == nil {
-		t.Fatal("expected transport error")
-	}
-
+	testutil.AssertError(t, err)
 	var clientErr *pkgerrs.ClientError
-	if !errors.As(err, &clientErr) {
-		t.Fatalf("expected ClientError, got %T", err)
-	}
-	if !errors.Is(clientErr, expectedErr) {
-		t.Fatalf("expected wrapped error %v, got %v", expectedErr, clientErr)
+	testutil.AssertErrorType(t, err, &clientErr)
+
+	if !errors.Is(err, expectedErr) {
+		t.Fatalf("expected wrapped error %v, got %v", expectedErr, err)
 	}
 }
 
@@ -266,27 +216,13 @@ func TestClient_DoNonSuccessStatusReturnsAPIError(t *testing.T) {
 
 	httpClient := server.Client()
 	c, err := NewClient(httpClient, server.URL+"/", "agent", nil)
-	if err != nil {
-		t.Fatalf("NewClient returned error: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	req, err := c.NewRequest(context.Background(), http.MethodGet, "fail", nil)
-	if err != nil {
-		t.Fatalf("NewRequest returned error: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	err = c.Do(req, nil)
-	if err == nil {
-		t.Fatal("expected API error")
-	}
-
-	var apiErr *pkgerrs.APIError
-	if !errors.As(err, &apiErr) {
-		t.Fatalf("expected APIError, got %T", err)
-	}
-	if apiErr.StatusCode != http.StatusServiceUnavailable {
-		t.Fatalf("unexpected status on APIError: %d", apiErr.StatusCode)
-	}
+	testutil.AssertAPIError(t, err, http.StatusServiceUnavailable)
 }
 
 func TestClient_DoJSONDecodeErrorWrapped(t *testing.T) {
@@ -298,25 +234,16 @@ func TestClient_DoJSONDecodeErrorWrapped(t *testing.T) {
 
 	httpClient := server.Client()
 	c, err := NewClient(httpClient, server.URL+"/", "agent", nil)
-	if err != nil {
-		t.Fatalf("NewClient returned error: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	req, err := c.NewRequest(context.Background(), http.MethodGet, "bad-json", nil)
-	if err != nil {
-		t.Fatalf("NewRequest returned error: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	var thing types.Thing
 	err = c.Do(req, &thing)
-	if err == nil {
-		t.Fatal("expected decode error")
-	}
-
+	testutil.AssertError(t, err)
 	var clientErr *pkgerrs.ClientError
-	if !errors.As(err, &clientErr) {
-		t.Fatalf("expected ClientError, got %T", err)
-	}
+	testutil.AssertErrorType(t, err, &clientErr)
 }
 
 // failingReader simulates a body read error
@@ -344,27 +271,16 @@ func TestClient_DoBodyReadError(t *testing.T) {
 	}
 
 	c, err := NewClient(httpClient, "https://example.com/", "agent", nil)
-	if err != nil {
-		t.Fatalf("NewClient returned error: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	req, err := c.NewRequest(context.Background(), http.MethodGet, "resource", nil)
-	if err != nil {
-		t.Fatalf("NewRequest returned error: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	err = c.Do(req, nil)
-	if err == nil {
-		t.Fatal("expected body read error")
-	}
-
+	testutil.AssertError(t, err)
 	var clientErr *pkgerrs.ClientError
-	if !errors.As(err, &clientErr) {
-		t.Fatalf("expected ClientError, got %T", err)
-	}
-	if !bytes.Contains([]byte(clientErr.Error()), []byte("simulated read failure")) {
-		t.Errorf("expected error to contain 'simulated read failure', got %q", clientErr.Error())
-	}
+	testutil.AssertErrorType(t, err, &clientErr)
+	testutil.AssertStringContains(t, err.Error(), "simulated read failure")
 }
 
 func TestClient_DoSkipsDecodeWhenTargetNil(t *testing.T) {
@@ -376,19 +292,13 @@ func TestClient_DoSkipsDecodeWhenTargetNil(t *testing.T) {
 
 	httpClient := server.Client()
 	c, err := NewClient(httpClient, server.URL+"/", "agent", nil)
-	if err != nil {
-		t.Fatalf("NewClient returned error: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	req, err := c.NewRequest(context.Background(), http.MethodGet, "skip", nil)
-	if err != nil {
-		t.Fatalf("NewRequest returned error: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	err = c.Do(req, nil)
-	if err != nil {
-		t.Fatalf("expected no error when decode target nil, got %v", err)
-	}
+	testutil.AssertNoError(t, err)
 }
 
 func TestClient_DoEnforcesRetryAfter(t *testing.T) {
@@ -418,28 +328,21 @@ func TestClient_DoEnforcesRetryAfter(t *testing.T) {
 
 	httpClient := server.Client()
 	c, err := NewClient(httpClient, server.URL+"/", "agent", nil)
-	if err != nil {
-		t.Fatalf("NewClient returned error: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	ctx := context.Background()
 	req1, err := c.NewRequest(ctx, http.MethodGet, "first", nil)
-	if err != nil {
-		t.Fatalf("NewRequest returned error: %v", err)
-	}
-	if err := c.Do(req1, nil); err != nil {
-		t.Fatalf("Do on first request returned error: %v", err)
-	}
+	testutil.AssertNoError(t, err)
+
+	err = c.Do(req1, nil)
+	testutil.AssertNoError(t, err)
 
 	req2, err := c.NewRequest(ctx, http.MethodGet, "second", nil)
-	if err != nil {
-		t.Fatalf("NewRequest returned error: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	start := time.Now()
-	if err := c.Do(req2, nil); err != nil {
-		t.Fatalf("Do on second request returned error: %v", err)
-	}
+	err = c.Do(req2, nil)
+	testutil.AssertNoError(t, err)
 	elapsed := time.Since(start)
 
 	mu.Lock()
@@ -471,21 +374,15 @@ func TestClient_DoHonorsCanceledContextBeforeSend(t *testing.T) {
 	})}
 
 	c, err := NewClient(httpClient, "https://example.com/", "agent", nil)
-	if err != nil {
-		t.Fatalf("NewClient returned error: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	req, err := c.NewRequest(ctx, http.MethodGet, "resource", nil)
-	if err != nil {
-		t.Fatalf("NewRequest returned error: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	err = c.Do(req, nil)
-	if err == nil {
-		t.Fatal("expected error due to canceled context")
-	}
+	testutil.AssertError(t, err)
 
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context cancellation, got %v", err)
@@ -501,9 +398,8 @@ func TestClient_WaitForForcedDelayBlocksAndClears(t *testing.T) {
 	c.forceWaitUntil.Store(future.UnixNano())
 
 	start := time.Now()
-	if err := c.waitForRateLimit(context.Background()); err != nil {
-		t.Fatalf("waitForRateLimit returned error: %v", err)
-	}
+	err := c.waitForRateLimit(context.Background())
+	testutil.AssertNoError(t, err)
 	elapsed := time.Since(start)
 	if elapsed < 25*time.Millisecond {
 		t.Fatalf("expected waitForRateLimit to block, elapsed %v", elapsed)
@@ -523,9 +419,8 @@ func TestClient_WaitForForcedDelayContextCanceled(t *testing.T) {
 	cancel()
 
 	err := c.waitForRateLimit(ctx)
-	if err == nil {
-		t.Fatal("expected context cancellation error")
-	}
+	testutil.AssertError(t, err)
+
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context canceled error, got %v", err)
 	}
@@ -687,19 +582,13 @@ func TestClient_DoThingArray_ArrayResponse(t *testing.T) {
 
 	httpClient := server.Client()
 	c, err := NewClient(httpClient, server.URL+"/", "agent", nil)
-	if err != nil {
-		t.Fatalf("NewClient returned error: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	req, err := c.NewRequest(context.Background(), http.MethodGet, "comments", nil)
-	if err != nil {
-		t.Fatalf("NewRequest returned error: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	things, err := c.DoThingArray(req)
-	if err != nil {
-		t.Fatalf("DoThingArray returned error: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	if len(things) != 2 {
 		t.Fatalf("expected 2 Things, got %d", len(things))
@@ -721,19 +610,13 @@ func TestClient_DoThingArray_SingleListingWrapped(t *testing.T) {
 
 	httpClient := server.Client()
 	c, err := NewClient(httpClient, server.URL+"/", "agent", nil)
-	if err != nil {
-		t.Fatalf("NewClient returned error: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	req, err := c.NewRequest(context.Background(), http.MethodGet, "comments", nil)
-	if err != nil {
-		t.Fatalf("NewRequest returned error: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	things, err := c.DoThingArray(req)
-	if err != nil {
-		t.Fatalf("DoThingArray returned error: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	if len(things) != 1 {
 		t.Fatalf("expected 1 Thing wrapped in array, got %d", len(things))
@@ -752,19 +635,13 @@ func TestClient_DoThingArray_APIErrorResponse(t *testing.T) {
 
 	httpClient := server.Client()
 	c, err := NewClient(httpClient, server.URL+"/", "agent", nil)
-	if err != nil {
-		t.Fatalf("NewClient returned error: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	req, err := c.NewRequest(context.Background(), http.MethodGet, "restricted", nil)
-	if err != nil {
-		t.Fatalf("NewRequest returned error: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	things, err := c.DoThingArray(req)
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
+	testutil.AssertError(t, err)
 	if things != nil {
 		t.Fatalf("expected nil Things on error, got %v", things)
 	}
@@ -772,12 +649,8 @@ func TestClient_DoThingArray_APIErrorResponse(t *testing.T) {
 	// Error objects without "kind" field unmarshal as Thing with empty kind,
 	// which triggers "unexpected response kind" error
 	var clientErr *pkgerrs.ClientError
-	if !errors.As(err, &clientErr) {
-		t.Fatalf("expected ClientError, got %T", err)
-	}
-	if !bytes.Contains([]byte(clientErr.Error()), []byte("unexpected response kind")) {
-		t.Errorf("expected error about unexpected kind, got %q", clientErr.Error())
-	}
+	testutil.AssertErrorType(t, err, &clientErr)
+	testutil.AssertStringContains(t, err.Error(), "unexpected response kind")
 }
 
 func TestClient_DoThingArray_EmptyResponse(t *testing.T) {
@@ -789,27 +662,19 @@ func TestClient_DoThingArray_EmptyResponse(t *testing.T) {
 
 	httpClient := server.Client()
 	c, err := NewClient(httpClient, server.URL+"/", "agent", nil)
-	if err != nil {
-		t.Fatalf("NewClient returned error: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	req, err := c.NewRequest(context.Background(), http.MethodGet, "empty", nil)
-	if err != nil {
-		t.Fatalf("NewRequest returned error: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	things, err := c.DoThingArray(req)
-	if err == nil {
-		t.Fatal("expected error for empty response")
-	}
+	testutil.AssertError(t, err)
 	if things != nil {
 		t.Fatalf("expected nil Things on error, got %v", things)
 	}
 
 	var clientErr *pkgerrs.ClientError
-	if !errors.As(err, &clientErr) {
-		t.Fatalf("expected ClientError, got %T", err)
-	}
+	testutil.AssertErrorType(t, err, &clientErr)
 }
 
 func TestClient_DoThingArray_InvalidJSON(t *testing.T) {
@@ -821,27 +686,19 @@ func TestClient_DoThingArray_InvalidJSON(t *testing.T) {
 
 	httpClient := server.Client()
 	c, err := NewClient(httpClient, server.URL+"/", "agent", nil)
-	if err != nil {
-		t.Fatalf("NewClient returned error: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	req, err := c.NewRequest(context.Background(), http.MethodGet, "bad", nil)
-	if err != nil {
-		t.Fatalf("NewRequest returned error: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	things, err := c.DoThingArray(req)
-	if err == nil {
-		t.Fatal("expected error for invalid JSON")
-	}
+	testutil.AssertError(t, err)
 	if things != nil {
 		t.Fatalf("expected nil Things on error, got %v", things)
 	}
 
 	var clientErr *pkgerrs.ClientError
-	if !errors.As(err, &clientErr) {
-		t.Fatalf("expected ClientError, got %T", err)
-	}
+	testutil.AssertErrorType(t, err, &clientErr)
 }
 
 func TestClient_DoThingArray_UnexpectedKind(t *testing.T) {
@@ -853,30 +710,20 @@ func TestClient_DoThingArray_UnexpectedKind(t *testing.T) {
 
 	httpClient := server.Client()
 	c, err := NewClient(httpClient, server.URL+"/", "agent", nil)
-	if err != nil {
-		t.Fatalf("NewClient returned error: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	req, err := c.NewRequest(context.Background(), http.MethodGet, "wrong-kind", nil)
-	if err != nil {
-		t.Fatalf("NewRequest returned error: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	things, err := c.DoThingArray(req)
-	if err == nil {
-		t.Fatal("expected error for unexpected kind")
-	}
+	testutil.AssertError(t, err)
 	if things != nil {
 		t.Fatalf("expected nil Things on error, got %v", things)
 	}
 
 	var clientErr *pkgerrs.ClientError
-	if !errors.As(err, &clientErr) {
-		t.Fatalf("expected ClientError, got %T", err)
-	}
-	if !bytes.Contains([]byte(clientErr.Error()), []byte("unexpected response kind")) {
-		t.Errorf("expected error about unexpected kind, got %q", clientErr.Error())
-	}
+	testutil.AssertErrorType(t, err, &clientErr)
+	testutil.AssertStringContains(t, err.Error(), "unexpected response kind")
 }
 
 func TestClient_DoMoreChildren_Success(t *testing.T) {
@@ -888,19 +735,13 @@ func TestClient_DoMoreChildren_Success(t *testing.T) {
 
 	httpClient := server.Client()
 	c, err := NewClient(httpClient, server.URL+"/", "agent", nil)
-	if err != nil {
-		t.Fatalf("NewClient returned error: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	req, err := c.NewRequest(context.Background(), http.MethodGet, "morechildren", nil)
-	if err != nil {
-		t.Fatalf("NewRequest returned error: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	things, err := c.DoMoreChildren(req)
-	if err != nil {
-		t.Fatalf("DoMoreChildren returned error: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	if len(things) != 2 {
 		t.Fatalf("expected 2 Things, got %d", len(things))
@@ -922,19 +763,13 @@ func TestClient_DoMoreChildren_EmptyThings(t *testing.T) {
 
 	httpClient := server.Client()
 	c, err := NewClient(httpClient, server.URL+"/", "agent", nil)
-	if err != nil {
-		t.Fatalf("NewClient returned error: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	req, err := c.NewRequest(context.Background(), http.MethodGet, "morechildren", nil)
-	if err != nil {
-		t.Fatalf("NewRequest returned error: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	things, err := c.DoMoreChildren(req)
-	if err != nil {
-		t.Fatalf("DoMoreChildren returned error: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	if len(things) != 0 {
 		t.Fatalf("expected 0 Things, got %d", len(things))
@@ -950,30 +785,20 @@ func TestClient_DoMoreChildren_APIError(t *testing.T) {
 
 	httpClient := server.Client()
 	c, err := NewClient(httpClient, server.URL+"/", "agent", nil)
-	if err != nil {
-		t.Fatalf("NewClient returned error: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	req, err := c.NewRequest(context.Background(), http.MethodGet, "morechildren", nil)
-	if err != nil {
-		t.Fatalf("NewRequest returned error: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	things, err := c.DoMoreChildren(req)
-	if err == nil {
-		t.Fatal("expected API error, got nil")
-	}
+	testutil.AssertError(t, err)
 	if things != nil {
 		t.Fatalf("expected nil Things on error, got %v", things)
 	}
 
 	var apiErr *pkgerrs.APIError
-	if !errors.As(err, &apiErr) {
-		t.Fatalf("expected APIError, got %T", err)
-	}
-	if !bytes.Contains([]byte(apiErr.Error()), []byte("THREAD_LOCKED")) {
-		t.Errorf("expected error to contain 'THREAD_LOCKED', got %q", apiErr.Error())
-	}
+	testutil.AssertErrorType(t, err, &apiErr)
+	testutil.AssertStringContains(t, err.Error(), "THREAD_LOCKED")
 }
 
 func TestClient_DoMoreChildren_InvalidJSON(t *testing.T) {
@@ -985,27 +810,19 @@ func TestClient_DoMoreChildren_InvalidJSON(t *testing.T) {
 
 	httpClient := server.Client()
 	c, err := NewClient(httpClient, server.URL+"/", "agent", nil)
-	if err != nil {
-		t.Fatalf("NewClient returned error: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	req, err := c.NewRequest(context.Background(), http.MethodGet, "bad", nil)
-	if err != nil {
-		t.Fatalf("NewRequest returned error: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	things, err := c.DoMoreChildren(req)
-	if err == nil {
-		t.Fatal("expected error for invalid JSON")
-	}
+	testutil.AssertError(t, err)
 	if things != nil {
 		t.Fatalf("expected nil Things on error, got %v", things)
 	}
 
 	var clientErr *pkgerrs.ClientError
-	if !errors.As(err, &clientErr) {
-		t.Fatalf("expected ClientError, got %T", err)
-	}
+	testutil.AssertErrorType(t, err, &clientErr)
 }
 
 func TestClient_DoMoreChildren_MalformedStructure(t *testing.T) {
@@ -1017,19 +834,13 @@ func TestClient_DoMoreChildren_MalformedStructure(t *testing.T) {
 
 	httpClient := server.Client()
 	c, err := NewClient(httpClient, server.URL+"/", "agent", nil)
-	if err != nil {
-		t.Fatalf("NewClient returned error: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	req, err := c.NewRequest(context.Background(), http.MethodGet, "malformed", nil)
-	if err != nil {
-		t.Fatalf("NewRequest returned error: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	things, err := c.DoMoreChildren(req)
-	if err != nil {
-		t.Fatalf("DoMoreChildren should handle missing nested fields, got error: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	if len(things) != 0 {
 		t.Fatalf("expected empty Things for missing data.things field, got %d", len(things))
