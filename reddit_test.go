@@ -932,67 +932,29 @@ func TestClient_GetComments(t *testing.T) {
 			setupMock: func() HTTPClient {
 				return &mockHTTPClient{
 					doThingArrayFunc: func(req *http.Request) ([]*types.Thing, error) {
-						postListingData, _ := json.Marshal(map[string]interface{}{
-							"children": []interface{}{
-								map[string]interface{}{
-									"kind": "t3",
-									"data": map[string]interface{}{
-										"id":           "abc123",
-										"name":         "t3_abc123",
-										"title":        "Test Post",
-										"author":       "testuser",
-										"subreddit":    "golang",
-										"permalink":    "/r/golang/comments/abc123/test_post/",
-										"url":          "https://reddit.com/r/golang/",
-										"score":        100,
-										"ups":          100,
-										"downs":        0,
-										"created_utc":  1609459200.0,
-										"created":      1609459200.0,
-										"num_comments": 1,
-										"upvote_ratio": 0.95,
-									},
-								},
-							},
-						})
+						// Post listing
+						postData := `{"id":"abc123","name":"t3_abc123","title":"Test Post","author":"testuser","subreddit":"golang","permalink":"/r/golang/comments/abc123/test_post/","url":"https://reddit.com/r/golang/","score":100,"ups":100,"downs":0,"created_utc":1609459200.0,"created":1609459200.0,"num_comments":1,"upvote_ratio":0.95}`
+						postChild := map[string]interface{}{
+							"kind": "t3",
+							"data": json.RawMessage(postData),
+						}
+						postChildJSON, _ := json.Marshal(postChild)
+						postListing := map[string]interface{}{
+							"children": []json.RawMessage{postChildJSON},
+						}
+						postListingData, _ := json.Marshal(postListing)
 
-						commentListingData, _ := json.Marshal(map[string]interface{}{
-							"children": []interface{}{
-								map[string]interface{}{
-									"kind": "t1",
-									"data": map[string]interface{}{
-										"id":          "c_nested",
-										"body":        "Test comment",
-										"author":      "user1",
-										"link_id":     "t3_abc123",
-										"parent_id":   "t3_abc123",
-										"name":        "t1_c_nested",
-										"created_utc": 1609459200.0,
-										"created":     1609459200.0,
-										"permalink":   "/r/golang/comments/abc123/test_post/c_nested/",
-										"subreddit":   "golang",
-										"score":       10,
-										"ups":         10,
-										"downs":       0,
-										"replies": map[string]interface{}{
-											"kind": "Listing",
-											"data": map[string]interface{}{
-												"children": []interface{}{
-													map[string]interface{}{
-														"kind": "more",
-														"data": map[string]interface{}{
-															"id":       "moreid1",
-															"name":     "t1_moreid1",
-															"children": []string{"more1", "more2"},
-														},
-													},
-												},
-											},
-										},
-									},
-								},
-							},
-						})
+						// Comment with nested replies - use embedded JSON format
+						commentData := `{"id":"cnested","body":"Test comment","author":"user1","link_id":"t3_abc123","parent_id":"t3_abc123","name":"t1_cnested","created_utc":1609459200.0,"created":1609459200.0,"permalink":"/r/golang/comments/abc123/test_post/cnested/","subreddit":"golang","score":10,"ups":10,"downs":0,"replies":{"kind":"Listing","data":{"children":[{"kind":"more","data":{"id":"moreid1","name":"t1_moreid1","children":["more1","more2"]}}]}}}`
+						commentChild := map[string]interface{}{
+							"kind": "t1",
+							"data": json.RawMessage(commentData),
+						}
+						commentChildJSON, _ := json.Marshal(commentChild)
+						commentListing := map[string]interface{}{
+							"children": []json.RawMessage{commentChildJSON},
+						}
+						commentListingData, _ := json.Marshal(commentListing)
 
 						return []*types.Thing{
 							{Kind: "Listing", Data: postListingData},
