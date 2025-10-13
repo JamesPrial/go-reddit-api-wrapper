@@ -177,10 +177,10 @@ func (m *MockServer) WithError(pathPattern string, statusCode int, message strin
 }
 
 // Start creates and starts the mock HTTP server.
-// Returns the started httptest.Server.
-func (m *MockServer) Start() *httptest.Server {
+// Returns the MockServer itself for convenience in chaining and accessing the URL.
+func (m *MockServer) Start() *MockServer {
 	m.server = httptest.NewServer(http.HandlerFunc(m.handler))
-	return m.server
+	return m
 }
 
 // Close stops the mock server.
@@ -190,13 +190,21 @@ func (m *MockServer) Close() {
 	}
 }
 
-// URL returns the base URL of the mock server.
+// URL returns the base URL of the mock server as a string.
 // Returns empty string if the server hasn't been started.
+// This is a convenience method that returns m.server.URL directly.
 func (m *MockServer) URL() string {
 	if m.server != nil {
 		return m.server.URL
 	}
 	return ""
+}
+
+// Server returns the underlying httptest.Server.
+// Returns nil if the server hasn't been started.
+// Use this if you need direct access to the httptest.Server for advanced configuration.
+func (m *MockServer) Server() *httptest.Server {
+	return m.server
 }
 
 // handler routes incoming requests to the appropriate mock endpoint.
