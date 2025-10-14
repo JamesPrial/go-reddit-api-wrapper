@@ -1246,11 +1246,16 @@ func TestParsePost_MaliciousData(t *testing.T) {
 		},
 		{
 			name: "future timestamp",
-			thing: testutil.NewPostBuilder().
-				WithID("abc123").
-				WithTitle("Test Post").
-				WithCreated(float64(time.Now().Add(48 * time.Hour).Unix())).
-				ToThing(),
+			thing: func() *types.Thing {
+				// Use mock clock to generate future timestamp
+				mockClock := NewMockClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
+				futureTime := mockClock.Now().Add(48 * time.Hour)
+				return testutil.NewPostBuilder().
+					WithID("abc123").
+					WithTitle("Test Post").
+					WithCreated(float64(futureTime.Unix())).
+					ToThing()
+			}(),
 			expectError: true,
 			errorText:   "CreatedUTC is in the future",
 		},
@@ -1329,11 +1334,16 @@ func TestParseComment_MaliciousData(t *testing.T) {
 		},
 		{
 			name: "future timestamp",
-			thing: testutil.NewCommentBuilder().
-				WithID("def456").
-				WithBody("Test comment").
-				WithCreated(float64(time.Now().Add(48 * time.Hour).Unix())).
-				ToThing(),
+			thing: func() *types.Thing {
+				// Use mock clock to generate future timestamp
+				mockClock := NewMockClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
+				futureTime := mockClock.Now().Add(48 * time.Hour)
+				return testutil.NewCommentBuilder().
+					WithID("def456").
+					WithBody("Test comment").
+					WithCreated(float64(futureTime.Unix())).
+					ToThing()
+			}(),
 			expectError: true,
 			errorText:   "CreatedUTC is in the future",
 		},

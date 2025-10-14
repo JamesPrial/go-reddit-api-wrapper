@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal"
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/testutil"
-	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 )
 
 // TestConcurrentClientUsage tests multiple clients using the API simultaneously
@@ -74,13 +74,16 @@ func TestConcurrentClientUsage(t *testing.T) {
 	}))
 	defer server.Close()
 
+	// Create mock clock for testing
+	mockClock := internal.NewMockClock(time.Time{})
+
 	// Create multiple clients
 	numClients := 5
 	clients := make([]*Reddit, numClients)
 
 	for i := 0; i < numClients; i++ {
 		httpClient := &http.Client{Timeout: 30 * time.Second}
-		internalClient, err := internal.NewClient(httpClient, server.URL, fmt.Sprintf("test_agent_%d/1.0", i), nil)
+		internalClient, err := internal.NewClientWithRateLimit(httpClient, server.URL, fmt.Sprintf("test_agent_%d/1.0", i), nil, internal.RateLimitConfig{}, mockClock)
 		testutil.AssertNoError(t, err)
 
 		clients[i] = &Reddit{
@@ -175,8 +178,7 @@ func TestConcurrentSameClientOperations(t *testing.T) {
 		mu.Lock()
 		defer mu.Unlock()
 
-		// Simulate some processing time
-		time.Sleep(10 * time.Millisecond)
+		// No simulated processing time needed with mock clock
 
 		w.Header().Set("X-Ratelimit-Remaining", "60")
 		w.Header().Set("X-Ratelimit-Reset", "60")
@@ -209,8 +211,11 @@ func TestConcurrentSameClientOperations(t *testing.T) {
 	}))
 	defer server.Close()
 
+	// Create mock clock for testing
+	mockClock := internal.NewMockClock(time.Time{})
+
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := internal.NewClient(httpClient, server.URL, "concurrent_test_agent/1.0", nil)
+	internalClient, err := internal.NewClientWithRateLimit(httpClient, server.URL, "concurrent_test_agent/1.0", nil, internal.RateLimitConfig{}, mockClock)
 	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
@@ -289,7 +294,10 @@ func TestConcurrentRateLimitingBehavior(t *testing.T) {
 	var requestCount int64
 	var rateLimitHits int64
 	var mu sync.Mutex
-	lastRequestTime := time.Now()
+
+	// Create mock clock for testing
+	mockClock := internal.NewMockClock(time.Time{})
+	lastRequestTime := mockClock.Now()
 
 	// Setup test data
 	subreddit := testutil.NewSubreddit("ratelimit_test").
@@ -301,8 +309,8 @@ func TestConcurrentRateLimitingBehavior(t *testing.T) {
 		atomic.AddInt64(&requestCount, 1)
 
 		mu.Lock()
-		currentTime := time.Now()
-		timeSinceLastRequest := currentTime.Sub(lastRequestTime)
+		currentTime := mockClock.Now()
+		timeSinceLastRequest := mockClock.Since(lastRequestTime)
 		lastRequestTime = currentTime
 
 		// Simulate rate limiting - if requests come too quickly, return 429
@@ -329,7 +337,7 @@ func TestConcurrentRateLimitingBehavior(t *testing.T) {
 	defer server.Close()
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := internal.NewClient(httpClient, server.URL, "ratelimit_test_agent/1.0", nil)
+	internalClient, err := internal.NewClientWithRateLimit(httpClient, server.URL, "ratelimit_test_agent/1.0", nil, internal.RateLimitConfig{}, mockClock)
 	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
@@ -385,6 +393,9 @@ func TestConcurrentContextCancellation(t *testing.T) {
 	var activeRequests int64
 	var mu sync.Mutex
 
+	// Create mock clock for testing
+	mockClock := internal.NewMockClock(time.Time{})
+
 	// Setup test data
 	subreddit := testutil.NewSubreddit("cancellation_test").
 		WithTitle("Cancellation Test Subreddit").
@@ -396,7 +407,8 @@ func TestConcurrentContextCancellation(t *testing.T) {
 		atomic.AddInt64(&activeRequests, 1)
 		defer atomic.AddInt64(&activeRequests, -1)
 
-		// Simulate slow response
+		// Keep real delay for context cancellation testing
+		// Context timeouts use real time, not mock time
 		time.Sleep(200 * time.Millisecond)
 
 		mu.Lock()
@@ -413,7 +425,7 @@ func TestConcurrentContextCancellation(t *testing.T) {
 	defer server.Close()
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := internal.NewClient(httpClient, server.URL, "cancellation_test_agent/1.0", nil)
+	internalClient, err := internal.NewClientWithRateLimit(httpClient, server.URL, "cancellation_test_agent/1.0", nil, internal.RateLimitConfig{}, mockClock)
 	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
@@ -458,7 +470,7 @@ func TestConcurrentContextCancellation(t *testing.T) {
 		t.Error("Expected some requests to be cancelled")
 	}
 
-	// Wait a bit for any remaining requests to complete
+	// Wait for any remaining requests to complete (real time needed for context cancellation)
 	time.Sleep(300 * time.Millisecond)
 
 	// Verify no requests are still active
@@ -476,6 +488,9 @@ func TestConcurrentResourceContention(t *testing.T) {
 	var requestCount int64
 	var mu sync.Mutex
 
+	// Create mock clock for testing
+	mockClock := internal.NewMockClock(time.Time{})
+
 	// Setup test data
 	subreddit := testutil.NewSubreddit("contention_test").
 		WithTitle("Resource Contention Test Subreddit").
@@ -488,8 +503,7 @@ func TestConcurrentResourceContention(t *testing.T) {
 		mu.Lock()
 		defer mu.Unlock()
 
-		// Simulate resource contention with variable response times
-		time.Sleep(time.Duration(atomic.LoadInt64(&requestCount)%10) * time.Millisecond)
+		// No simulated resource contention delays needed with mock clock
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -502,7 +516,7 @@ func TestConcurrentResourceContention(t *testing.T) {
 	defer server.Close()
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := internal.NewClient(httpClient, server.URL, "contention_test_agent/1.0", nil)
+	internalClient, err := internal.NewClientWithRateLimit(httpClient, server.URL, "contention_test_agent/1.0", nil, internal.RateLimitConfig{}, mockClock)
 	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
@@ -520,7 +534,7 @@ func TestConcurrentResourceContention(t *testing.T) {
 	var errorMu sync.Mutex
 	var successCount int64
 
-	startTime := time.Now()
+	startTime := mockClock.Now()
 
 	for i := 0; i < numGoroutines; i++ {
 		wg.Add(1)
@@ -541,7 +555,7 @@ func TestConcurrentResourceContention(t *testing.T) {
 	}
 
 	wg.Wait()
-	duration := time.Since(startTime)
+	duration := mockClock.Since(startTime)
 
 	// Check for errors
 	if len(errors) > 0 {
@@ -659,8 +673,11 @@ func TestConcurrentMixedOperations(t *testing.T) {
 	}))
 	defer server.Close()
 
+	// Create mock clock for testing
+	mockClock := internal.NewMockClock(time.Time{})
+
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := internal.NewClient(httpClient, server.URL, "mixed_operations_test_agent/1.0", nil)
+	internalClient, err := internal.NewClientWithRateLimit(httpClient, server.URL, "mixed_operations_test_agent/1.0", nil, internal.RateLimitConfig{}, mockClock)
 	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
