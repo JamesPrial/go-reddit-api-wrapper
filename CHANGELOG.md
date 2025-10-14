@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Reorganized examples into `cmd/examples/` directory following Go conventions (c26a9a7)
+  - Moved `cmd/example` to `cmd/examples/basic`
+  - Moved `examples/monitor` to `cmd/examples/monitor`
+  - Moved `examples/analyzer` to `cmd/examples/analyzer`
+  - Updated all documentation and CI workflows with new paths
+
 ### Fixed
 - Comprehensive test failure fixes in validation, auth, and error handling (25b9315)
 - Relaxed validation rules for test data compatibility (83efa9a)
