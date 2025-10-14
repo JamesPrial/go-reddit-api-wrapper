@@ -1,0 +1,156 @@
+package storage
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"time"
+)
+
+// GetStats returns statistics about the stored data.
+// It queries the database for post counts, comment counts, oldest/newest entry timestamps,
+// and total database size. Returns an error if any query fails.
+// For an empty database, count fields are 0 and timestamp fields are zero time.Time values.
+func (s *SQLiteStore) GetStats(ctx context.Context) (*CacheStats, error) {
+	stats := &CacheStats{}
+
+	// Query post count
+	var postCount sql.NullInt64
+	err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM posts").Scan(&postCount)
+	if err != nil {
+		return nil, fmt.Errorf("GetStats: failed to query post count: %w", err)
+	}
+	if postCount.Valid {
+		stats.PostCount = postCount.Int64
+	}
+
+	// Query comment count
+	var commentCount sql.NullInt64
+	err = s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM comments").Scan(&commentCount)
+	if err != nil {
+		return nil, fmt.Errorf("GetStats: failed to query comment count: %w", err)
+	}
+	if commentCount.Valid {
+		stats.CommentCount = commentCount.Int64
+	}
+
+	// Query oldest entry timestamp
+	// Use UNION ALL to combine posts and comments, then find minimum timestamp
+	var oldestTS sql.NullInt64
+	oldestQuery := `
+		SELECT MIN(fetched_at) FROM (
+			SELECT fetched_at FROM posts
+			UNION ALL
+			SELECT fetched_at FROM comments
+		)
+	`
+	err = s.db.QueryRowContext(ctx, oldestQuery).Scan(&oldestTS)
+	if err != nil {
+		return nil, fmt.Errorf("GetStats: failed to query oldest entry: %w", err)
+	}
+	if oldestTS.Valid && oldestTS.Int64 > 0 {
+		stats.OldestEntry = time.Unix(oldestTS.Int64, 0)
+	}
+
+	// Query newest entry timestamp
+	var newestTS sql.NullInt64
+	newestQuery := `
+		SELECT MAX(fetched_at) FROM (
+			SELECT fetched_at FROM posts
+			UNION ALL
+			SELECT fetched_at FROM comments
+		)
+	`
+	err = s.db.QueryRowContext(ctx, newestQuery).Scan(&newestTS)
+	if err != nil {
+		return nil, fmt.Errorf("GetStats: failed to query newest entry: %w", err)
+	}
+	if newestTS.Valid && newestTS.Int64 > 0 {
+		stats.NewestEntry = time.Unix(newestTS.Int64, 0)
+	}
+
+	// Query database size
+	// SQLite stores this as page_count * page_size
+	var sizeBytes sql.NullInt64
+	sizeQuery := `
+		SELECT page_count * page_size as size
+		FROM pragma_page_count(), pragma_page_size()
+	`
+	err = s.db.QueryRowContext(ctx, sizeQuery).Scan(&sizeBytes)
+	if err != nil {
+		return nil, fmt.Errorf("GetStats: failed to query database size: %w", err)
+	}
+	if sizeBytes.Valid {
+		stats.TotalSizeBytes = sizeBytes.Int64
+	}
+
+	s.logger.Debug("retrieved cache statistics",
+		"post_count", stats.PostCount,
+		"comment_count", stats.CommentCount,
+		"oldest_entry", stats.OldestEntry,
+		"newest_entry", stats.NewestEntry,
+		"total_size_bytes", stats.TotalSizeBytes,
+	)
+
+	return stats, nil
+}
+
+// EvictStale removes entries older than the specified maxAge.
+// It deletes posts and comments where fetched_at is earlier than the calculated cutoff time.
+// The operation is performed within a transaction for atomicity.
+// Returns the total number of entries evicted (posts + comments), or an error if the operation fails.
+// Comments are automatically cleaned up from the closure table via CASCADE constraints.
+// A maxAge of 0 or negative will delete all entries.
+func (s *SQLiteStore) EvictStale(ctx context.Context, maxAge time.Duration) (int64, error) {
+	// Calculate cutoff timestamp
+	cutoff := time.Now().Add(-maxAge)
+	cutoffUnix := cutoff.Unix()
+
+	// Begin transaction for atomicity
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("EvictStale: failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback() // Safe to call even after commit
+
+	// Delete stale posts
+	// Use <= to handle edge case where maxAge=0 (delete everything)
+	deletePostsQuery := "DELETE FROM posts WHERE fetched_at <= ?"
+	resultPosts, err := tx.ExecContext(ctx, deletePostsQuery, cutoffUnix)
+	if err != nil {
+		return 0, fmt.Errorf("EvictStale: failed to delete stale posts: %w", err)
+	}
+	postsDeleted, err := resultPosts.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("EvictStale: failed to get posts rows affected: %w", err)
+	}
+
+	// Delete stale comments
+	// Closure table entries will be automatically deleted via CASCADE
+	// Use <= to handle edge case where maxAge=0 (delete everything)
+	deleteCommentsQuery := "DELETE FROM comments WHERE fetched_at <= ?"
+	resultComments, err := tx.ExecContext(ctx, deleteCommentsQuery, cutoffUnix)
+	if err != nil {
+		return 0, fmt.Errorf("EvictStale: failed to delete stale comments: %w", err)
+	}
+	commentsDeleted, err := resultComments.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("EvictStale: failed to get comments rows affected: %w", err)
+	}
+
+	// Commit transaction
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("EvictStale: failed to commit transaction: %w", err)
+	}
+
+	totalDeleted := postsDeleted + commentsDeleted
+
+	s.logger.Info("evicted stale entries",
+		"cutoff", cutoff,
+		"deleted_posts", postsDeleted,
+		"deleted_comments", commentsDeleted,
+		"total", totalDeleted,
+	)
+
+	return totalDeleted, nil
+}
