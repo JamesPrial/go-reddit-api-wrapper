@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/jamesprial/go-reddit-api-wrapper/internal/testutil"
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/testutil"
 )
 
 // This example demonstrates how to use MockServer with the fluent builder API

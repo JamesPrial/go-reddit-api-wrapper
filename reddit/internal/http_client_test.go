@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jamesprial/go-reddit-api-wrapper/internal/testutil"
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/testutil"
 	pkgerrs "github.com/jamesprial/go-reddit-api-wrapper/pkg/errors"
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 	"golang.org/x/time/rate"

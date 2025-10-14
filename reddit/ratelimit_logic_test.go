@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jamesprial/go-reddit-api-wrapper/internal"
-	"github.com/jamesprial/go-reddit-api-wrapper/internal/testutil"
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal"
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/testutil"
 )
 
 // Note: mockTokenProvider is defined in reddit_test.go and shared across all test files

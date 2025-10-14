@@ -7,7 +7,7 @@ import (
 	pkgerrs "github.com/jamesprial/go-reddit-api-wrapper/pkg/errors"
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 
-	"github.com/jamesprial/go-reddit-api-wrapper/internal/testutil"
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/testutil"
 )
 
 func TestValidator_ValidateSubredditName(t *testing.T) {

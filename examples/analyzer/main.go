@@ -22,7 +22,7 @@ import (
 	"sort"
 	"strings"
 
-	graw "github.com/jamesprial/go-reddit-api-wrapper"
+	graw "github.com/jamesprial/go-reddit-api-wrapper/reddit"
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 )
 

@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jamesprial/go-reddit-api-wrapper/internal"
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal"
 	pkgerrs "github.com/jamesprial/go-reddit-api-wrapper/pkg/errors"
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 )

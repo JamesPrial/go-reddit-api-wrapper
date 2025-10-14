@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/jamesprial/go-reddit-api-wrapper/internal/testutil"
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/testutil"
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 )
 

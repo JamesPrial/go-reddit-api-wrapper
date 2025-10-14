@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jamesprial/go-reddit-api-wrapper/internal"
-	"github.com/jamesprial/go-reddit-api-wrapper/internal/testutil"
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal"
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/testutil"
 )
 
 // TestNetworkTimeoutRecovery tests recovery from network timeouts

@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	graw "github.com/jamesprial/go-reddit-api-wrapper"
+	graw "github.com/jamesprial/go-reddit-api-wrapper/reddit"
 )
 
 // TestClient provides a wrapper around the Reddit client for testing
