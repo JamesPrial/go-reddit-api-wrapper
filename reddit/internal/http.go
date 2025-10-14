@@ -397,6 +397,13 @@ func (c *Client) waitForRateLimit(ctx context.Context) error {
 			break
 		}
 
+		// Check context before creating timer to avoid race with MockClock
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
 		delay := waitUntil.Sub(now)
 		timer := c.clock.After(delay)
 		select {
