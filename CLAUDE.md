@@ -172,6 +172,7 @@ go run ./cmd/examples/analyzer
 ## Development Workflow
 
 1. **Before coding**: Use @agent-codebase-navigator to understand related code across multiple files
+2. **Coding**: Use @agent-go-code-writer to write all code
 2. **After coding**: Use @agent-go-test-runner to verify tests pass
 3. **Before committing**: Always run `go vet ./...` and ensure tests pass
 4. **After finishing work**: Use @agent-git-ops to commit and push changes
