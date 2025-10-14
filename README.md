@@ -180,11 +180,11 @@ export REDDIT_USERNAME="your-username"
 export REDDIT_PASSWORD="your-password"
 
 # Run basic example
-go run ./cmd/example/main.go
+go run ./cmd/examples/basic
 
-# Run specific examples (see examples/ directory)
-go run ./examples/monitor/main.go
-go run ./examples/analyzer/main.go
+# Run specific examples (see cmd/examples/ directory)
+go run ./cmd/examples/monitor
+go run ./cmd/examples/analyzer
 ```
 
 ## Real-World Usage Examples
@@ -452,7 +452,7 @@ func robustFetch(ctx context.Context, client *graw.Reddit, subreddit string) {
 }
 ```
 
-For complete working examples, see the `examples/` directory.
+For complete working examples, see the `cmd/examples/` directory.
 
 ## Error Handling
 

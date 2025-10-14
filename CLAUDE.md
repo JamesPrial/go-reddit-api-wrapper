@@ -18,11 +18,11 @@ tools to resolve library id and get library docs without me having to explicitly
 
 ### Building
 ```bash
-# Build the example application
-go build -o reddit-example ./cmd/example
+# Build the basic example application
+go build -o reddit-example ./cmd/examples/basic
 
 # Build with race detection
-go build -race -o reddit-example ./cmd/example
+go build -race -o reddit-example ./cmd/examples/basic
 ```
 
 ### Linting & Code Quality
@@ -37,7 +37,7 @@ go fmt ./...
 go mod tidy
 ```
 
-### Running the Example
+### Running the Examples
 ```bash
 # Set required environment variables
 export REDDIT_CLIENT_ID="your-client-id"
@@ -46,8 +46,14 @@ export REDDIT_CLIENT_SECRET="your-client-secret"
 export REDDIT_USERNAME="your-username"
 export REDDIT_PASSWORD="your-password"
 
-# Run the example
-go run ./cmd/example
+# Run the basic example
+go run ./cmd/examples/basic
+
+# Run the subreddit monitor example
+go run ./cmd/examples/monitor
+
+# Run the comment analyzer example
+go run ./cmd/examples/analyzer
 ```
 
 ## Architecture
@@ -104,6 +110,6 @@ go run ./cmd/example
 - Unit tests in `internal/*_test.go` cover auth, HTTP client, and parsing logic
 - Mock HTTP client (`mockHTTPClient`) enables deterministic testing without API calls
 - Benchmarks measure performance of HTTP operations with/without logging
-- Example application (`cmd/example`) serves as integration test and usage demo
+- Example applications (`cmd/examples/`) serve as integration tests and usage demos
 
 ### git commit after finishing anything ###

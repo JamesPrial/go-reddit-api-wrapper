@@ -20,7 +20,7 @@
 //
 //	export REDDIT_CLIENT_ID="your_client_id"
 //	export REDDIT_CLIENT_SECRET="your_client_secret"
-//	go run ./cmd/example/main.go
+//	go run ./cmd/examples/basic
 package main
 
 import (
