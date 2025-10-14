@@ -1,3 +1,13 @@
+// Package validation provides security-focused validation utilities for Reddit API data.
+//
+// This package includes:
+//   - Format validators for Reddit-specific data types (base36 IDs, fullnames, permalinks, usernames, subreddits)
+//   - Struct validators for Reddit API response types (Posts, Comments, Subreddits, etc.)
+//   - Security protections against DoS attacks (length limits, ReDoS prevention)
+//   - Input validation to prevent injection attacks
+//
+// All validators are designed with security in mind, performing length checks before
+// regex matching to prevent resource exhaustion attacks.
 package validation
 
 import (
@@ -9,9 +19,52 @@ import (
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 )
 
+// Clock provides time operations for testing.
+// Use this interface to make time-based validation deterministic in tests.
+type Clock interface {
+	Now() time.Time
+}
+
+// realClock implements Clock using the actual system time.
+type realClock struct{}
+
+func (realClock) Now() time.Time { return time.Now() }
+
+// defaultClock is the default clock used by validators.
+// Can be overridden in tests using SetClock.
+var defaultClock Clock = realClock{}
+
+// SetClock sets the clock used for time validation.
+// This is primarily useful for testing. Production code should not call this.
+func SetClock(c Clock) {
+	defaultClock = c
+}
+
+// ResetClock resets the clock to use system time.
+// This is primarily useful for test cleanup.
+func ResetClock() {
+	defaultClock = realClock{}
+}
+
+// Security limits to prevent DoS attacks
+const (
+	// Maximum length for base36 IDs (Reddit IDs are typically 6-10 chars, but we allow more for safety)
+	maxBase36Length = 100
+
+	// Maximum length for fullname IDs (type prefix + underscore + ID)
+	maxFullnameLength = 110
+
+	// Maximum length for permalinks to prevent ReDoS
+	maxPermalinkLength = 500
+
+	// Maximum length for title slugs in permalinks
+	maxTitleSlugLength = 200
+)
+
 // Regular expressions for validating Reddit data formats
 var (
 	// base36Regex matches base36 encoded IDs (0-9, a-z)
+	// Note: Length is validated separately before regex matching for security
 	base36Regex = regexp.MustCompile(`^[0-9a-z]+$`)
 
 	// subredditRegex matches valid subreddit names (3-21 chars, alphanumeric + underscore)
@@ -22,16 +75,22 @@ var (
 
 	// fullnameRegex matches Reddit fullname IDs (type prefix + base36 ID)
 	// Format: t[1-6]_[base36_id]
+	// Note: Length is validated separately before regex matching for security
 	fullnameRegex = regexp.MustCompile(`^t[1-6]_[0-9a-z]+$`)
 
 	// permalinkRegex matches Reddit permalink format
 	// Format: /r/{subreddit}/comments/{post_id}/{title_slug}/ or with /{comment_id}/
+	// Note: Length is validated separately before regex matching to prevent ReDoS
 	permalinkRegex = regexp.MustCompile(`^/r/[a-zA-Z0-9_]{3,21}/comments/[0-9a-z]+/[^/]+/?([0-9a-z]+/?)?$`)
 )
 
-// IsValidBase36 checks if a string is a valid base36 encoded ID
+// IsValidBase36 checks if a string is a valid base36 encoded ID.
+// It performs length validation before regex matching to prevent DoS attacks.
 func IsValidBase36(s string) bool {
-	return s != "" && base36Regex.MatchString(s)
+	if s == "" || len(s) > maxBase36Length {
+		return false
+	}
+	return base36Regex.MatchString(s)
 }
 
 // IsValidSubreddit checks if a string is a valid subreddit name
@@ -44,14 +103,58 @@ func IsValidUsername(s string) bool {
 	return usernameRegex.MatchString(s)
 }
 
-// IsValidFullname checks if a string is a valid Reddit fullname ID
+// IsValidFullname checks if a string is a valid Reddit fullname ID.
+// Format: t[1-6]_[base36_id]
+// It performs length validation before regex matching to prevent DoS attacks.
 func IsValidFullname(s string) bool {
+	if s == "" || len(s) > maxFullnameLength {
+		return false
+	}
+	// Quick structural check before regex
+	if len(s) < 4 || s[0] != 't' || s[2] != '_' {
+		return false
+	}
 	return fullnameRegex.MatchString(s)
 }
 
-// IsValidPermalink checks if a string is a valid Reddit permalink
+// IsValidPermalink checks if a string is a valid Reddit permalink.
+// Format: /r/{subreddit}/comments/{post_id}/{title_slug}/ or with /{comment_id}/
+// It performs length validation before regex matching to prevent ReDoS attacks.
 func IsValidPermalink(s string) bool {
-	return s != "" && permalinkRegex.MatchString(s)
+	if s == "" || len(s) > maxPermalinkLength {
+		return false
+	}
+
+	// SECURITY: Check for control characters (null bytes, newlines, etc.) to prevent injection attacks
+	for _, ch := range s {
+		// Reject all control characters (ASCII 0-31) except space (32)
+		if ch < 32 || ch == 127 { // 127 is DEL character
+			return false
+		}
+	}
+
+	// Quick structural validation before regex to avoid ReDoS
+	if !strings.HasPrefix(s, "/r/") || !strings.Contains(s, "/comments/") {
+		return false
+	}
+
+	// Validate title slug length separately to prevent DoS
+	parts := strings.Split(s, "/")
+	// Format: ["", "r", "subreddit", "comments", "postid", "slug", "commentid?", ""]
+	// Minimum: /r/sub/comments/id/slug/ = 7 parts (with trailing slash) or 6 without
+	// Maximum: /r/sub/comments/id/slug/commentid/ = 8 parts or 7 without trailing slash
+	if len(parts) < 6 || len(parts) > 8 {
+		return false
+	}
+
+	// Check title slug and segment lengths
+	for i, part := range parts {
+		if i > 0 && len(part) > maxTitleSlugLength {
+			return false
+		}
+	}
+
+	return permalinkRegex.MatchString(s)
 }
 
 // ValidateRedditObject validates any type that implements RedditObject interface
@@ -117,7 +220,8 @@ func ValidateVotable(v *types.Votable) error {
 	return nil
 }
 
-// ValidateCreated validates the Created embedded struct
+// ValidateCreated validates the Created embedded struct.
+// It uses the configured Clock for time-based validation, making tests deterministic.
 func ValidateCreated(c *types.Created) error {
 	if c == nil {
 		return fmt.Errorf("created is nil")
@@ -136,7 +240,7 @@ func ValidateCreated(c *types.Created) error {
 	}
 
 	// Check timestamp is not in the future (with 1 hour grace period for clock skew)
-	maxTime := float64(time.Now().Add(time.Hour).Unix())
+	maxTime := float64(defaultClock.Now().Add(time.Hour).Unix())
 	if c.CreatedUTC > maxTime {
 		errs = append(errs, fmt.Errorf("CreatedUTC is in the future: %f", c.CreatedUTC))
 	}

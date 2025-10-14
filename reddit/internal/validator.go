@@ -279,19 +279,19 @@ func (v *Validator) ValidatePostID(postID string) error {
 		}
 	}
 
+	// Check for reasonable length BEFORE format check for better error messages
+	if len(postID) > maxCommentIDLength {
+		return &pkgerrs.ConfigError{
+			Field:   "PostID",
+			Message: fmt.Sprintf("post ID too long (max %d characters): %s", maxCommentIDLength, postID),
+		}
+	}
+
 	// Validate base36 format (lowercase alphanumeric only)
 	if !validation.IsValidBase36(postID) {
 		return &pkgerrs.ConfigError{
 			Field:   "PostID",
 			Message: fmt.Sprintf("post ID has invalid format (must be base36: 0-9, a-z): %s", postID),
-		}
-	}
-
-	// Check for reasonable length
-	if len(postID) > maxCommentIDLength {
-		return &pkgerrs.ConfigError{
-			Field:   "PostID",
-			Message: fmt.Sprintf("post ID too long (max %d characters): %s", maxCommentIDLength, postID),
 		}
 	}
 
