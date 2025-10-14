@@ -35,7 +35,7 @@ type Config struct {
 	ConnMaxLife time.Duration
 
 	// MigrationsPath specifies the directory containing migration files.
-	// If empty, defaults to "reddit/storage/migrations" relative to the working directory.
+	// If empty, defaults to "storage/migrations" relative to the working directory.
 	// This can be overridden for testing or when migrations are in a non-standard location.
 	MigrationsPath string
 
@@ -134,7 +134,7 @@ func (s *SQLiteStore) runMigrations(migrationsPath string) error {
 
 	// Use default migrations path if not specified
 	if migrationsPath == "" {
-		migrationsPath = "reddit/storage/migrations"
+		migrationsPath = "storage/migrations"
 	}
 
 	// Convert to absolute path if it's not already absolute

@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
-	"github.com/jamesprial/go-reddit-api-wrapper/reddit/storage/testutil"
+	"github.com/jamesprial/go-reddit-api-wrapper/storage/testutil"
 	"github.com/stretchr/testify/require"
 )
 
