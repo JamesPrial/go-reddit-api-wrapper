@@ -196,6 +196,7 @@ func TestNewAuthenticator(t *testing.T) {
 				tt.baseURL,
 				tt.grantType,
 				nil,
+				nil, // Use real clock
 			)
 
 			if tt.wantErr {
@@ -436,6 +437,7 @@ func TestAuthenticator_GetToken(t *testing.T) {
 				serverURL,
 				tt.grantType,
 				tt.logger,
+				nil, // Use real clock
 			)
 			testutil.AssertNoError(t, err)
 
@@ -463,7 +465,7 @@ func TestAuthenticator_GetToken(t *testing.T) {
 		}))
 		defer server.Close()
 
-		a, err := NewAuthenticator(http.DefaultClient, "", "", "id", "secret", "agent", server.URL, "creds", nil)
+		a, err := NewAuthenticator(http.DefaultClient, "", "", "id", "secret", "agent", server.URL, "creds", nil, nil) // Use real clock
 		testutil.AssertNoError(t, err)
 
 		ctx, cancel := context.WithCancel(context.Background())

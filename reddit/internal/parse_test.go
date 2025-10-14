@@ -1247,9 +1247,9 @@ func TestParsePost_MaliciousData(t *testing.T) {
 		{
 			name: "future timestamp",
 			thing: func() *types.Thing {
-				// Use mock clock to generate future timestamp
-				mockClock := NewMockClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
-				futureTime := mockClock.Now().Add(48 * time.Hour)
+				// Create timestamp 48 hours in the future (beyond the 1-hour grace period)
+				// (validation allows 1 hour grace period for clock skew)
+				futureTime := time.Now().Add(48 * time.Hour)
 				return testutil.NewPostBuilder().
 					WithID("abc123").
 					WithTitle("Test Post").
@@ -1335,9 +1335,9 @@ func TestParseComment_MaliciousData(t *testing.T) {
 		{
 			name: "future timestamp",
 			thing: func() *types.Thing {
-				// Use mock clock to generate future timestamp
-				mockClock := NewMockClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
-				futureTime := mockClock.Now().Add(48 * time.Hour)
+				// Create timestamp 48 hours in the future (beyond the 1-hour grace period)
+				// (validation allows 1 hour grace period for clock skew)
+				futureTime := time.Now().Add(48 * time.Hour)
 				return testutil.NewCommentBuilder().
 					WithID("def456").
 					WithBody("Test comment").
