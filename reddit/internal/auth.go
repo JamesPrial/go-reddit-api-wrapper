@@ -36,6 +36,7 @@ type Authenticator struct {
 	tokenURL     *url.URL
 	formData     *url.Values
 	logger       *slog.Logger
+	clock        Clock // Time abstraction for testing
 
 	// Token cache using atomic pointer for lock-free reads
 	cachedToken atomic.Pointer[tokenCache]
@@ -44,9 +45,14 @@ type Authenticator struct {
 }
 
 // NewAuthenticator creates a new authenticator.
-func NewAuthenticator(httpClient *http.Client, username, password, clientID, clientSecret, userAgent, baseURL, grantType string, logger *slog.Logger) (*Authenticator, error) {
+// If a nil clock is provided, a real clock will be used.
+func NewAuthenticator(httpClient *http.Client, username, password, clientID, clientSecret, userAgent, baseURL, grantType string, logger *slog.Logger, clock Clock) (*Authenticator, error) {
 	if httpClient == nil {
 		httpClient = http.DefaultClient
+	}
+
+	if clock == nil {
+		clock = NewRealClock()
 	}
 
 	parsedURL, err := url.Parse(baseURL)
@@ -80,6 +86,7 @@ func NewAuthenticator(httpClient *http.Client, username, password, clientID, cli
 		tokenURL:     resolvedTokenURL,
 		formData:     &form,
 		logger:       logger,
+		clock:        clock,
 	}, nil
 }
 
@@ -95,7 +102,7 @@ func (a *Authenticator) GetToken(ctx context.Context) (string, error) {
 	// Check cache first - lock-free read
 	if cached := a.cachedToken.Load(); cached != nil {
 		// Capture the current time once for consistent comparison
-		now := time.Now()
+		now := a.clock.Now()
 		if now.Before(cached.expiry) {
 			if a.logger != nil {
 				a.logger.LogAttrs(ctx, slog.LevelDebug, "using cached reddit token",
@@ -112,7 +119,7 @@ func (a *Authenticator) GetToken(ctx context.Context) (string, error) {
 
 	// Double-check cache after acquiring lock - another goroutine might have refreshed
 	if cached := a.cachedToken.Load(); cached != nil {
-		now := time.Now()
+		now := a.clock.Now()
 		if now.Before(cached.expiry) {
 			if a.logger != nil {
 				a.logger.LogAttrs(ctx, slog.LevelDebug, "using cached reddit token (after lock)",
@@ -124,7 +131,7 @@ func (a *Authenticator) GetToken(ctx context.Context) (string, error) {
 
 	// Definitely need to fetch new token
 	data := a.formData.Encode()
-	start := time.Now()
+	start := a.clock.Now()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.tokenURL.String(), strings.NewReader(data))
 	if err != nil {
@@ -169,7 +176,7 @@ func (a *Authenticator) GetToken(ctx context.Context) (string, error) {
 		}
 	}
 
-	duration := time.Since(start)
+	duration := a.clock.Since(start)
 	a.logAuthHTTPResult(ctx, resp.StatusCode, duration, bodyBytes)
 
 	if resp.StatusCode != http.StatusOK {
@@ -241,7 +248,7 @@ func (a *Authenticator) GetToken(ctx context.Context) (string, error) {
 
 	a.cachedToken.Store(&tokenCache{
 		token:  tokenResp.AccessToken,
-		expiry: time.Now().Add(expiryDuration),
+		expiry: a.clock.Now().Add(expiryDuration),
 	})
 
 	a.logAuthSuccess(ctx, duration, tokenResp)

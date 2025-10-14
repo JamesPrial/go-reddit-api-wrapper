@@ -329,6 +329,7 @@ func NewClientWithContext(ctx context.Context, config *Config) (*Reddit, error) 
 		config.AuthURL,
 		grantType,
 		config.Logger,
+		nil, // Use real clock
 	)
 	if err != nil {
 		return nil, &pkgerrs.AuthError{Message: "failed to create authenticator", Err: err}
@@ -355,6 +356,7 @@ func NewClientWithContext(ctx context.Context, config *Config) (*Reddit, error) 
 			config.UserAgent,
 			config.Logger,
 			internalRateLimitCfg,
+			nil, // Use real clock
 		)
 	} else {
 		httpClient, err = internal.NewClient(

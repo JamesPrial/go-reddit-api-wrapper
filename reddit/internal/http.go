@@ -101,6 +101,7 @@ type Client struct {
 	UserAgent       string
 	logger          *slog.Logger
 	maxLogBodyBytes int
+	clock           Clock // Time abstraction for testing
 
 	limiter            *rate.Limiter
 	forceWaitUntil     atomic.Int64 // Unix nanoseconds
@@ -120,15 +121,21 @@ type RateLimitConfig struct {
 
 // NewClient returns a new Reddit API client.
 // If a nil httpClient is provided, http.DefaultClient will be used.
+// If a nil clock is provided, a real clock will be used.
 func NewClient(httpClient *http.Client, baseURL string, userAgent string, logger *slog.Logger) (*Client, error) {
-	return NewClientWithRateLimit(httpClient, baseURL, userAgent, logger, RateLimitConfig{})
+	return NewClientWithRateLimit(httpClient, baseURL, userAgent, logger, RateLimitConfig{}, nil)
 }
 
 // NewClientWithRateLimit returns a new Reddit API client with custom rate limiting.
 // If a nil httpClient is provided, http.DefaultClient will be used.
-func NewClientWithRateLimit(httpClient *http.Client, baseURL string, userAgent string, logger *slog.Logger, cfg RateLimitConfig) (*Client, error) {
+// If a nil clock is provided, a real clock will be used.
+func NewClientWithRateLimit(httpClient *http.Client, baseURL string, userAgent string, logger *slog.Logger, cfg RateLimitConfig, clock Clock) (*Client, error) {
 	if httpClient == nil {
 		httpClient = http.DefaultClient
+	}
+
+	if clock == nil {
+		clock = NewRealClock()
 	}
 
 	parsedURL, err := url.Parse(baseURL)
@@ -156,6 +163,7 @@ func NewClientWithRateLimit(httpClient *http.Client, baseURL string, userAgent s
 		logger:             logger,
 		maxLogBodyBytes:    defaultLogBodyBytes,
 		rateLimitThreshold: threshold,
+		clock:              clock,
 	}
 
 	return c, nil
@@ -206,7 +214,7 @@ func (c *Client) NewRequest(ctx context.Context, method, path string, body io.Re
 // This centralizes rate limiting, logging, and error handling for all HTTP operations.
 func (c *Client) doRequest(req *http.Request) ([]byte, *http.Response, error) {
 	ctx := req.Context()
-	start := time.Now()
+	start := c.clock.Now()
 
 	// Rate limiting
 	if err := c.waitForRateLimit(ctx); err != nil {
@@ -217,7 +225,7 @@ func (c *Client) doRequest(req *http.Request) ([]byte, *http.Response, error) {
 	// Execute request
 	resp, err := c.client.Do(req)
 	if err != nil {
-		c.logTransportError(ctx, req, time.Since(start), err)
+		c.logTransportError(ctx, req, c.clock.Since(start), err)
 		return nil, nil, &pkgerrs.ClientError{Err: err}
 	}
 	defer resp.Body.Close()
@@ -233,7 +241,7 @@ func (c *Client) doRequest(req *http.Request) ([]byte, *http.Response, error) {
 	limitedReader := io.LimitReader(resp.Body, maxResponseBodySize)
 	bytesRead, err := io.Copy(buf, limitedReader)
 	if err != nil {
-		c.logBodyReadError(ctx, req, resp, time.Since(start), err)
+		c.logBodyReadError(ctx, req, resp, c.clock.Since(start), err)
 		return nil, resp, &pkgerrs.ClientError{Err: err}
 	}
 
@@ -243,7 +251,7 @@ func (c *Client) doRequest(req *http.Request) ([]byte, *http.Response, error) {
 		var extraByte [1]byte
 		if n, _ := resp.Body.Read(extraByte[:]); n > 0 {
 			err := fmt.Errorf("response body exceeded max size of %d bytes", maxResponseBodySize)
-			c.logBodyReadError(ctx, req, resp, time.Since(start), err)
+			c.logBodyReadError(ctx, req, resp, c.clock.Since(start), err)
 			return nil, resp, &pkgerrs.ClientError{Err: err}
 		}
 	}
@@ -252,7 +260,7 @@ func (c *Client) doRequest(req *http.Request) ([]byte, *http.Response, error) {
 	bodyBytes := make([]byte, buf.Len())
 	copy(bodyBytes, buf.Bytes())
 
-	c.logHTTPResult(ctx, req, resp, bodyBytes, time.Since(start))
+	c.logHTTPResult(ctx, req, resp, bodyBytes, c.clock.Since(start))
 
 	// Check HTTP status
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -383,18 +391,18 @@ func (c *Client) waitForRateLimit(ctx context.Context) error {
 		}
 
 		waitUntil := time.Unix(0, waitUntilNanos)
-		now := time.Now()
+		now := c.clock.Now()
 		if !now.Before(waitUntil) {
 			c.clearForcedDelay(waitUntilNanos)
 			break
 		}
 
-		timer := time.NewTimer(waitUntil.Sub(now))
+		delay := waitUntil.Sub(now)
+		timer := c.clock.After(delay)
 		select {
 		case <-ctx.Done():
-			timer.Stop()
 			return ctx.Err()
-		case <-timer.C:
+		case <-timer:
 			c.clearForcedDelay(waitUntilNanos)
 		}
 	}
@@ -478,7 +486,7 @@ func (c *Client) deferRequests(ctx context.Context, d time.Duration, reason stri
 		ctx = context.Background()
 	}
 
-	until := time.Now().Add(d)
+	until := c.clock.Now().Add(d)
 	untilNanos := until.UnixNano()
 
 	// Use a CAS loop to ensure we only update if the new value is later
@@ -508,7 +516,7 @@ func (c *Client) deferRequests(ctx context.Context, d time.Duration, reason stri
 			return
 		}
 		// CAS failed, yield to avoid busy-wait before retrying
-		time.Sleep(time.Microsecond)
+		c.clock.Sleep(time.Microsecond)
 	}
 }
 
