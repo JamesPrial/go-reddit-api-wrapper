@@ -7,9 +7,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal"
-	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/testutil"
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/client"
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/parse"
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/testutil"
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/validator"
 )
 
 // createWorkflowClient creates a Reddit client configured for the given mock server
@@ -17,13 +19,13 @@ func createWorkflowClient(t *testing.T, server *testutil.MockServer) *Reddit {
 	t.Helper()
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := internal.NewClient(httpClient, server.URL(), "test/1.0", nil)
+	internalClient, err := client.NewClient(httpClient, server.URL(), "test/1.0", nil)
 	testutil.AssertNoError(t, err)
 
 	return &Reddit{
 		httpClient: internalClient,
-		parser:     internal.NewParser(),
-		validator:  internal.NewValidator(),
+		parser:     parse.NewParser(nil),
+		validator:  validator.NewValidator(),
 		auth:       &mockTokenProvider{token: "test_token"},
 	}
 }

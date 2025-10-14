@@ -10,9 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal"
-	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/testutil"
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/client"
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/parse"
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/testutil"
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/validator"
 )
 
 // customResponseServer is a helper for creating test servers with custom response handlers.
@@ -60,13 +62,13 @@ func TestMalformedJSONResponse(t *testing.T) {
 	defer customServer.Close()
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := internal.NewClient(httpClient, customServer.URL(), "test/1.0", nil)
+	internalClient, err := client.NewClient(httpClient, customServer.URL(), "test/1.0", nil)
 	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
-		parser:     internal.NewParser(),
-		validator:  internal.NewValidator(),
+		parser:     parse.NewParser(nil),
+		validator:  validator.NewValidator(),
 		auth:       &mockTokenProvider{token: "test_token"},
 	}
 
@@ -95,13 +97,13 @@ func TestEmptyResponse(t *testing.T) {
 	defer customServer.Close()
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := internal.NewClient(httpClient, customServer.URL(), "test/1.0", nil)
+	internalClient, err := client.NewClient(httpClient, customServer.URL(), "test/1.0", nil)
 	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
-		parser:     internal.NewParser(),
-		validator:  internal.NewValidator(),
+		parser:     parse.NewParser(nil),
+		validator:  validator.NewValidator(),
 		auth:       &mockTokenProvider{token: "test_token"},
 	}
 
@@ -131,13 +133,13 @@ func TestUnexpectedResponseStructure(t *testing.T) {
 	defer customServer.Close()
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := internal.NewClient(httpClient, customServer.URL(), "test/1.0", nil)
+	internalClient, err := client.NewClient(httpClient, customServer.URL(), "test/1.0", nil)
 	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
-		parser:     internal.NewParser(),
-		validator:  internal.NewValidator(),
+		parser:     parse.NewParser(nil),
+		validator:  validator.NewValidator(),
 		auth:       &mockTokenProvider{token: "test_token"},
 	}
 
@@ -172,13 +174,13 @@ func TestNullFieldsInResponse(t *testing.T) {
 	defer customServer.Close()
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := internal.NewClient(httpClient, customServer.URL(), "test/1.0", nil)
+	internalClient, err := client.NewClient(httpClient, customServer.URL(), "test/1.0", nil)
 	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
-		parser:     internal.NewParser(),
-		validator:  internal.NewValidator(),
+		parser:     parse.NewParser(nil),
+		validator:  validator.NewValidator(),
 		auth:       &mockTokenProvider{token: "test_token"},
 	}
 
@@ -228,13 +230,13 @@ func TestVeryLargeResponse(t *testing.T) {
 	defer server.Close()
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := internal.NewClient(httpClient, server.URL(), "test/1.0", nil)
+	internalClient, err := client.NewClient(httpClient, server.URL(), "test/1.0", nil)
 	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
-		parser:     internal.NewParser(),
-		validator:  internal.NewValidator(),
+		parser:     parse.NewParser(nil),
+		validator:  validator.NewValidator(),
 		auth:       &mockTokenProvider{token: "test_token"},
 	}
 
@@ -280,13 +282,13 @@ func TestUnicodeAndSpecialCharacters(t *testing.T) {
 	defer server.Close()
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := internal.NewClient(httpClient, server.URL(), "test/1.0", nil)
+	internalClient, err := client.NewClient(httpClient, server.URL(), "test/1.0", nil)
 	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
-		parser:     internal.NewParser(),
-		validator:  internal.NewValidator(),
+		parser:     parse.NewParser(nil),
+		validator:  validator.NewValidator(),
 		auth:       &mockTokenProvider{token: "test_token"},
 	}
 
@@ -340,13 +342,13 @@ func TestResponseWithExtraFields(t *testing.T) {
 	defer customServer.Close()
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := internal.NewClient(httpClient, customServer.URL(), "test/1.0", nil)
+	internalClient, err := client.NewClient(httpClient, customServer.URL(), "test/1.0", nil)
 	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
-		parser:     internal.NewParser(),
-		validator:  internal.NewValidator(),
+		parser:     parse.NewParser(nil),
+		validator:  validator.NewValidator(),
 		auth:       &mockTokenProvider{token: "test_token"},
 	}
 
@@ -389,13 +391,13 @@ func TestResponseWithWrongTypes(t *testing.T) {
 	defer customServer.Close()
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := internal.NewClient(httpClient, customServer.URL(), "test/1.0", nil)
+	internalClient, err := client.NewClient(httpClient, customServer.URL(), "test/1.0", nil)
 	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
-		parser:     internal.NewParser(),
-		validator:  internal.NewValidator(),
+		parser:     parse.NewParser(nil),
+		validator:  validator.NewValidator(),
 		auth:       &mockTokenProvider{token: "test_token"},
 	}
 
@@ -420,7 +422,7 @@ func TestPartialResponse(t *testing.T) {
 		partialResponse := map[string]interface{}{
 			"kind": "t5",
 			"data": map[string]interface{}{
-				"id":                 "test123",
+				"id":           "test123",
 				"display_name": "testsub",
 				// Missing subscribers, created_utc, etc.
 				"public_description": "A test subreddit",
@@ -431,13 +433,13 @@ func TestPartialResponse(t *testing.T) {
 	defer customServer.Close()
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := internal.NewClient(httpClient, customServer.URL(), "test/1.0", nil)
+	internalClient, err := client.NewClient(httpClient, customServer.URL(), "test/1.0", nil)
 	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
-		parser:     internal.NewParser(),
-		validator:  internal.NewValidator(),
+		parser:     parse.NewParser(nil),
+		validator:  validator.NewValidator(),
 		auth:       &mockTokenProvider{token: "test_token"},
 	}
 
@@ -486,13 +488,13 @@ func TestResponseWithNewlinesAndWhitespace(t *testing.T) {
 	defer customServer.Close()
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := internal.NewClient(httpClient, customServer.URL(), "test/1.0", nil)
+	internalClient, err := client.NewClient(httpClient, customServer.URL(), "test/1.0", nil)
 	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
-		parser:     internal.NewParser(),
-		validator:  internal.NewValidator(),
+		parser:     parse.NewParser(nil),
+		validator:  validator.NewValidator(),
 		auth:       &mockTokenProvider{token: "test_token"},
 	}
 
@@ -530,13 +532,13 @@ func TestResponseStreamError(t *testing.T) {
 	defer customServer.Close()
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := internal.NewClient(httpClient, customServer.URL(), "test/1.0", nil)
+	internalClient, err := client.NewClient(httpClient, customServer.URL(), "test/1.0", nil)
 	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
-		parser:     internal.NewParser(),
-		validator:  internal.NewValidator(),
+		parser:     parse.NewParser(nil),
+		validator:  validator.NewValidator(),
 		auth:       &mockTokenProvider{token: "test_token"},
 	}
 
@@ -568,13 +570,13 @@ func TestResponseWithInvalidContentType(t *testing.T) {
 	defer customServer.Close()
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := internal.NewClient(httpClient, customServer.URL(), "test/1.0", nil)
+	internalClient, err := client.NewClient(httpClient, customServer.URL(), "test/1.0", nil)
 	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
-		parser:     internal.NewParser(),
-		validator:  internal.NewValidator(),
+		parser:     parse.NewParser(nil),
+		validator:  validator.NewValidator(),
 		auth:       &mockTokenProvider{token: "test_token"},
 	}
 

@@ -1,4 +1,4 @@
-package internal
+package auth
 
 import (
 	"context"
@@ -12,8 +12,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/testutil"
 	pkgerrs "github.com/jamesprial/go-reddit-api-wrapper/pkg/errors"
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/testutil"
 )
 
 // oauthServerConfig holds configuration for the mock OAuth server.

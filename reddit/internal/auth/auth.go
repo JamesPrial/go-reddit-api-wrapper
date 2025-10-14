@@ -1,4 +1,4 @@
-package internal
+package auth
 
 import (
 	"context"
@@ -14,10 +14,13 @@ import (
 	"time"
 
 	pkgerrs "github.com/jamesprial/go-reddit-api-wrapper/pkg/errors"
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/clock"
 )
 
 const (
 	defaultTokenEndpointPath = "api/v1/access_token"
+	// maxResponseBodySize limits the size of HTTP response bodies to prevent DoS
+	maxResponseBodySize = 10 * 1024 * 1024 // 10MB
 )
 
 // tokenCache holds cached token data immutably
@@ -36,7 +39,7 @@ type Authenticator struct {
 	tokenURL     *url.URL
 	formData     *url.Values
 	logger       *slog.Logger
-	clock        Clock // Time abstraction for testing
+	clock        clock.Clock // Time abstraction for testing
 
 	// Token cache using atomic pointer for lock-free reads
 	cachedToken atomic.Pointer[tokenCache]
@@ -46,13 +49,13 @@ type Authenticator struct {
 
 // NewAuthenticator creates a new authenticator.
 // If a nil clock is provided, a real clock will be used.
-func NewAuthenticator(httpClient *http.Client, username, password, clientID, clientSecret, userAgent, baseURL, grantType string, logger *slog.Logger, clock Clock) (*Authenticator, error) {
+func NewAuthenticator(httpClient *http.Client, username, password, clientID, clientSecret, userAgent, baseURL, grantType string, logger *slog.Logger, clk clock.Clock) (*Authenticator, error) {
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}
 
-	if clock == nil {
-		clock = NewRealClock()
+	if clk == nil {
+		clk = clock.NewRealClock()
 	}
 
 	parsedURL, err := url.Parse(baseURL)
@@ -86,7 +89,7 @@ func NewAuthenticator(httpClient *http.Client, username, password, clientID, cli
 		tokenURL:     resolvedTokenURL,
 		formData:     &form,
 		logger:       logger,
-		clock:        clock,
+		clock:        clk,
 	}, nil
 }
 
@@ -337,4 +340,13 @@ func (a *Authenticator) logAuthSuccess(ctx context.Context, duration time.Durati
 	}
 
 	a.logger.LogAttrs(ctx, slog.LevelInfo, "reddit token acquired", attrs...)
+}
+
+// contextOrBackground returns the provided context or Background as fallback.
+// Used to ensure logging functions always have a valid context.
+func contextOrBackground(ctx context.Context) context.Context {
+	if ctx != nil {
+		return ctx
+	}
+	return context.Background()
 }

@@ -1,4 +1,4 @@
-package internal
+package client
 
 import (
 	"bytes"
@@ -11,14 +11,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/testutil"
 	pkgerrs "github.com/jamesprial/go-reddit-api-wrapper/pkg/errors"
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/clock"
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/testutil"
 	"golang.org/x/time/rate"
 )
 
 func TestNewClient_DefaultRateLimiter(t *testing.T) {
-	mockClock := NewMockClock(time.Time{})
+	mockClock := clock.NewMockClock(time.Time{})
 	client, err := NewClientWithRateLimit(nil, "https://example.com/api/", "agent", nil, RateLimitConfig{}, mockClock)
 	testutil.AssertNoError(t, err)
 
@@ -43,7 +44,7 @@ func TestNewClient_InvalidBaseURL(t *testing.T) {
 }
 
 func TestNewClient_BaseURLHandling(t *testing.T) {
-	mockClock := NewMockClock(time.Time{})
+	mockClock := clock.NewMockClock(time.Time{})
 	client, err := NewClientWithRateLimit(nil, "https://example.com/api", "agent", nil, RateLimitConfig{}, mockClock)
 	testutil.AssertNoError(t, err)
 
@@ -58,7 +59,7 @@ func TestNewClient_BaseURLHandling(t *testing.T) {
 
 func TestClient_NewRequestSetsHeaders(t *testing.T) {
 	httpClient := &http.Client{}
-	mockClock := NewMockClock(time.Time{})
+	mockClock := clock.NewMockClock(time.Time{})
 	c, err := NewClientWithRateLimit(httpClient, "https://example.com", "my-agent", nil, RateLimitConfig{}, mockClock)
 	testutil.AssertNoError(t, err)
 
@@ -305,7 +306,7 @@ func TestClient_DoSkipsDecodeWhenTargetNil(t *testing.T) {
 }
 
 func TestClient_DoEnforcesRetryAfter(t *testing.T) {
-	mockClock := NewMockClock(time.Time{})
+	mockClock := clock.NewMockClock(time.Time{})
 
 	var (
 		mu        sync.Mutex
@@ -412,7 +413,7 @@ func TestClient_DoHonorsCanceledContextBeforeSend(t *testing.T) {
 }
 
 func TestClient_WaitForForcedDelayBlocksAndClears(t *testing.T) {
-	mockClock := NewMockClock(time.Time{})
+	mockClock := clock.NewMockClock(time.Time{})
 	c := &Client{clock: mockClock}
 	future := mockClock.Now().Add(30 * time.Millisecond)
 	c.forceWaitUntil.Store(future.UnixNano())
@@ -445,7 +446,7 @@ func TestClient_WaitForForcedDelayBlocksAndClears(t *testing.T) {
 }
 
 func TestClient_WaitForForcedDelayContextCanceled(t *testing.T) {
-	mockClock := NewMockClock(time.Time{})
+	mockClock := clock.NewMockClock(time.Time{})
 	c := &Client{clock: mockClock}
 	c.forceWaitUntil.Store(mockClock.Now().Add(100 * time.Millisecond).UnixNano())
 
@@ -465,7 +466,7 @@ func TestClient_WaitForForcedDelayContextCanceled(t *testing.T) {
 }
 
 func TestClient_DeferRequestsExtendsDelay(t *testing.T) {
-	mockClock := NewMockClock(time.Time{})
+	mockClock := clock.NewMockClock(time.Time{})
 	c := &Client{clock: mockClock}
 
 	c.deferRequests(context.Background(), -time.Second, "test")
@@ -508,7 +509,7 @@ func TestClient_SetLogBodyLimit(t *testing.T) {
 }
 
 func TestClient_ApplyRateHeadersSetsForcedDelay(t *testing.T) {
-	mockClock := NewMockClock(time.Time{})
+	mockClock := clock.NewMockClock(time.Time{})
 	c := &Client{clock: mockClock}
 	resp := &http.Response{Header: make(http.Header)}
 	resp.Header.Set("Retry-After", "0.05")
@@ -525,7 +526,7 @@ func TestClient_ApplyRateHeadersSetsForcedDelay(t *testing.T) {
 }
 
 func TestClient_ApplyRateHeadersDoesNotShortenDelay(t *testing.T) {
-	mockClock := NewMockClock(time.Time{})
+	mockClock := clock.NewMockClock(time.Time{})
 	c := &Client{clock: mockClock}
 	c.deferRequests(context.Background(), 60*time.Millisecond, "test")
 	initial := c.forceWaitUntil.Load()
@@ -541,7 +542,7 @@ func TestClient_ApplyRateHeadersDoesNotShortenDelay(t *testing.T) {
 }
 
 func TestClient_ApplyRateHeadersUsesRatelimitRemaining(t *testing.T) {
-	mockClock := NewMockClock(time.Time{})
+	mockClock := clock.NewMockClock(time.Time{})
 	c := &Client{
 		rateLimitThreshold: ProactiveRateLimitThreshold,
 		clock:              mockClock,
@@ -573,7 +574,7 @@ func TestClient_ProactiveRateLimiting(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mockClock := NewMockClock(time.Time{})
+			mockClock := clock.NewMockClock(time.Time{})
 			c := &Client{
 				rateLimitThreshold: ProactiveRateLimitThreshold,
 				clock:              mockClock,

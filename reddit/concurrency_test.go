@@ -14,8 +14,11 @@ import (
 	"time"
 
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
-	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal"
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/client"
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/clock"
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/parse"
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/testutil"
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/validator"
 )
 
 // TestConcurrentClientUsage tests multiple clients using the API simultaneously
@@ -75,7 +78,7 @@ func TestConcurrentClientUsage(t *testing.T) {
 	defer server.Close()
 
 	// Create mock clock for testing
-	mockClock := internal.NewMockClock(time.Time{})
+	mockClock := clock.NewMockClock(time.Time{})
 
 	// Create multiple clients
 	numClients := 5
@@ -83,13 +86,13 @@ func TestConcurrentClientUsage(t *testing.T) {
 
 	for i := 0; i < numClients; i++ {
 		httpClient := &http.Client{Timeout: 30 * time.Second}
-		internalClient, err := internal.NewClientWithRateLimit(httpClient, server.URL, fmt.Sprintf("test_agent_%d/1.0", i), nil, internal.RateLimitConfig{}, mockClock)
+		internalClient, err := client.NewClientWithRateLimit(httpClient, server.URL, fmt.Sprintf("test_agent_%d/1.0", i), nil, client.RateLimitConfig{}, mockClock)
 		testutil.AssertNoError(t, err)
 
 		clients[i] = &Reddit{
 			httpClient: internalClient,
-			parser:     internal.NewParser(),
-			validator:  internal.NewValidator(),
+			parser:     parse.NewParser(nil),
+			validator:  validator.NewValidator(),
 			auth:       &mockTokenProvider{token: "test_token"},
 		}
 	}
@@ -212,16 +215,16 @@ func TestConcurrentSameClientOperations(t *testing.T) {
 	defer server.Close()
 
 	// Create mock clock for testing
-	mockClock := internal.NewMockClock(time.Time{})
+	mockClock := clock.NewMockClock(time.Time{})
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := internal.NewClientWithRateLimit(httpClient, server.URL, "concurrent_test_agent/1.0", nil, internal.RateLimitConfig{}, mockClock)
+	internalClient, err := client.NewClientWithRateLimit(httpClient, server.URL, "concurrent_test_agent/1.0", nil, client.RateLimitConfig{}, mockClock)
 	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
-		parser:     internal.NewParser(),
-		validator:  internal.NewValidator(),
+		parser:     parse.NewParser(nil),
+		validator:  validator.NewValidator(),
 		auth:       &mockTokenProvider{token: "test_token"},
 	}
 
@@ -296,7 +299,7 @@ func TestConcurrentRateLimitingBehavior(t *testing.T) {
 	var mu sync.Mutex
 
 	// Create mock clock for testing
-	mockClock := internal.NewMockClock(time.Time{})
+	mockClock := clock.NewMockClock(time.Time{})
 	lastRequestTime := mockClock.Now()
 
 	// Setup test data
@@ -337,13 +340,13 @@ func TestConcurrentRateLimitingBehavior(t *testing.T) {
 	defer server.Close()
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := internal.NewClientWithRateLimit(httpClient, server.URL, "ratelimit_test_agent/1.0", nil, internal.RateLimitConfig{}, mockClock)
+	internalClient, err := client.NewClientWithRateLimit(httpClient, server.URL, "ratelimit_test_agent/1.0", nil, client.RateLimitConfig{}, mockClock)
 	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
-		parser:     internal.NewParser(),
-		validator:  internal.NewValidator(),
+		parser:     parse.NewParser(nil),
+		validator:  validator.NewValidator(),
 		auth:       &mockTokenProvider{token: "test_token"},
 	}
 
@@ -394,7 +397,7 @@ func TestConcurrentContextCancellation(t *testing.T) {
 	var mu sync.Mutex
 
 	// Create mock clock for testing
-	mockClock := internal.NewMockClock(time.Time{})
+	mockClock := clock.NewMockClock(time.Time{})
 
 	// Setup test data
 	subreddit := testutil.NewSubreddit("cancellation_test").
@@ -425,13 +428,13 @@ func TestConcurrentContextCancellation(t *testing.T) {
 	defer server.Close()
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := internal.NewClientWithRateLimit(httpClient, server.URL, "cancellation_test_agent/1.0", nil, internal.RateLimitConfig{}, mockClock)
+	internalClient, err := client.NewClientWithRateLimit(httpClient, server.URL, "cancellation_test_agent/1.0", nil, client.RateLimitConfig{}, mockClock)
 	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
-		parser:     internal.NewParser(),
-		validator:  internal.NewValidator(),
+		parser:     parse.NewParser(nil),
+		validator:  validator.NewValidator(),
 		auth:       &mockTokenProvider{token: "test_token"},
 	}
 
@@ -489,7 +492,7 @@ func TestConcurrentResourceContention(t *testing.T) {
 	var mu sync.Mutex
 
 	// Create mock clock for testing
-	mockClock := internal.NewMockClock(time.Time{})
+	mockClock := clock.NewMockClock(time.Time{})
 
 	// Setup test data
 	subreddit := testutil.NewSubreddit("contention_test").
@@ -516,13 +519,13 @@ func TestConcurrentResourceContention(t *testing.T) {
 	defer server.Close()
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := internal.NewClientWithRateLimit(httpClient, server.URL, "contention_test_agent/1.0", nil, internal.RateLimitConfig{}, mockClock)
+	internalClient, err := client.NewClientWithRateLimit(httpClient, server.URL, "contention_test_agent/1.0", nil, client.RateLimitConfig{}, mockClock)
 	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
-		parser:     internal.NewParser(),
-		validator:  internal.NewValidator(),
+		parser:     parse.NewParser(nil),
+		validator:  validator.NewValidator(),
 		auth:       &mockTokenProvider{token: "test_token"},
 	}
 
@@ -674,16 +677,16 @@ func TestConcurrentMixedOperations(t *testing.T) {
 	defer server.Close()
 
 	// Create mock clock for testing
-	mockClock := internal.NewMockClock(time.Time{})
+	mockClock := clock.NewMockClock(time.Time{})
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := internal.NewClientWithRateLimit(httpClient, server.URL, "mixed_operations_test_agent/1.0", nil, internal.RateLimitConfig{}, mockClock)
+	internalClient, err := client.NewClientWithRateLimit(httpClient, server.URL, "mixed_operations_test_agent/1.0", nil, client.RateLimitConfig{}, mockClock)
 	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
-		parser:     internal.NewParser(),
-		validator:  internal.NewValidator(),
+		parser:     parse.NewParser(nil),
+		validator:  validator.NewValidator(),
 		auth:       &mockTokenProvider{token: "test_token"},
 	}
 

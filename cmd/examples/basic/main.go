@@ -30,8 +30,8 @@ import (
 	"log/slog"
 	"os"
 
-	graw "github.com/jamesprial/go-reddit-api-wrapper/reddit"
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
+	graw "github.com/jamesprial/go-reddit-api-wrapper/reddit"
 )
 
 // main demonstrates the core functionality of the Reddit API wrapper.

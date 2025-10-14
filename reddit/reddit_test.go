@@ -15,9 +15,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal"
 	pkgerrs "github.com/jamesprial/go-reddit-api-wrapper/pkg/errors"
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/parse"
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/validator"
 )
 
 // mockHTTPClient implements the HTTPClient interface for testing
@@ -88,8 +89,8 @@ func newTestClient(httpClient HTTPClient, auth TokenProvider) *Reddit {
 			UserAgent: "test/1.0",
 			BaseURL:   "https://oauth.reddit.com/",
 		},
-		parser:    internal.NewParser(),
-		validator: internal.NewValidator(),
+		parser:    parse.NewParser(nil),
+		validator: validator.NewValidator(),
 	}
 }
 

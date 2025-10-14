@@ -8,9 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal"
-	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/testutil"
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/client"
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/parse"
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/testutil"
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/validator"
 )
 
 // mockPaginationServer creates a custom server that handles pagination properly.
@@ -28,13 +30,13 @@ func mockPaginationServer(handler func(w http.ResponseWriter, r *http.Request)) 
 func createPaginationTestClient(t *testing.T, serverURL string) *Reddit {
 	t.Helper()
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := internal.NewClient(httpClient, serverURL, "test/1.0", nil)
+	internalClient, err := client.NewClient(httpClient, serverURL, "test/1.0", nil)
 	testutil.AssertNoError(t, err)
 
 	return &Reddit{
 		httpClient: internalClient,
-		parser:     internal.NewParser(),
-		validator:  internal.NewValidator(),
+		parser:     parse.NewParser(nil),
+		validator:  validator.NewValidator(),
 		auth:       &mockTokenProvider{token: "test_token"},
 	}
 }
@@ -361,11 +363,11 @@ func TestPaginationLimitBehavior(t *testing.T) {
 			postID := "post" + string(rune('a'+i))
 			posts[i] = testutil.NewPostBuilder().
 				WithID(postID).
-				WithTitle("Test Post "+string(rune('A'+i))).
-				WithAuthor("user"+string(rune('1'+i))).
-				WithScore(100+i*10).
+				WithTitle("Test Post " + string(rune('A'+i))).
+				WithAuthor("user" + string(rune('1'+i))).
+				WithScore(100 + i*10).
 				WithSubreddit("testsub").
-				WithCreated(1609459200.0+float64(i*3600)).
+				WithCreated(1609459200.0 + float64(i*3600)).
 				Build()
 		}
 
@@ -681,12 +683,12 @@ func TestPaginationWithComments(t *testing.T) {
 			commentID := "comment" + string(rune('0'+i))
 			comments[i] = testutil.NewCommentBuilder().
 				WithID(commentID).
-				WithBody("Test comment "+string(rune('1'+i))).
-				WithAuthor("user"+string(rune('1'+i))).
-				WithScore(10+i).
+				WithBody("Test comment " + string(rune('1'+i))).
+				WithAuthor("user" + string(rune('1'+i))).
+				WithScore(10 + i).
 				WithParentPost("post1").
 				WithSubreddit("testsub").
-				WithCreated(1609459200.0+float64(i*3600)).
+				WithCreated(1609459200.0 + float64(i*3600)).
 				Build()
 		}
 

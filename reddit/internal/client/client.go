@@ -1,4 +1,4 @@
-package internal
+package client
 
 import (
 	"bytes"
@@ -17,6 +17,7 @@ import (
 
 	pkgerrs "github.com/jamesprial/go-reddit-api-wrapper/pkg/errors"
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/clock"
 	"golang.org/x/time/rate"
 )
 
@@ -101,7 +102,7 @@ type Client struct {
 	UserAgent       string
 	logger          *slog.Logger
 	maxLogBodyBytes int
-	clock           Clock // Time abstraction for testing
+	clock           clock.Clock // Time abstraction for testing
 
 	limiter            *rate.Limiter
 	forceWaitUntil     atomic.Int64 // Unix nanoseconds
@@ -129,13 +130,13 @@ func NewClient(httpClient *http.Client, baseURL string, userAgent string, logger
 // NewClientWithRateLimit returns a new Reddit API client with custom rate limiting.
 // If a nil httpClient is provided, http.DefaultClient will be used.
 // If a nil clock is provided, a real clock will be used.
-func NewClientWithRateLimit(httpClient *http.Client, baseURL string, userAgent string, logger *slog.Logger, cfg RateLimitConfig, clock Clock) (*Client, error) {
+func NewClientWithRateLimit(httpClient *http.Client, baseURL string, userAgent string, logger *slog.Logger, cfg RateLimitConfig, clk clock.Clock) (*Client, error) {
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}
 
-	if clock == nil {
-		clock = NewRealClock()
+	if clk == nil {
+		clk = clock.NewRealClock()
 	}
 
 	parsedURL, err := url.Parse(baseURL)
@@ -163,7 +164,7 @@ func NewClientWithRateLimit(httpClient *http.Client, baseURL string, userAgent s
 		logger:             logger,
 		maxLogBodyBytes:    defaultLogBodyBytes,
 		rateLimitThreshold: threshold,
-		clock:              clock,
+		clock:              clk,
 	}
 
 	return c, nil

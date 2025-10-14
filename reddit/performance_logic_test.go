@@ -9,9 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal"
-	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/testutil"
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/client"
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/parse"
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/testutil"
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/validator"
 )
 
 // Note: mockTokenProvider is defined in reddit_test.go and shared across all test files
@@ -51,13 +53,13 @@ func TestMemoryUsageEfficiency(t *testing.T) {
 	})
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := internal.NewClient(httpClient, server.URL(), "test/1.0", nil)
+	internalClient, err := client.NewClient(httpClient, server.URL(), "test/1.0", nil)
 	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
-		parser:     internal.NewParser(),
-		validator:  internal.NewValidator(),
+		parser:     parse.NewParser(nil),
+		validator:  validator.NewValidator(),
 		auth:       &mockTokenProvider{token: "test_token"},
 	}
 
@@ -137,13 +139,13 @@ func TestConcurrentPerformance(t *testing.T) {
 	})
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := internal.NewClient(httpClient, server.URL(), "test/1.0", nil)
+	internalClient, err := client.NewClient(httpClient, server.URL(), "test/1.0", nil)
 	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
-		parser:     internal.NewParser(),
-		validator:  internal.NewValidator(),
+		parser:     parse.NewParser(nil),
+		validator:  validator.NewValidator(),
 		auth:       &mockTokenProvider{token: "test_token"},
 	}
 
@@ -225,13 +227,13 @@ func TestParsingPerformance(t *testing.T) {
 	defer server.Close()
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := internal.NewClient(httpClient, server.URL(), "test/1.0", nil)
+	internalClient, err := client.NewClient(httpClient, server.URL(), "test/1.0", nil)
 	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
-		parser:     internal.NewParser(),
-		validator:  internal.NewValidator(),
+		parser:     parse.NewParser(nil),
+		validator:  validator.NewValidator(),
 		auth:       &mockTokenProvider{token: "test_token"},
 	}
 
@@ -304,13 +306,13 @@ func TestConnectionPooling(t *testing.T) {
 		},
 	}
 
-	internalClient, err := internal.NewClient(httpClient, server.URL(), "test/1.0", nil)
+	internalClient, err := client.NewClient(httpClient, server.URL(), "test/1.0", nil)
 	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
-		parser:     internal.NewParser(),
-		validator:  internal.NewValidator(),
+		parser:     parse.NewParser(nil),
+		validator:  validator.NewValidator(),
 		auth:       &mockTokenProvider{token: "test_token"},
 	}
 
@@ -381,13 +383,13 @@ func TestGoroutineScalability(t *testing.T) {
 	})
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := internal.NewClient(httpClient, server.URL(), "test/1.0", nil)
+	internalClient, err := client.NewClient(httpClient, server.URL(), "test/1.0", nil)
 	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
-		parser:     internal.NewParser(),
-		validator:  internal.NewValidator(),
+		parser:     parse.NewParser(nil),
+		validator:  validator.NewValidator(),
 		auth:       &mockTokenProvider{token: "test_token"},
 	}
 
@@ -474,13 +476,13 @@ func TestMemoryLeakDetection(t *testing.T) {
 	})
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := internal.NewClient(httpClient, server.URL(), "test/1.0", nil)
+	internalClient, err := client.NewClient(httpClient, server.URL(), "test/1.0", nil)
 	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
-		parser:     internal.NewParser(),
-		validator:  internal.NewValidator(),
+		parser:     parse.NewParser(nil),
+		validator:  validator.NewValidator(),
 		auth:       &mockTokenProvider{token: "test_token"},
 	}
 
@@ -574,13 +576,13 @@ func TestCPUUsageEfficiency(t *testing.T) {
 	})
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := internal.NewClient(httpClient, server.URL(), "test/1.0", nil)
+	internalClient, err := client.NewClient(httpClient, server.URL(), "test/1.0", nil)
 	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
-		parser:     internal.NewParser(),
-		validator:  internal.NewValidator(),
+		parser:     parse.NewParser(nil),
+		validator:  validator.NewValidator(),
 		auth:       &mockTokenProvider{token: "test_token"},
 	}
 

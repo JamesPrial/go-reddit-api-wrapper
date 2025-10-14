@@ -11,9 +11,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal"
-	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/testutil"
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/client"
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/parse"
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/testutil"
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/validator"
 )
 
 // TestRedditAPIClientUsage tests real-world Reddit API client usage patterns
@@ -79,13 +81,13 @@ func TestRedditAPIClientUsage(t *testing.T) {
 
 	httpClient := server.Server().Client()
 	httpClient.Timeout = 30 * time.Second
-	internalClient, err := internal.NewClient(httpClient, server.URL(), "test/1.0", nil)
+	internalClient, err := client.NewClient(httpClient, server.URL(), "test/1.0", nil)
 	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
-		parser:     internal.NewParser(),
-		validator:  internal.NewValidator(),
+		parser:     parse.NewParser(nil),
+		validator:  validator.NewValidator(),
 		auth:       &mockTokenProvider{token: "test_token"},
 	}
 
@@ -263,13 +265,13 @@ func TestErrorHandlingInRealWorld(t *testing.T) {
 
 	httpClient := server.Client()
 	httpClient.Timeout = 500 * time.Millisecond
-	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
+	internalClient, err := client.NewClient(httpClient, server.URL, "test/1.0", nil)
 	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
-		parser:     internal.NewParser(),
-		validator:  internal.NewValidator(),
+		parser:     parse.NewParser(nil),
+		validator:  validator.NewValidator(),
 		auth:       &mockTokenProvider{token: "test_token"},
 	}
 
@@ -349,13 +351,13 @@ func TestConcurrentRealWorldUsage(t *testing.T) {
 
 	httpClient := server.Server().Client()
 	httpClient.Timeout = 30 * time.Second
-	internalClient, err := internal.NewClient(httpClient, server.URL(), "test/1.0", nil)
+	internalClient, err := client.NewClient(httpClient, server.URL(), "test/1.0", nil)
 	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
-		parser:     internal.NewParser(),
-		validator:  internal.NewValidator(),
+		parser:     parse.NewParser(nil),
+		validator:  validator.NewValidator(),
 		auth:       &mockTokenProvider{token: "test_token"},
 	}
 
@@ -450,13 +452,13 @@ func TestLongRunningOperations(t *testing.T) {
 
 	httpClient := server.Server().Client()
 	httpClient.Timeout = 30 * time.Second
-	internalClient, err := internal.NewClient(httpClient, server.URL(), "test/1.0", nil)
+	internalClient, err := client.NewClient(httpClient, server.URL(), "test/1.0", nil)
 	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
-		parser:     internal.NewParser(),
-		validator:  internal.NewValidator(),
+		parser:     parse.NewParser(nil),
+		validator:  validator.NewValidator(),
 		auth:       &mockTokenProvider{token: "test_token"},
 	}
 

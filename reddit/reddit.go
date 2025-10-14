@@ -35,9 +35,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal"
 	pkgerrs "github.com/jamesprial/go-reddit-api-wrapper/pkg/errors"
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/auth"
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/client"
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/parse"
+	validatorpkg "github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/validator"
 )
 
 const (
@@ -291,7 +294,7 @@ func NewClientWithContext(ctx context.Context, config *Config) (*Reddit, error) 
 	}
 
 	// Validate config and set HTTP client defaults
-	validator := internal.NewValidator()
+	validator := validatorpkg.NewValidator()
 
 	// Validate URLs
 	if err := validator.ValidateURL(config.BaseURL); err != nil {
@@ -319,7 +322,7 @@ func NewClientWithContext(ctx context.Context, config *Config) (*Reddit, error) 
 		grantType = "password" // Use password grant if credentials provided
 	}
 
-	auth, err := internal.NewAuthenticator(
+	authenticator, err := auth.NewAuthenticator(
 		config.HTTPClient,
 		config.Username,
 		config.Password,
@@ -336,7 +339,7 @@ func NewClientWithContext(ctx context.Context, config *Config) (*Reddit, error) 
 	}
 
 	// Validate that we can get a token before creating the client
-	_, err = auth.GetToken(ctx)
+	_, err = authenticator.GetToken(ctx)
 	if err != nil {
 		return nil, &pkgerrs.AuthError{Message: "failed to authenticate", Err: err}
 	}
@@ -345,12 +348,12 @@ func NewClientWithContext(ctx context.Context, config *Config) (*Reddit, error) 
 	var httpClient HTTPClient
 	if config.RateLimitConfig != nil {
 		// Convert public config to internal config
-		internalRateLimitCfg := internal.RateLimitConfig{
+		internalRateLimitCfg := client.RateLimitConfig{
 			RequestsPerMinute:  config.RateLimitConfig.RequestsPerMinute,
 			Burst:              config.RateLimitConfig.Burst,
 			ProactiveThreshold: config.RateLimitConfig.ProactiveThreshold,
 		}
-		httpClient, err = internal.NewClientWithRateLimit(
+		httpClient, err = client.NewClientWithRateLimit(
 			config.HTTPClient,
 			config.BaseURL,
 			config.UserAgent,
@@ -359,7 +362,7 @@ func NewClientWithContext(ctx context.Context, config *Config) (*Reddit, error) 
 			nil, // Use real clock
 		)
 	} else {
-		httpClient, err = internal.NewClient(
+		httpClient, err = client.NewClient(
 			config.HTTPClient,
 			config.BaseURL,
 			config.UserAgent,
@@ -376,10 +379,10 @@ func NewClientWithContext(ctx context.Context, config *Config) (*Reddit, error) 
 
 	return &Reddit{
 		httpClient: httpClient,
-		auth:       auth,
+		auth:       authenticator,
 		config:     config,
-		parser:     internal.NewParser(config.Logger),
-		validator:  internal.NewValidator(),
+		parser:     parse.NewParser(config.Logger),
+		validator:  validatorpkg.NewValidator(),
 	}, nil
 }
 

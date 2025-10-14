@@ -10,8 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal"
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/client"
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/clock"
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/parse"
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/testutil"
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/validator"
 )
 
 // Note: mockTokenProvider is defined in reddit_test.go and shared across all test files
@@ -22,7 +25,7 @@ func TestProactiveRateLimitingBehavior(t *testing.T) {
 	var mu sync.Mutex
 
 	// Create mock clock
-	mockClock := internal.NewMockClock(time.Time{})
+	mockClock := clock.NewMockClock(time.Time{})
 
 	// Create account using builder
 	account := testutil.NewAccount("testuser123").
@@ -54,19 +57,19 @@ func TestProactiveRateLimitingBehavior(t *testing.T) {
 
 	// Create client with rate limiting
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	rateLimitConfig := internal.RateLimitConfig{
+	rateLimitConfig := client.RateLimitConfig{
 		RequestsPerMinute:  60,
 		Burst:              10,
 		ProactiveThreshold: 8, // Start being proactive at 8 remaining
 	}
 
-	internalClient, err := internal.NewClientWithRateLimit(httpClient, server.URL(), "test/1.0", nil, rateLimitConfig, mockClock)
+	internalClient, err := client.NewClientWithRateLimit(httpClient, server.URL(), "test/1.0", nil, rateLimitConfig, mockClock)
 	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
-		parser:     internal.NewParser(),
-		validator:  internal.NewValidator(),
+		parser:     parse.NewParser(nil),
+		validator:  validator.NewValidator(),
 		auth:       &mockTokenProvider{token: "test_token"},
 	}
 
@@ -127,7 +130,7 @@ func TestRateLimitRecoveryPatterns(t *testing.T) {
 	var mu sync.Mutex
 
 	// Create mock clock
-	mockClock := internal.NewMockClock(time.Time{})
+	mockClock := clock.NewMockClock(time.Time{})
 
 	// Create account using builder
 	account := testutil.NewAccount("testuser123").
@@ -171,19 +174,19 @@ func TestRateLimitRecoveryPatterns(t *testing.T) {
 
 	// Create client with rate limiting
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	rateLimitConfig := internal.RateLimitConfig{
+	rateLimitConfig := client.RateLimitConfig{
 		RequestsPerMinute:  60,
 		Burst:              5,
 		ProactiveThreshold: 3,
 	}
 
-	internalClient, err := internal.NewClientWithRateLimit(httpClient, server.URL(), "test/1.0", nil, rateLimitConfig, mockClock)
+	internalClient, err := client.NewClientWithRateLimit(httpClient, server.URL(), "test/1.0", nil, rateLimitConfig, mockClock)
 	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
-		parser:     internal.NewParser(),
-		validator:  internal.NewValidator(),
+		parser:     parse.NewParser(nil),
+		validator:  validator.NewValidator(),
 		auth:       &mockTokenProvider{token: "test_token"},
 	}
 
@@ -242,7 +245,7 @@ func TestBurstCapacityHandling(t *testing.T) {
 	var mu sync.Mutex
 
 	// Create mock clock
-	mockClock := internal.NewMockClock(time.Time{})
+	mockClock := clock.NewMockClock(time.Time{})
 
 	// Create account using builder
 	account := testutil.NewAccount("testuser123").
@@ -274,19 +277,19 @@ func TestBurstCapacityHandling(t *testing.T) {
 
 	// Create client with burst capacity
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	rateLimitConfig := internal.RateLimitConfig{
+	rateLimitConfig := client.RateLimitConfig{
 		RequestsPerMinute:  30, // 0.5 per second
 		Burst:              10, // Allow burst of 10
 		ProactiveThreshold: 5,
 	}
 
-	internalClient, err := internal.NewClientWithRateLimit(httpClient, server.URL(), "test/1.0", nil, rateLimitConfig, mockClock)
+	internalClient, err := client.NewClientWithRateLimit(httpClient, server.URL(), "test/1.0", nil, rateLimitConfig, mockClock)
 	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
-		parser:     internal.NewParser(),
-		validator:  internal.NewValidator(),
+		parser:     parse.NewParser(nil),
+		validator:  validator.NewValidator(),
 		auth:       &mockTokenProvider{token: "test_token"},
 	}
 
@@ -354,7 +357,7 @@ func TestMalformedRateLimitHeaders(t *testing.T) {
 	var mu sync.Mutex
 
 	// Create mock clock
-	mockClock := internal.NewMockClock(time.Time{})
+	mockClock := clock.NewMockClock(time.Time{})
 
 	// Create account using builder
 	account := testutil.NewAccount("testuser123").
@@ -411,19 +414,19 @@ func TestMalformedRateLimitHeaders(t *testing.T) {
 
 	// Create client
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	rateLimitConfig := internal.RateLimitConfig{
+	rateLimitConfig := client.RateLimitConfig{
 		RequestsPerMinute:  60,
 		Burst:              10,
 		ProactiveThreshold: 5,
 	}
 
-	internalClient, err := internal.NewClientWithRateLimit(httpClient, server.URL(), "test/1.0", nil, rateLimitConfig, mockClock)
+	internalClient, err := client.NewClientWithRateLimit(httpClient, server.URL(), "test/1.0", nil, rateLimitConfig, mockClock)
 	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
-		parser:     internal.NewParser(),
-		validator:  internal.NewValidator(),
+		parser:     parse.NewParser(nil),
+		validator:  validator.NewValidator(),
 		auth:       &mockTokenProvider{token: "test_token"},
 	}
 
@@ -460,7 +463,7 @@ func TestConcurrentRateLimiting(t *testing.T) {
 	var mu sync.Mutex
 
 	// Create mock clock
-	mockClock := internal.NewMockClock(time.Time{})
+	mockClock := clock.NewMockClock(time.Time{})
 
 	// Create account using builder
 	account := testutil.NewAccount("testuser123").
@@ -497,19 +500,19 @@ func TestConcurrentRateLimiting(t *testing.T) {
 	// Create client with generous rate limiting to avoid blocking
 	// Note: The golang.org/x/time/rate limiter uses real time, so we use a high limit
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	rateLimitConfig := internal.RateLimitConfig{
+	rateLimitConfig := client.RateLimitConfig{
 		RequestsPerMinute:  600, // High limit to avoid real blocking
 		Burst:              50,
 		ProactiveThreshold: 10,
 	}
 
-	internalClient, err := internal.NewClientWithRateLimit(httpClient, server.URL(), "test/1.0", nil, rateLimitConfig, mockClock)
+	internalClient, err := client.NewClientWithRateLimit(httpClient, server.URL(), "test/1.0", nil, rateLimitConfig, mockClock)
 	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
-		parser:     internal.NewParser(),
-		validator:  internal.NewValidator(),
+		parser:     parse.NewParser(nil),
+		validator:  validator.NewValidator(),
 		auth:       &mockTokenProvider{token: "test_token"},
 	}
 
@@ -581,7 +584,7 @@ func TestRateLimitEdgeCases(t *testing.T) {
 	var mu sync.Mutex
 
 	// Create mock clock
-	mockClock := internal.NewMockClock(time.Time{})
+	mockClock := clock.NewMockClock(time.Time{})
 
 	// Create account using builder
 	account := testutil.NewAccount("testuser123").
@@ -635,19 +638,19 @@ func TestRateLimitEdgeCases(t *testing.T) {
 
 	// Create client
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	rateLimitConfig := internal.RateLimitConfig{
+	rateLimitConfig := client.RateLimitConfig{
 		RequestsPerMinute:  60,
 		Burst:              10,
 		ProactiveThreshold: 5,
 	}
 
-	internalClient, err := internal.NewClientWithRateLimit(httpClient, server.URL(), "test/1.0", nil, rateLimitConfig, mockClock)
+	internalClient, err := client.NewClientWithRateLimit(httpClient, server.URL(), "test/1.0", nil, rateLimitConfig, mockClock)
 	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
-		parser:     internal.NewParser(),
-		validator:  internal.NewValidator(),
+		parser:     parse.NewParser(nil),
+		validator:  validator.NewValidator(),
 		auth:       &mockTokenProvider{token: "test_token"},
 	}
 

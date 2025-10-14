@@ -12,8 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal"
+	httpclient "github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/client"
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/parse"
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/testutil"
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/validator"
 )
 
 // TestNetworkTimeoutRecovery tests recovery from network timeouts
@@ -63,13 +65,13 @@ func TestNetworkTimeoutRecovery(t *testing.T) {
 
 	// Create client with short timeout to trigger timeout on first request
 	httpClient := &http.Client{Timeout: 500 * time.Millisecond}
-	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
+	internalClient, err := httpclient.NewClient(httpClient, server.URL, "test/1.0", nil)
 	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
-		parser:     internal.NewParser(),
-		validator:  internal.NewValidator(),
+		parser:     parse.NewParser(nil),
+		validator:  validator.NewValidator(),
 		auth:       &mockTokenProvider{token: "test_token"},
 	}
 
@@ -84,13 +86,13 @@ func TestNetworkTimeoutRecovery(t *testing.T) {
 
 	// Create new client with longer timeout for recovery
 	httpClient2 := &http.Client{Timeout: 5 * time.Second}
-	internalClient2, err := internal.NewClient(httpClient2, server.URL, "test/1.0", nil)
+	internalClient2, err := httpclient.NewClient(httpClient2, server.URL, "test/1.0", nil)
 	testutil.AssertNoError(t, err)
 
 	recoveryClient := &Reddit{
 		httpClient: internalClient2,
-		parser:     internal.NewParser(),
-		validator:  internal.NewValidator(),
+		parser:     parse.NewParser(nil),
+		validator:  validator.NewValidator(),
 		auth:       &mockTokenProvider{token: "test_token"},
 	}
 
@@ -123,13 +125,13 @@ func TestConnectionRefusedRecovery(t *testing.T) {
 
 	// Create client
 	httpClient := &http.Client{Timeout: 5 * time.Second}
-	internalClient, err := internal.NewClient(httpClient, server.URL(), "test/1.0", nil)
+	internalClient, err := httpclient.NewClient(httpClient, server.URL(), "test/1.0", nil)
 	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
-		parser:     internal.NewParser(),
-		validator:  internal.NewValidator(),
+		parser:     parse.NewParser(nil),
+		validator:  validator.NewValidator(),
 		auth:       &mockTokenProvider{token: "test_token"},
 	}
 
@@ -154,13 +156,13 @@ func TestConnectionRefusedRecovery(t *testing.T) {
 
 	// Create new client pointing to recovery server
 	recoveryHttpClient := &http.Client{Timeout: 5 * time.Second}
-	recoveryInternalClient, err := internal.NewClient(recoveryHttpClient, recoveryServer.URL(), "test/1.0", nil)
+	recoveryInternalClient, err := httpclient.NewClient(recoveryHttpClient, recoveryServer.URL(), "test/1.0", nil)
 	testutil.AssertNoError(t, err)
 
 	recoveryClient := &Reddit{
 		httpClient: recoveryInternalClient,
-		parser:     internal.NewParser(),
-		validator:  internal.NewValidator(),
+		parser:     parse.NewParser(nil),
+		validator:  validator.NewValidator(),
 		auth:       &mockTokenProvider{token: "test_token"},
 	}
 
@@ -179,13 +181,13 @@ func TestConnectionRefusedRecovery(t *testing.T) {
 func TestDNSFailureRecovery(t *testing.T) {
 	// Create client pointing to non-existent domain
 	httpClient := &http.Client{Timeout: 5 * time.Second}
-	internalClient, err := internal.NewClient(httpClient, "http://non-existent-domain-for-testing.invalid", "test/1.0", nil)
+	internalClient, err := httpclient.NewClient(httpClient, "http://non-existent-domain-for-testing.invalid", "test/1.0", nil)
 	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
-		parser:     internal.NewParser(),
-		validator:  internal.NewValidator(),
+		parser:     parse.NewParser(nil),
+		validator:  validator.NewValidator(),
 		auth:       &mockTokenProvider{token: "test_token"},
 	}
 
@@ -213,13 +215,13 @@ func TestDNSFailureRecovery(t *testing.T) {
 
 	// Create new client pointing to working server
 	recoveryHttpClient := &http.Client{Timeout: 5 * time.Second}
-	recoveryInternalClient, err := internal.NewClient(recoveryHttpClient, server.URL(), "test/1.0", nil)
+	recoveryInternalClient, err := httpclient.NewClient(recoveryHttpClient, server.URL(), "test/1.0", nil)
 	testutil.AssertNoError(t, err)
 
 	recoveryClient := &Reddit{
 		httpClient: recoveryInternalClient,
-		parser:     internal.NewParser(),
-		validator:  internal.NewValidator(),
+		parser:     parse.NewParser(nil),
+		validator:  validator.NewValidator(),
 		auth:       &mockTokenProvider{token: "test_token"},
 	}
 
@@ -263,13 +265,13 @@ func TestHTTP5xxErrorRecovery(t *testing.T) {
 	defer server.Close()
 
 	httpClient := &http.Client{Timeout: 5 * time.Second}
-	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
+	internalClient, err := httpclient.NewClient(httpClient, server.URL, "test/1.0", nil)
 	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
-		parser:     internal.NewParser(),
-		validator:  internal.NewValidator(),
+		parser:     parse.NewParser(nil),
+		validator:  validator.NewValidator(),
 		auth:       &mockTokenProvider{token: "test_token"},
 	}
 
@@ -332,13 +334,13 @@ func TestHTTP429RateLimitRecovery(t *testing.T) {
 	defer server.Close()
 
 	httpClient := &http.Client{Timeout: 5 * time.Second}
-	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
+	internalClient, err := httpclient.NewClient(httpClient, server.URL, "test/1.0", nil)
 	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
-		parser:     internal.NewParser(),
-		validator:  internal.NewValidator(),
+		parser:     parse.NewParser(nil),
+		validator:  validator.NewValidator(),
 		auth:       &mockTokenProvider{token: "test_token"},
 	}
 
@@ -407,13 +409,13 @@ func TestPartialResponseRecovery(t *testing.T) {
 	defer server.Close()
 
 	httpClient := &http.Client{Timeout: 5 * time.Second}
-	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
+	internalClient, err := httpclient.NewClient(httpClient, server.URL, "test/1.0", nil)
 	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
-		parser:     internal.NewParser(),
-		validator:  internal.NewValidator(),
+		parser:     parse.NewParser(nil),
+		validator:  validator.NewValidator(),
 		auth:       &mockTokenProvider{token: "test_token"},
 	}
 
@@ -472,13 +474,13 @@ func TestIntermittentNetworkFailure(t *testing.T) {
 	defer server.Close()
 
 	httpClient := &http.Client{Timeout: 5 * time.Second}
-	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
+	internalClient, err := httpclient.NewClient(httpClient, server.URL, "test/1.0", nil)
 	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
-		parser:     internal.NewParser(),
-		validator:  internal.NewValidator(),
+		parser:     parse.NewParser(nil),
+		validator:  validator.NewValidator(),
 		auth:       &mockTokenProvider{token: "test_token"},
 	}
 
@@ -549,13 +551,13 @@ func TestNetworkRecoveryWithRetry(t *testing.T) {
 	defer server.Close()
 
 	httpClient := &http.Client{Timeout: 5 * time.Second}
-	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
+	internalClient, err := httpclient.NewClient(httpClient, server.URL, "test/1.0", nil)
 	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
-		parser:     internal.NewParser(),
-		validator:  internal.NewValidator(),
+		parser:     parse.NewParser(nil),
+		validator:  validator.NewValidator(),
 		auth:       &mockTokenProvider{token: "test_token"},
 	}
 
@@ -609,13 +611,13 @@ func TestContextCancellationDuringRecovery(t *testing.T) {
 	defer server.Close()
 
 	httpClient := &http.Client{Timeout: 5 * time.Second}
-	internalClient, err := internal.NewClient(httpClient, server.URL, "test/1.0", nil)
+	internalClient, err := httpclient.NewClient(httpClient, server.URL, "test/1.0", nil)
 	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
 		httpClient: internalClient,
-		parser:     internal.NewParser(),
-		validator:  internal.NewValidator(),
+		parser:     parse.NewParser(nil),
+		validator:  validator.NewValidator(),
 		auth:       &mockTokenProvider{token: "test_token"},
 	}
 

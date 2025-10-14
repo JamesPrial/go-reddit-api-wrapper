@@ -23,7 +23,7 @@ func ExampleIsValidBase36() {
 // Example of validating a subreddit name
 func ExampleIsValidSubreddit() {
 	valid := validation.IsValidSubreddit("golang")
-	tooShort := validation.IsValidSubreddit("go")      // must be 3+ chars
+	tooShort := validation.IsValidSubreddit("go")                    // must be 3+ chars
 	tooLong := validation.IsValidSubreddit("a1234567890123456789xy") // max 21 chars
 
 	fmt.Printf("Valid: %v\n", valid)

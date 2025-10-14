@@ -1,4 +1,4 @@
-package internal
+package client
 
 import (
 	"context"
@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/testutil"
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/testutil"
 )
 
 func BenchmarkClient_Do_WithLogging(b *testing.B) {

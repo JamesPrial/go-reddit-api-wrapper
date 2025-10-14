@@ -12,9 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal"
-	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/testutil"
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/auth"
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/clock"
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/testutil"
 )
 
 // MockHTTPClient is a mock implementation of the HTTPClient interface for testing.
@@ -35,7 +36,7 @@ func TestTokenRefreshTimingEdgeCases(t *testing.T) {
 	var requestCount int64
 	var currentTokenLifespan time.Duration
 	var mu sync.Mutex
-	var mockClock *internal.MockClock
+	var mockClock *clock.MockClock
 
 	account := testutil.NewAccount("testuser").
 		WithID("user123").
@@ -150,11 +151,11 @@ func TestTokenRefreshTimingEdgeCases(t *testing.T) {
 				atomic.StoreInt64(&requestCount, 0)
 				mu.Lock()
 				currentTokenLifespan = tc.tokenLifespan
-				mockClock = internal.NewMockClock(time.Time{})
+				mockClock = clock.NewMockClock(time.Time{})
 				mu.Unlock()
 
 				// Create authenticator directly with mock clock
-				auth, err := internal.NewAuthenticator(
+				a, err := auth.NewAuthenticator(
 					&http.Client{Timeout: 30 * time.Second},
 					"", "", // no username/password for client_credentials
 					"test_id",
@@ -170,14 +171,14 @@ func TestTokenRefreshTimingEdgeCases(t *testing.T) {
 				t.Logf("Testing %s: %s", tc.name, tc.description)
 
 				// Get initial token
-				_, err = auth.GetToken(context.Background())
+				_, err = a.GetToken(context.Background())
 				testutil.AssertNoError(t, err)
 
 				// Advance mock time by the specified delay
 				mockClock.Advance(tc.requestDelay)
 
 				// Try to get token again - should refresh if expired
-				_, err = auth.GetToken(context.Background())
+				_, err = a.GetToken(context.Background())
 				testutil.AssertNoError(t, err)
 
 				totalRequests := atomic.LoadInt64(&requestCount)
@@ -246,10 +247,10 @@ func TestConcurrentTokenRefreshRaceCondition(t *testing.T) {
 		atomic.StoreInt64(&requestCount, 0)
 		atomic.StoreInt64(&tokenRefreshCount, 0)
 
-		mockClock := internal.NewMockClock(time.Time{})
+		mockClock := clock.NewMockClock(time.Time{})
 
 		// Create authenticator directly with mock clock
-		auth, err := internal.NewAuthenticator(
+		authenticator, err := auth.NewAuthenticator(
 			&http.Client{Timeout: 30 * time.Second},
 			"", "", // no username/password for client_credentials
 			"test_id",
@@ -272,7 +273,7 @@ func TestConcurrentTokenRefreshRaceCondition(t *testing.T) {
 			go func(goroutineID int) {
 				defer wg.Done()
 
-				_, err := auth.GetToken(context.Background())
+				_, err := authenticator.GetToken(context.Background())
 				results <- err
 
 				if err != nil {
@@ -524,10 +525,10 @@ func TestTokenCacheInvalidation(t *testing.T) {
 		atomic.StoreInt64(&requestCount, 0)
 		atomic.StoreInt64(&tokenIssuedCount, 0)
 
-		mockClock := internal.NewMockClock(time.Time{})
+		mockClock := clock.NewMockClock(time.Time{})
 
 		// Create authenticator directly with mock clock
-		auth, err := internal.NewAuthenticator(
+		authenticator, err := auth.NewAuthenticator(
 			&http.Client{Timeout: 30 * time.Second},
 			"", "", // no username/password for client_credentials
 			"test_id",
@@ -541,7 +542,7 @@ func TestTokenCacheInvalidation(t *testing.T) {
 		testutil.AssertNoError(t, err)
 
 		// Make initial token request
-		_, err = auth.GetToken(context.Background())
+		_, err = authenticator.GetToken(context.Background())
 		testutil.AssertNoError(t, err)
 		t.Logf("Initial token obtained")
 
@@ -549,7 +550,7 @@ func TestTokenCacheInvalidation(t *testing.T) {
 		mockClock.Advance(2 * time.Second)
 
 		// Make another request - should trigger token refresh
-		_, err = auth.GetToken(context.Background())
+		_, err = authenticator.GetToken(context.Background())
 		testutil.AssertNoError(t, err)
 		t.Logf("Token after expiry obtained (token refreshed)")
 
@@ -559,8 +560,8 @@ func TestTokenCacheInvalidation(t *testing.T) {
 		mu.Unlock()
 
 		// Invalidate cache and make request with revoked token - should trigger new token refresh
-		auth.InvalidateToken()
-		_, err = auth.GetToken(context.Background())
+		authenticator.InvalidateToken()
+		_, err = authenticator.GetToken(context.Background())
 		testutil.AssertNoError(t, err)
 		t.Logf("Token with revoked token succeeded (new token obtained)")
 
@@ -633,11 +634,11 @@ func TestMultiClientAuthBehavior(t *testing.T) {
 
 		// Create multiple authenticators with same credentials and shared mock clock
 		numClients := 5
-		mockClock := internal.NewMockClock(time.Time{})
-		auths := make([]*internal.Authenticator, numClients)
+		mockClock := clock.NewMockClock(time.Time{})
+		auths := make([]*auth.Authenticator, numClients)
 
 		for i := 0; i < numClients; i++ {
-			auth, err := internal.NewAuthenticator(
+			authenticator, err := auth.NewAuthenticator(
 				&http.Client{Timeout: 30 * time.Second},
 				"", "", // no username/password for client_credentials
 				"shared_id",
@@ -649,16 +650,16 @@ func TestMultiClientAuthBehavior(t *testing.T) {
 				mockClock,
 			)
 			testutil.AssertNoError(t, err)
-			auths[i] = auth
+			auths[i] = authenticator
 		}
 
 		// Use all authenticators concurrently
 		var wg sync.WaitGroup
 		results := make(chan error, numClients)
 
-		for i, auth := range auths {
+		for i, authInstance := range auths {
 			wg.Add(1)
-			go func(clientID int, a *internal.Authenticator) {
+			go func(clientID int, a *auth.Authenticator) {
 				defer wg.Done()
 
 				_, err := a.GetToken(context.Background())
@@ -669,7 +670,7 @@ func TestMultiClientAuthBehavior(t *testing.T) {
 				} else {
 					t.Logf("Client %d succeeded", clientID)
 				}
-			}(i, auth)
+			}(i, authInstance)
 		}
 
 		wg.Wait()
@@ -754,10 +755,10 @@ func TestAuthSystemClockManipulation(t *testing.T) {
 		// Reset counters
 		atomic.StoreInt64(&requestCount, 0)
 
-		mockClock := internal.NewMockClock(time.Time{})
+		mockClock := clock.NewMockClock(time.Time{})
 
 		// Create authenticator directly with mock clock
-		auth, err := internal.NewAuthenticator(
+		authenticator, err := auth.NewAuthenticator(
 			&http.Client{Timeout: 30 * time.Second},
 			"", "", // no username/password for client_credentials
 			"test_id",
@@ -771,20 +772,20 @@ func TestAuthSystemClockManipulation(t *testing.T) {
 		testutil.AssertNoError(t, err)
 
 		// Test 1: Normal operation
-		_, err = auth.GetToken(context.Background())
+		_, err = authenticator.GetToken(context.Background())
 		testutil.AssertNoError(t, err)
 		t.Logf("Normal request succeeded")
 
 		// Test 2: Simulate clock advancement
 		mockClock.Advance(100 * time.Millisecond)
 
-		_, err = auth.GetToken(context.Background())
+		_, err = authenticator.GetToken(context.Background())
 		testutil.AssertNoError(t, err)
 		t.Logf("Request after clock advance succeeded")
 
 		// Test 3: Rapid successive requests with small time advances
 		for i := 0; i < 5; i++ {
-			_, err = auth.GetToken(context.Background())
+			_, err = authenticator.GetToken(context.Background())
 			testutil.AssertNoError(t, err)
 			mockClock.Advance(10 * time.Millisecond)
 		}
