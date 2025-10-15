@@ -4,6 +4,8 @@
 **Date:** 2025-10-15  
 **Status:** 3 Minor Issues, 3 Enhancement Recommendations
 
+**Note on Effort Estimates:** All time estimates are based on an experienced Go developer familiar with the codebase. Actual times may vary depending on individual experience and familiarity with the project. Estimates include time for implementation, testing, and documentation updates.
+
 ---
 
 ## Minor Issues (Optional Improvements)
