@@ -4,7 +4,6 @@ import (
 	"strings"
 	"testing"
 
-	pkgerrs "github.com/jamesprial/go-reddit-api-wrapper/pkg/errors"
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/testutil"
@@ -54,8 +53,8 @@ func TestValidator_ValidateSubredditName(t *testing.T) {
 			if tt.wantError {
 				testutil.AssertError(t, err)
 				testutil.AssertStringContains(t, err.Error(), tt.errorMsg)
-				var configErr *pkgerrs.ConfigError
-				testutil.AssertErrorType(t, err, &configErr)
+				var validationErr *ValidationError
+				testutil.AssertErrorType(t, err, &validationErr)
 			} else {
 				testutil.AssertNoError(t, err)
 			}
@@ -92,8 +91,8 @@ func TestValidator_ValidatePagination(t *testing.T) {
 			if tt.wantError {
 				testutil.AssertError(t, err)
 				testutil.AssertStringContains(t, err.Error(), tt.errorMsg)
-				var configErr *pkgerrs.ConfigError
-				testutil.AssertErrorType(t, err, &configErr)
+				var validationErr *ValidationError
+				testutil.AssertErrorType(t, err, &validationErr)
 			} else {
 				testutil.AssertNoError(t, err)
 			}
@@ -151,8 +150,8 @@ func TestValidator_ValidateCommentIDs(t *testing.T) {
 			if tt.wantError {
 				testutil.AssertError(t, err)
 				testutil.AssertStringContains(t, err.Error(), tt.errorMsg)
-				var configErr *pkgerrs.ConfigError
-				testutil.AssertErrorType(t, err, &configErr)
+				var validationErr *ValidationError
+				testutil.AssertErrorType(t, err, &validationErr)
 			} else {
 				testutil.AssertNoError(t, err)
 			}
@@ -233,8 +232,8 @@ func TestValidator_ValidateLinkID(t *testing.T) {
 			if tt.wantError {
 				testutil.AssertError(t, err)
 				testutil.AssertStringContains(t, err.Error(), tt.errorMsg)
-				var configErr *pkgerrs.ConfigError
-				testutil.AssertErrorType(t, err, &configErr)
+				var validationErr *ValidationError
+				testutil.AssertErrorType(t, err, &validationErr)
 			} else {
 				testutil.AssertNoError(t, err)
 				if normalized != tt.wantNormalized {
