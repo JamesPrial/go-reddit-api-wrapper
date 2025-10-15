@@ -312,7 +312,7 @@ func NewClientWithContext(ctx context.Context, config *Config) (*Reddit, error) 
 		DefaultTimeout,
 	)
 	if err != nil {
-		return nil, err
+		return nil, translateValidationError(err)
 	}
 
 	// Create authenticator
