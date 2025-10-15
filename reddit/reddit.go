@@ -35,7 +35,6 @@ import (
 	"strings"
 	"time"
 
-	pkgerrs "github.com/jamesprial/go-reddit-api-wrapper/pkg/errors"
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/auth"
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/client"
@@ -279,7 +278,7 @@ func NewClient(config *Config) (*Reddit, error) {
 // This allows cancellation of the authentication process if needed.
 func NewClientWithContext(ctx context.Context, config *Config) (*Reddit, error) {
 	if config == nil {
-		return nil, &pkgerrs.ConfigError{Message: "config cannot be nil"}
+		return nil, &ConfigError{Message: "config cannot be nil"}
 	}
 
 	// Set defaults
@@ -298,10 +297,10 @@ func NewClientWithContext(ctx context.Context, config *Config) (*Reddit, error) 
 
 	// Validate URLs
 	if err := validator.ValidateURL(config.BaseURL); err != nil {
-		return nil, &pkgerrs.ConfigError{Field: "BaseURL", Message: fmt.Sprintf("invalid base URL: %v", err)}
+		return nil, &ConfigError{Field: "BaseURL", Message: fmt.Sprintf("invalid base URL: %v", err)}
 	}
 	if err := validator.ValidateURL(config.AuthURL); err != nil {
-		return nil, &pkgerrs.ConfigError{Field: "AuthURL", Message: fmt.Sprintf("invalid auth URL: %v", err)}
+		return nil, &ConfigError{Field: "AuthURL", Message: fmt.Sprintf("invalid auth URL: %v", err)}
 	}
 	var err error
 	config.HTTPClient, err = validator.ValidateConfig(
@@ -335,13 +334,13 @@ func NewClientWithContext(ctx context.Context, config *Config) (*Reddit, error) 
 		nil, // Use real clock
 	)
 	if err != nil {
-		return nil, &pkgerrs.AuthError{Message: "failed to create authenticator", Err: err}
+		return nil, &AuthError{Message: "failed to create authenticator", Err: err}
 	}
 
 	// Validate that we can get a token before creating the client
 	_, err = authenticator.GetToken(ctx)
 	if err != nil {
-		return nil, &pkgerrs.AuthError{Message: "failed to authenticate", Err: err}
+		return nil, &AuthError{Message: "failed to authenticate", Err: err}
 	}
 
 	// Create internal HTTP client
@@ -370,10 +369,9 @@ func NewClientWithContext(ctx context.Context, config *Config) (*Reddit, error) 
 		)
 	}
 	if err != nil {
-		return nil, &pkgerrs.RequestError{
-			Message:   "failed to create HTTP client",
-			Operation: "create HTTP client",
-			Err:       err,
+		return nil, &ConfigError{
+			Field:   "HTTPClient",
+			Message: fmt.Sprintf("failed to create HTTP client: %v", err),
 		}
 	}
 
@@ -400,12 +398,12 @@ func NewClientWithContext(ctx context.Context, config *Config) (*Reddit, error) 
 func (r *Reddit) Me(ctx context.Context) (*types.AccountData, error) {
 	req, err := r.httpClient.NewRequest(ctx, http.MethodGet, MeURL, nil)
 	if err != nil {
-		return nil, &pkgerrs.RequestError{Operation: "create request", URL: MeURL, Err: err}
+		return nil, wrapDoError(err, "create request", MeURL)
 	}
 
 	// Add authentication headers
 	if err := r.addAuthHeaders(ctx, req); err != nil {
-		return nil, &pkgerrs.AuthError{Message: "failed to add auth headers", Err: err}
+		return nil, &AuthError{Message: "failed to add auth headers", Err: err}
 	}
 
 	var result types.Thing
@@ -416,10 +414,10 @@ func (r *Reddit) Me(ctx context.Context) (*types.AccountData, error) {
 			// Token invalidated, recreate request with fresh token
 			req, err = r.httpClient.NewRequest(ctx, http.MethodGet, MeURL, nil)
 			if err != nil {
-				return nil, &pkgerrs.RequestError{Operation: "create request", URL: MeURL, Err: err}
+				return nil, wrapDoError(err, "create request", MeURL)
 			}
 			if err := r.addAuthHeaders(ctx, req); err != nil {
-				return nil, &pkgerrs.AuthError{Message: "failed to add auth headers on retry", Err: err}
+				return nil, &AuthError{Message: "failed to add auth headers on retry", Err: err}
 			}
 			// Retry the request
 			err = r.httpClient.Do(req, &result)
@@ -432,12 +430,12 @@ func (r *Reddit) Me(ctx context.Context) (*types.AccountData, error) {
 	// Parse the account data
 	parsed, err := r.parser.ParseThing(ctx, &result)
 	if err != nil {
-		return nil, &pkgerrs.ParseError{Operation: "parse user info", Err: err}
+		return nil, &ParseError{Operation: "parse user info", Err: err}
 	}
 
 	account, ok := parsed.(*types.AccountData)
 	if !ok {
-		return nil, &pkgerrs.ParseError{Operation: "user info response", Err: fmt.Errorf("unexpected response type")}
+		return nil, &ParseError{Operation: "user info response", Err: fmt.Errorf("unexpected response type")}
 	}
 
 	return account, nil
@@ -464,18 +462,18 @@ func (r *Reddit) Me(ctx context.Context) (*types.AccountData, error) {
 func (r *Reddit) GetSubreddit(ctx context.Context, name string) (*types.SubredditData, error) {
 	// Validate subreddit name
 	if err := r.validator.ValidateSubredditName(name); err != nil {
-		return nil, err
+		return nil, translateValidationError(err)
 	}
 
 	path := SubPrefixURL + name + "/about"
 	req, err := r.httpClient.NewRequest(ctx, http.MethodGet, path, nil)
 	if err != nil {
-		return nil, &pkgerrs.RequestError{Operation: "create request", URL: path, Err: err}
+		return nil, wrapDoError(err, "create request", path)
 	}
 
 	// Add authentication headers
 	if err := r.addAuthHeaders(ctx, req); err != nil {
-		return nil, &pkgerrs.AuthError{Message: "failed to add auth headers", Err: err}
+		return nil, &AuthError{Message: "failed to add auth headers", Err: err}
 	}
 
 	var result types.Thing
@@ -486,10 +484,10 @@ func (r *Reddit) GetSubreddit(ctx context.Context, name string) (*types.Subreddi
 			// Token invalidated, recreate request with fresh token
 			req, err = r.httpClient.NewRequest(ctx, http.MethodGet, path, nil)
 			if err != nil {
-				return nil, &pkgerrs.RequestError{Operation: "create request", URL: path, Err: err}
+				return nil, wrapDoError(err, "create request", path)
 			}
 			if err := r.addAuthHeaders(ctx, req); err != nil {
-				return nil, &pkgerrs.AuthError{Message: "failed to add auth headers on retry", Err: err}
+				return nil, &AuthError{Message: "failed to add auth headers on retry", Err: err}
 			}
 			// Retry the request
 			err = r.httpClient.Do(req, &result)
@@ -502,12 +500,12 @@ func (r *Reddit) GetSubreddit(ctx context.Context, name string) (*types.Subreddi
 	// Parse the subreddit data
 	parsed, err := r.parser.ParseThing(ctx, &result)
 	if err != nil {
-		return nil, &pkgerrs.ParseError{Operation: "parse subreddit", Err: err}
+		return nil, &ParseError{Operation: "parse subreddit", Err: err}
 	}
 
 	subreddit, ok := parsed.(*types.SubredditData)
 	if !ok {
-		return nil, &pkgerrs.ParseError{Operation: "subreddit response", Err: fmt.Errorf("unexpected response type")}
+		return nil, &ParseError{Operation: "subreddit response", Err: fmt.Errorf("unexpected response type")}
 	}
 
 	return subreddit, nil
@@ -555,13 +553,13 @@ func (r *Reddit) getPosts(ctx context.Context, request *types.PostsRequest, sort
 		// Validate subreddit name if provided
 		if subreddit != "" {
 			if err := r.validator.ValidateSubredditName(subreddit); err != nil {
-				return nil, err
+				return nil, translateValidationError(err)
 			}
 		}
 
 		// Validate pagination parameters
 		if err := r.validator.ValidatePagination(pagination); err != nil {
-			return nil, err
+			return nil, translateValidationError(err)
 		}
 	}
 
@@ -575,12 +573,12 @@ func (r *Reddit) getPosts(ctx context.Context, request *types.PostsRequest, sort
 
 	httpReq, err := r.httpClient.NewRequest(ctx, http.MethodGet, path, nil, params)
 	if err != nil {
-		return nil, &pkgerrs.RequestError{Operation: "create request", URL: path, Err: err}
+		return nil, wrapDoError(err, "create request", path)
 	}
 
 	// Add authentication headers
 	if err := r.addAuthHeaders(ctx, httpReq); err != nil {
-		return nil, &pkgerrs.AuthError{Message: "failed to add auth headers", Err: err}
+		return nil, &AuthError{Message: "failed to add auth headers", Err: err}
 	}
 
 	var result types.Thing
@@ -591,7 +589,7 @@ func (r *Reddit) getPosts(ctx context.Context, request *types.PostsRequest, sort
 
 	posts, err := r.parser.ExtractPosts(ctx, &result)
 	if err != nil {
-		return nil, &pkgerrs.ParseError{Operation: "parse posts", Err: err}
+		return nil, &ParseError{Operation: "parse posts", Err: err}
 	}
 
 	var after, before string
@@ -632,25 +630,25 @@ func (r *Reddit) getPosts(ctx context.Context, request *types.PostsRequest, sort
 //   - The API request fails
 func (r *Reddit) GetComments(ctx context.Context, request *types.CommentsRequest) (*types.CommentsResponse, error) {
 	if request == nil {
-		return nil, &pkgerrs.ConfigError{Message: "comments request cannot be nil"}
+		return nil, &ConfigError{Message: "comments request cannot be nil"}
 	}
 	if request.Subreddit == "" || request.PostID == "" {
-		return nil, &pkgerrs.ConfigError{Message: "subreddit and postID are required"}
+		return nil, &ConfigError{Message: "subreddit and postID are required"}
 	}
 
 	// Validate subreddit name
 	if err := r.validator.ValidateSubredditName(request.Subreddit); err != nil {
-		return nil, err
+		return nil, translateValidationError(err)
 	}
 
 	// Validate post ID format
 	if err := r.validator.ValidatePostID(request.PostID); err != nil {
-		return nil, err
+		return nil, translateValidationError(err)
 	}
 
 	// Validate pagination parameters
 	if err := r.validator.ValidatePagination(&request.Pagination); err != nil {
-		return nil, err
+		return nil, translateValidationError(err)
 	}
 
 	path := SubPrefixURL + request.Subreddit + "/comments/" + request.PostID
@@ -659,12 +657,12 @@ func (r *Reddit) GetComments(ctx context.Context, request *types.CommentsRequest
 	params := buildPaginationParams(&request.Pagination)
 	httpReq, err := r.httpClient.NewRequest(ctx, http.MethodGet, path, nil, params)
 	if err != nil {
-		return nil, &pkgerrs.RequestError{Operation: "create request", URL: path, Err: err}
+		return nil, wrapDoError(err, "create request", path)
 	}
 
 	// Add authentication headers
 	if err := r.addAuthHeaders(ctx, httpReq); err != nil {
-		return nil, &pkgerrs.AuthError{Message: "failed to add auth headers", Err: err}
+		return nil, &AuthError{Message: "failed to add auth headers", Err: err}
 	}
 
 	result, err := r.httpClient.DoThingArray(httpReq)
@@ -675,7 +673,7 @@ func (r *Reddit) GetComments(ctx context.Context, request *types.CommentsRequest
 	// Parse the post and comments
 	extractResult, err := r.parser.ExtractPostAndComments(ctx, result)
 	if err != nil {
-		return nil, &pkgerrs.ParseError{Operation: "parse comments", Err: err}
+		return nil, &ParseError{Operation: "parse comments", Err: err}
 	}
 
 	// Note: post may be nil if Reddit only returned comments without the post
@@ -705,7 +703,7 @@ func (r *Reddit) GetCommentsMultiple(ctx context.Context, requests []*types.Comm
 
 	// Add overall limit check to prevent DoS
 	if len(requests) > MaxTotalCommentRequests {
-		return nil, &pkgerrs.ConfigError{
+		return nil, &ConfigError{
 			Message: fmt.Sprintf("too many requests (%d), maximum is %d", len(requests), MaxTotalCommentRequests),
 		}
 	}
@@ -713,35 +711,37 @@ func (r *Reddit) GetCommentsMultiple(ctx context.Context, requests []*types.Comm
 	// Validate all requests upfront before launching goroutines
 	for i, req := range requests {
 		if req == nil {
-			return nil, &pkgerrs.ConfigError{
+			return nil, &ConfigError{
 				Field:   fmt.Sprintf("requests[%d]", i),
 				Message: "request cannot be nil",
 			}
 		}
 		if req.Subreddit == "" {
-			return nil, &pkgerrs.ConfigError{
+			return nil, &ConfigError{
 				Field:   fmt.Sprintf("requests[%d].Subreddit", i),
 				Message: "subreddit is required",
 			}
 		}
 		if req.PostID == "" {
-			return nil, &pkgerrs.ConfigError{
+			return nil, &ConfigError{
 				Field:   fmt.Sprintf("requests[%d].PostID", i),
 				Message: "post ID is required",
 			}
 		}
 		// Validate subreddit name format
 		if err := r.validator.ValidateSubredditName(req.Subreddit); err != nil {
-			return nil, &pkgerrs.ConfigError{
+			translated := translateValidationError(err)
+			return nil, &ConfigError{
 				Field:   fmt.Sprintf("requests[%d].Subreddit", i),
-				Message: err.Error(),
+				Message: translated.Error(),
 			}
 		}
 		// Validate post ID format
 		if err := r.validator.ValidatePostID(req.PostID); err != nil {
-			return nil, &pkgerrs.ConfigError{
+			translated := translateValidationError(err)
+			return nil, &ConfigError{
 				Field:   fmt.Sprintf("requests[%d].PostID", i),
-				Message: err.Error(),
+				Message: translated.Error(),
 			}
 		}
 	}
@@ -861,7 +861,7 @@ func (r *Reddit) GetCommentsMultiple(ctx context.Context, requests []*types.Comm
 //   - The API request fails
 func (r *Reddit) GetMoreComments(ctx context.Context, request *types.MoreCommentsRequest) ([]*types.Comment, error) {
 	if request == nil {
-		return nil, &pkgerrs.ConfigError{Message: "more comments request cannot be nil"}
+		return nil, &ConfigError{Message: "more comments request cannot be nil"}
 	}
 	if len(request.CommentIDs) == 0 {
 		return []*types.Comment{}, nil
@@ -869,13 +869,13 @@ func (r *Reddit) GetMoreComments(ctx context.Context, request *types.MoreComment
 
 	// Validate comment IDs count
 	if err := r.validator.ValidateCommentIDs(request.CommentIDs); err != nil {
-		return nil, err
+		return nil, translateValidationError(err)
 	}
 
 	// Validate and normalize link ID (adds t3_ prefix if needed)
 	linkID, err := r.validator.ValidateLinkID(request.LinkID)
 	if err != nil {
-		return nil, err
+		return nil, translateValidationError(err)
 	}
 
 	// Build form data for POST request
@@ -897,12 +897,12 @@ func (r *Reddit) GetMoreComments(ctx context.Context, request *types.MoreComment
 	// Create POST request with form data
 	req, err := r.httpClient.NewRequest(ctx, http.MethodPost, MoreChildrenURL, strings.NewReader(formData.Encode()))
 	if err != nil {
-		return nil, &pkgerrs.RequestError{Operation: "create request", URL: MoreChildrenURL, Err: err}
+		return nil, wrapDoError(err, "create request", MoreChildrenURL)
 	}
 
 	// Add authentication headers
 	if err := r.addAuthHeaders(ctx, req); err != nil {
-		return nil, &pkgerrs.AuthError{Message: "failed to add auth headers", Err: err}
+		return nil, &AuthError{Message: "failed to add auth headers", Err: err}
 	}
 
 	// Set Content-Type header for form data
@@ -993,22 +993,151 @@ func (r *Reddit) handleAuthError(err error) bool {
 	return false
 }
 
-func mapAPIError(err error) (*pkgerrs.APIError, bool) {
-	var apiErr *pkgerrs.APIError
+func mapAPIError(err error) (*APIError, bool) {
+	// Check for public APIError first
+	var apiErr *APIError
 	if errors.As(err, &apiErr) {
 		return apiErr, true
 	}
+
+	// Check for internal client.APIError and translate it
+	var clientAPIErr *client.APIError
+	if errors.As(err, &clientAPIErr) {
+		return &APIError{
+			StatusCode: clientAPIErr.StatusCode,
+			ErrorCode:  clientAPIErr.ErrorCode,
+			Message:    clientAPIErr.Message,
+			Details:    clientAPIErr.Details,
+		}, true
+	}
+
 	return nil, false
 }
 
-// wrapDoError wraps errors from HTTP client Do operations, preserving APIErrors
-// and wrapping other errors as RequestErrors with context.
+// wrapDoError wraps errors from HTTP client Do operations, preserving APIErrors,
+// translating internal errors to public types, and wrapping unknown errors as ParseError.
 func wrapDoError(err error, operation, url string) error {
 	if err == nil {
 		return nil
 	}
+
+	// Preserve APIError as-is (already public)
 	if apiErr, ok := mapAPIError(err); ok {
 		return apiErr
 	}
-	return &pkgerrs.RequestError{Operation: operation, URL: url, Err: err}
+
+	// Try to translate internal client errors
+	translated := translateClientError(err)
+	if translated != err {
+		// Translation occurred, return translated error
+		return translated
+	}
+
+	// Fallback: wrap as ParseError with operation context
+	return &ParseError{
+		Operation: operation,
+		Err:       err,
+	}
+}
+
+// translateValidationError converts internal validator errors to public ValidationError.
+func translateValidationError(err error) error {
+	if err == nil {
+		return nil
+	}
+
+	var valErr *validatorpkg.ValidationError
+	if errors.As(err, &valErr) {
+		return &ValidationError{
+			Field:  valErr.Field,
+			Value:  valErr.Value,
+			Reason: valErr.Reason,
+			Err:    valErr.Err,
+		}
+	}
+
+	// If not a ValidationError, wrap as generic ValidationError
+	return &ValidationError{
+		Field:  "unknown",
+		Reason: err.Error(),
+		Err:    err,
+	}
+}
+
+// translateClientError converts internal client errors to appropriate public error types.
+// Maps:
+//   - APIError → APIError (translated to public)
+//   - RequestBuildError → ConfigError or ValidationError
+//   - RateLimitError → RateLimitError (already public)
+//   - TransportError → NetworkError
+//   - ResponseReadError → NetworkError
+//   - DecodeError → ParseError
+//   - Other errors → passed through or wrapped as ParseError
+func translateClientError(err error) error {
+	if err == nil {
+		return nil
+	}
+
+	// Check for APIError - translate to public
+	var apiErr *client.APIError
+	if errors.As(err, &apiErr) {
+		return &APIError{
+			StatusCode: apiErr.StatusCode,
+			ErrorCode:  apiErr.ErrorCode,
+			Message:    apiErr.Message,
+			Details:    apiErr.Details,
+		}
+	}
+
+	// Check for RateLimitError - promote to public
+	var rateLimitErr *client.RateLimitError
+	if errors.As(err, &rateLimitErr) {
+		return &RateLimitError{
+			Reason:       rateLimitErr.Reason,
+			WaitDuration: rateLimitErr.WaitDuration,
+			Err:          rateLimitErr.Err,
+		}
+	}
+
+	// Check for TransportError - translate to NetworkError
+	var transportErr *client.TransportError
+	if errors.As(err, &transportErr) {
+		return &NetworkError{
+			Method:   transportErr.Method,
+			URL:      transportErr.URL,
+			Duration: transportErr.Duration,
+			Err:      transportErr.Err,
+		}
+	}
+
+	// Check for ResponseReadError - translate to NetworkError
+	var readErr *client.ResponseReadError
+	if errors.As(err, &readErr) {
+		return &NetworkError{
+			Method: "READ",
+			URL:    readErr.URL,
+			Err:    readErr.Err,
+		}
+	}
+
+	// Check for DecodeError - translate to ParseError
+	var decodeErr *client.DecodeError
+	if errors.As(err, &decodeErr) {
+		return &ParseError{
+			Operation: decodeErr.Operation,
+			Err:       decodeErr.Err,
+		}
+	}
+
+	// Check for RequestBuildError - translate to ConfigError
+	var buildErr *client.RequestBuildError
+	if errors.As(err, &buildErr) {
+		return &ConfigError{
+			Field:   buildErr.Operation,
+			Message: fmt.Sprintf("request build failed for %s: %v", buildErr.URL, buildErr.Err),
+		}
+	}
+
+	// Default: return as-is (could be APIError or other)
+	return err
 }

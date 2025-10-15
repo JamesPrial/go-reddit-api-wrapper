@@ -4,9 +4,28 @@ import (
 	"errors"
 	"testing"
 
-	pkgerrs "github.com/jamesprial/go-reddit-api-wrapper/pkg/errors"
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 )
+
+// testConfigError is a mock error type for testing
+type testConfigError struct {
+	Field   string
+	Message string
+}
+
+func (e *testConfigError) Error() string {
+	return e.Message
+}
+
+// testAPIError is a mock error type for testing
+type testAPIError struct {
+	StatusCode int
+	Message    string
+}
+
+func (e *testAPIError) Error() string {
+	return e.Message
+}
 
 // TestAssertNoError verifies AssertNoError helper works correctly
 func TestAssertNoError(t *testing.T) {
@@ -22,8 +41,8 @@ func TestAssertError(t *testing.T) {
 
 // TestAssertErrorType verifies error type checking
 func TestAssertErrorType(t *testing.T) {
-	err := &pkgerrs.ConfigError{Field: "test", Message: "test error"}
-	var configErr *pkgerrs.ConfigError
+	err := &testConfigError{Field: "test", Message: "test error"}
+	var configErr *testConfigError
 	AssertErrorType(t, err, &configErr)
 
 	// Verify the error was properly unwrapped
@@ -34,7 +53,7 @@ func TestAssertErrorType(t *testing.T) {
 
 // TestAssertAPIError verifies API error checking
 func TestAssertAPIError(t *testing.T) {
-	err := &pkgerrs.APIError{StatusCode: 404, Message: "Not Found"}
+	err := &testAPIError{StatusCode: 404, Message: "Not Found"}
 	AssertAPIError(t, err, 404)
 }
 

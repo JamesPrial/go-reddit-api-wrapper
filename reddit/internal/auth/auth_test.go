@@ -12,7 +12,6 @@ import (
 	"strings"
 	"testing"
 
-	pkgerrs "github.com/jamesprial/go-reddit-api-wrapper/pkg/errors"
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/testutil"
 )
 
@@ -139,8 +138,8 @@ func TestNewAuthenticator(t *testing.T) {
 			wantErr:   true,
 			checkFunc: func(t *testing.T, a *Authenticator, err error) {
 				t.Helper()
-				var authErr *pkgerrs.AuthError
-				testutil.AssertErrorType(t, err, &authErr)
+				var configErr *ConfigError
+				testutil.AssertErrorType(t, err, &configErr)
 			},
 		},
 		{
@@ -270,12 +269,12 @@ func TestAuthenticator_GetToken(t *testing.T) {
 			wantErr:              true,
 			checkErr: func(t *testing.T, err error) {
 				t.Helper()
-				var authErr *pkgerrs.AuthError
-				testutil.AssertErrorType(t, err, &authErr)
-				if authErr.StatusCode != http.StatusUnauthorized {
-					t.Errorf("expected status code %d, got %d", http.StatusUnauthorized, authErr.StatusCode)
+				var tokenErr *TokenError
+				testutil.AssertErrorType(t, err, &tokenErr)
+				if tokenErr.HTTPStatus != http.StatusUnauthorized {
+					t.Errorf("expected status code %d, got %d", http.StatusUnauthorized, tokenErr.HTTPStatus)
 				}
-				testutil.AssertStringContains(t, authErr.Body, "invalid_client")
+				testutil.AssertStringContains(t, tokenErr.Body, "invalid_client")
 			},
 		},
 		{
@@ -290,12 +289,12 @@ func TestAuthenticator_GetToken(t *testing.T) {
 			wantErr:              true,
 			checkErr: func(t *testing.T, err error) {
 				t.Helper()
-				var authErr *pkgerrs.AuthError
-				testutil.AssertErrorType(t, err, &authErr)
-				if authErr.StatusCode != http.StatusUnauthorized {
-					t.Errorf("expected status code %d, got %d", http.StatusUnauthorized, authErr.StatusCode)
+				var tokenErr *TokenError
+				testutil.AssertErrorType(t, err, &tokenErr)
+				if tokenErr.HTTPStatus != http.StatusUnauthorized {
+					t.Errorf("expected status code %d, got %d", http.StatusUnauthorized, tokenErr.HTTPStatus)
 				}
-				testutil.AssertStringContains(t, authErr.Body, "unauthorized")
+				testutil.AssertStringContains(t, tokenErr.Body, "unauthorized")
 			},
 		},
 		{
@@ -308,9 +307,9 @@ func TestAuthenticator_GetToken(t *testing.T) {
 			wantErr:              true,
 			checkErr: func(t *testing.T, err error) {
 				t.Helper()
-				var authErr *pkgerrs.AuthError
-				testutil.AssertErrorType(t, err, &authErr)
-				if authErr.Err == nil {
+				var tokenErr *TokenError
+				testutil.AssertErrorType(t, err, &tokenErr)
+				if errors.Unwrap(tokenErr) == nil {
 					t.Error("expected underlying network error, but was nil")
 				}
 			},
@@ -327,8 +326,8 @@ func TestAuthenticator_GetToken(t *testing.T) {
 			wantErr:              true,
 			checkErr: func(t *testing.T, err error) {
 				t.Helper()
-				var authErr *pkgerrs.AuthError
-				testutil.AssertErrorType(t, err, &authErr)
+				var tokenErr *TokenError
+				testutil.AssertErrorType(t, err, &tokenErr)
 				var jsonErr *json.SyntaxError
 				if !errors.As(err, &jsonErr) {
 					t.Errorf("expected underlying error to be json.SyntaxError, got %T", errors.Unwrap(err))
@@ -347,8 +346,8 @@ func TestAuthenticator_GetToken(t *testing.T) {
 			wantErr:              true,
 			checkErr: func(t *testing.T, err error) {
 				t.Helper()
-				var authErr *pkgerrs.AuthError
-				testutil.AssertErrorType(t, err, &authErr)
+				var tokenErr *TokenError
+				testutil.AssertErrorType(t, err, &tokenErr)
 				testutil.AssertStringContains(t, err.Error(), "access token was empty")
 			},
 		},
@@ -364,8 +363,8 @@ func TestAuthenticator_GetToken(t *testing.T) {
 			wantErr:              true,
 			checkErr: func(t *testing.T, err error) {
 				t.Helper()
-				var authErr *pkgerrs.AuthError
-				testutil.AssertErrorType(t, err, &authErr)
+				var tokenErr *TokenError
+				testutil.AssertErrorType(t, err, &tokenErr)
 				testutil.AssertStringContains(t, err.Error(), "cannot be negative")
 			},
 		},
@@ -381,8 +380,8 @@ func TestAuthenticator_GetToken(t *testing.T) {
 			wantErr:              true,
 			checkErr: func(t *testing.T, err error) {
 				t.Helper()
-				var authErr *pkgerrs.AuthError
-				testutil.AssertErrorType(t, err, &authErr)
+				var tokenErr *TokenError
+				testutil.AssertErrorType(t, err, &tokenErr)
 				testutil.AssertStringContains(t, err.Error(), "exceeds maximum")
 			},
 		},
@@ -398,8 +397,8 @@ func TestAuthenticator_GetToken(t *testing.T) {
 			wantErr:              true,
 			checkErr: func(t *testing.T, err error) {
 				t.Helper()
-				var authErr *pkgerrs.AuthError
-				testutil.AssertErrorType(t, err, &authErr)
+				var tokenErr *TokenError
+				testutil.AssertErrorType(t, err, &tokenErr)
 				testutil.AssertStringContains(t, err.Error(), "exceeded max size")
 			},
 		},
@@ -480,50 +479,25 @@ func TestAuthenticator_GetToken(t *testing.T) {
 	})
 }
 
-func TestAuthError_Error(t *testing.T) {
+func TestConfigError_Error(t *testing.T) {
 	t.Parallel()
 
-	testErr := errors.New("underlying error")
+	testErr := errors.New("parse error")
 
 	tests := []struct {
 		name     string
-		err      pkgerrs.AuthError
+		err      ConfigError
 		expected string
 	}{
 		{
-			name:     "full error with status, body, and underlying error",
-			err:      pkgerrs.AuthError{StatusCode: 401, Body: `{"error":"invalid"}`, Err: testErr},
-			expected: `auth error: status code 401, body: "{\"error\":\"invalid\"}", err: underlying error`,
+			name:     "with field, value, and error",
+			err:      ConfigError{Field: "base_url", Value: "::invalid", Err: testErr},
+			expected: "config error for field 'base_url' with value '::invalid': parse error",
 		},
 		{
-			name:     "status and body only",
-			err:      pkgerrs.AuthError{StatusCode: 400, Body: "bad request"},
-			expected: `auth error: status code 400, body: "bad request"`,
-		},
-		{
-			name:     "status and underlying error",
-			err:      pkgerrs.AuthError{StatusCode: 500, Err: testErr},
-			expected: `auth error: status code 500, err: underlying error`,
-		},
-		{
-			name:     "status code only",
-			err:      pkgerrs.AuthError{StatusCode: 404},
-			expected: "auth error: status code 404",
-		},
-		{
-			name:     "body only",
-			err:      pkgerrs.AuthError{Body: "some body"},
-			expected: `auth error, body: "some body"`,
-		},
-		{
-			name:     "underlying error only",
-			err:      pkgerrs.AuthError{Err: testErr},
-			expected: "auth error, err: underlying error",
-		},
-		{
-			name:     "empty error with no fields",
-			err:      pkgerrs.AuthError{},
-			expected: "auth error",
+			name:     "with field and error only",
+			err:      ConfigError{Field: "token_path", Err: testErr},
+			expected: "config error for field 'token_path': parse error",
 		},
 	}
 
@@ -537,35 +511,94 @@ func TestAuthError_Error(t *testing.T) {
 	}
 }
 
-func TestAuthError_Unwrap(t *testing.T) {
+func TestConfigError_Unwrap(t *testing.T) {
 	t.Parallel()
 
-	t.Run("unwraps nested error correctly", func(t *testing.T) {
-		t.Parallel()
+	baseErr := io.EOF
+	configErr := &ConfigError{Field: "test", Err: fmt.Errorf("wrapped: %w", baseErr)}
 
-		baseErr := io.EOF
-		authErr := &pkgerrs.AuthError{Err: fmt.Errorf("wrapped: %w", baseErr)}
+	if !errors.Is(configErr, baseErr) {
+		t.Errorf("errors.Is failed, expected to find %v in %v", baseErr, configErr)
+	}
 
-		if !errors.Is(authErr, baseErr) {
-			t.Errorf("errors.Is failed, expected to find %v in %v", baseErr, authErr)
-		}
+	unwrapped := errors.Unwrap(configErr)
+	if unwrapped == nil {
+		t.Fatal("Unwrap() returned nil")
+	}
 
-		unwrapped := errors.Unwrap(authErr)
-		if unwrapped == nil {
-			t.Fatal("Unwrap() returned nil")
-		}
+	if !errors.Is(unwrapped, baseErr) {
+		t.Errorf("unwrapped error is not the base error")
+	}
+}
 
-		if !errors.Is(unwrapped, baseErr) {
-			t.Errorf("unwrapped error is not the base error")
-		}
-	})
+func TestTokenError_Error(t *testing.T) {
+	t.Parallel()
 
-	t.Run("returns nil for error with no inner Err", func(t *testing.T) {
-		t.Parallel()
+	testErr := errors.New("network error")
 
-		emptyErr := &pkgerrs.AuthError{}
-		if errors.Unwrap(emptyErr) != nil {
-			t.Error("Unwrap should return nil for an error with no inner Err")
-		}
-	})
+	tests := []struct {
+		name     string
+		err      TokenError
+		expected string
+	}{
+		{
+			name:     "with HTTP status, body, and error",
+			err:      TokenError{Operation: "fetch", HTTPStatus: 401, Body: `{"error":"invalid"}`, Err: testErr},
+			expected: `token fetch error: status 401, body: "{\"error\":\"invalid\"}", err: network error`,
+		},
+		{
+			name:     "with HTTP status and body only",
+			err:      TokenError{Operation: "fetch", HTTPStatus: 400, Body: "bad request"},
+			expected: `token fetch error: status 400, body: "bad request"`,
+		},
+		{
+			name:     "with HTTP status and error",
+			err:      TokenError{Operation: "refresh", HTTPStatus: 500, Err: testErr},
+			expected: "token refresh error: status 500, err: network error",
+		},
+		{
+			name:     "with HTTP status only",
+			err:      TokenError{Operation: "fetch", HTTPStatus: 404},
+			expected: "token fetch error: status 404",
+		},
+		{
+			name:     "without HTTP status (network error before request)",
+			err:      TokenError{Operation: "fetch", Err: testErr},
+			expected: "token fetch error, err: network error",
+		},
+		{
+			name:     "minimal error",
+			err:      TokenError{Operation: "fetch"},
+			expected: "token fetch error",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := tt.err.Error(); got != tt.expected {
+				t.Errorf("Error() = %q, want %q", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestTokenError_Unwrap(t *testing.T) {
+	t.Parallel()
+
+	baseErr := io.EOF
+	tokenErr := &TokenError{Operation: "fetch", Err: fmt.Errorf("wrapped: %w", baseErr)}
+
+	if !errors.Is(tokenErr, baseErr) {
+		t.Errorf("errors.Is failed, expected to find %v in %v", baseErr, tokenErr)
+	}
+
+	unwrapped := errors.Unwrap(tokenErr)
+	if unwrapped == nil {
+		t.Fatal("Unwrap() returned nil")
+	}
+
+	if !errors.Is(unwrapped, baseErr) {
+		t.Errorf("unwrapped error is not the base error")
+	}
 }
