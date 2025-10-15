@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"testing"
 
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
@@ -387,4 +388,381 @@ func TestCommentClosureTable(t *testing.T) {
 		require.True(t, found, "expected closure entry (%s, %s, %d) not found",
 			expected.ancestor, expected.descendant, expected.depth)
 	}
+}
+
+// TestUpsertComments_DuplicateIDInBatch verifies that duplicate comment IDs in a batch are rejected.
+func TestUpsertComments_DuplicateIDInBatch(t *testing.T) {
+	store := NewTestDB(t)
+	ctx := context.Background()
+
+	// Insert a post
+	post := testutil.BuildPost("post1", "test")
+	err := store.UpsertPost(ctx, post)
+	require.NoError(t, err)
+
+	// Create comments with duplicate ID
+	comments := []*types.Comment{
+		testutil.BuildComment("c1", "post1", "", 0),
+		testutil.BuildComment("c2", "post1", "", 0),
+		testutil.BuildComment("c1", "post1", "", 0), // Duplicate ID
+	}
+
+	// Attempt batch insert - should fail
+	err = store.UpsertComments(ctx, comments)
+	require.Error(t, err, "should reject duplicate comment IDs in batch")
+	require.Contains(t, err.Error(), "duplicate comment ID", "error should mention duplicate ID")
+	require.Contains(t, err.Error(), "c1", "error should identify the duplicate ID")
+
+	// Verify no comments were inserted (transaction rollback)
+	retrieved, err := store.GetComment(ctx, "c1")
+	require.Error(t, err)
+	require.ErrorIs(t, err, sql.ErrNoRows, "no comments should be inserted on duplicate error")
+	require.Nil(t, retrieved)
+
+	t.Run("duplicate ID with different parents", func(t *testing.T) {
+		// Insert a parent comment first
+		parentComment := testutil.BuildComment("c_parent", "post1", "", 0)
+		err := store.UpsertComments(ctx, []*types.Comment{parentComment})
+		require.NoError(t, err)
+
+		// Try to insert two comments with the SAME ID but DIFFERENT parents
+		duplicateComment1 := testutil.BuildComment("c_duplicate", "post1", "", 0)
+		duplicateComment1.ParentID = "t3_post1" // Top-level (parent is post)
+
+		duplicateComment2 := testutil.BuildComment("c_duplicate", "post1", "c_parent", 1)
+		duplicateComment2.ParentID = "t1_c_parent" // Child of c_parent
+
+		err = store.UpsertComments(ctx, []*types.Comment{duplicateComment1, duplicateComment2})
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "duplicate comment ID")
+		require.Contains(t, err.Error(), "c_duplicate")
+	})
+}
+
+// TestUpsertComments_SelfReference verifies that self-referencing comments are rejected.
+// Tests both cases: ParentID == ID and ParentID == "t1_" + ID
+func TestUpsertComments_SelfReference(t *testing.T) {
+	store := NewTestDB(t)
+	ctx := context.Background()
+
+	// Insert a post
+	post := testutil.BuildPost("post1", "test")
+	err := store.UpsertPost(ctx, post)
+	require.NoError(t, err)
+
+	t.Run("self-reference without prefix", func(t *testing.T) {
+		// Create a comment that references itself
+		comment := testutil.BuildComment("c1", "post1", "", 0)
+		comment.ParentID = "c1" // Self-reference
+
+		err := store.UpsertComments(ctx, []*types.Comment{comment})
+		require.Error(t, err, "should reject self-referencing comment")
+		require.Contains(t, err.Error(), "references itself as parent", "error should mention self-reference")
+		require.Contains(t, err.Error(), "c1", "error should identify the comment")
+	})
+
+	t.Run("self-reference with t1 prefix", func(t *testing.T) {
+		// Create a comment that references itself with t1_ prefix
+		comment := testutil.BuildComment("c2", "post1", "", 0)
+		comment.ParentID = "t1_c2" // Self-reference with prefix
+
+		err := store.UpsertComments(ctx, []*types.Comment{comment})
+		require.Error(t, err, "should reject self-referencing comment with prefix")
+		require.Contains(t, err.Error(), "references itself as parent", "error should mention self-reference")
+		require.Contains(t, err.Error(), "c2", "error should identify the comment")
+	})
+
+	t.Run("valid parent reference for comparison", func(t *testing.T) {
+		// Insert a valid comment first
+		validComment1 := testutil.BuildComment("c3", "post1", "", 0)
+		err := store.UpsertComments(ctx, []*types.Comment{validComment1})
+		require.NoError(t, err, "valid top-level comment should succeed")
+
+		// Insert a child that properly references the parent
+		validComment2 := testutil.BuildComment("c4", "post1", "c3", 1)
+		err = store.UpsertComments(ctx, []*types.Comment{validComment2})
+		require.NoError(t, err, "valid child comment should succeed")
+	})
+}
+
+// TestUpsertComments_EmptyParentID verifies that comments with empty ParentID are rejected.
+func TestUpsertComments_EmptyParentID(t *testing.T) {
+	store := NewTestDB(t)
+	ctx := context.Background()
+
+	// Insert a post
+	post := testutil.BuildPost("post1", "test")
+	err := store.UpsertPost(ctx, post)
+	require.NoError(t, err)
+
+	t.Run("empty string", func(t *testing.T) {
+		// Create a comment with empty ParentID
+		comment := testutil.BuildComment("c1", "post1", "", 0)
+		comment.ParentID = "" // Empty parent ID
+
+		err := store.UpsertComments(ctx, []*types.Comment{comment})
+		require.Error(t, err, "should reject comment with empty ParentID")
+		require.Contains(t, err.Error(), "empty parent_id", "error should mention empty parent_id")
+		require.Contains(t, err.Error(), "c1", "error should identify the comment")
+
+		// Verify comment was not inserted (transaction rollback)
+		retrieved, err := store.GetComment(ctx, "c1")
+		require.Error(t, err)
+		require.ErrorIs(t, err, sql.ErrNoRows, "comment should not be inserted on validation error")
+		require.Nil(t, retrieved)
+	})
+
+	t.Run("whitespace only", func(t *testing.T) {
+		// Create a comment with whitespace-only ParentID
+		comment := testutil.BuildComment("c2", "post1", "", 0)
+		comment.ParentID = "   " // Whitespace-only parent ID
+
+		err := store.UpsertComments(ctx, []*types.Comment{comment})
+		require.Error(t, err, "should reject comment with whitespace-only ParentID")
+		require.Contains(t, err.Error(), "empty parent_id", "error should mention empty parent_id")
+		require.Contains(t, err.Error(), "c2", "error should identify the comment")
+
+		// Verify comment was not inserted (transaction rollback)
+		retrieved, err := store.GetComment(ctx, "c2")
+		require.Error(t, err)
+		require.ErrorIs(t, err, sql.ErrNoRows, "comment should not be inserted on validation error")
+		require.Nil(t, retrieved)
+	})
+}
+
+// TestUpsertComments_MalformedParentID verifies that malformed parent IDs are rejected.
+// Specifically, IDs like "t1_" with no actual ID after the prefix.
+func TestUpsertComments_MalformedParentID(t *testing.T) {
+	store := NewTestDB(t)
+	ctx := context.Background()
+
+	// Insert a post
+	post := testutil.BuildPost("post1", "test")
+	err := store.UpsertPost(ctx, post)
+	require.NoError(t, err)
+
+	// Create a comment with malformed ParentID (just the prefix, no ID)
+	comment := testutil.BuildComment("c1", "post1", "", 0)
+	comment.ParentID = "t1_" // Malformed: prefix with no ID
+
+	err = store.UpsertComments(ctx, []*types.Comment{comment})
+	require.Error(t, err, "should reject comment with malformed ParentID")
+	require.Contains(t, err.Error(), "malformed parent_id", "error should mention malformed parent_id")
+	require.Contains(t, err.Error(), "t1_", "error should show the malformed ID")
+	require.Contains(t, err.Error(), "c1", "error should identify the comment")
+	require.Contains(t, err.Error(), "empty after prefix", "error should explain the issue")
+
+	// Verify comment was not inserted (transaction rollback)
+	retrieved, err := store.GetComment(ctx, "c1")
+	require.Error(t, err)
+	require.ErrorIs(t, err, sql.ErrNoRows, "comment should not be inserted on validation error")
+	require.Nil(t, retrieved)
+}
+
+// TestUpsertComments_CyclicGraph verifies that cyclic comment dependencies are detected.
+// Creates a cycle: A→B→C→A
+func TestUpsertComments_CyclicGraph(t *testing.T) {
+	store := NewTestDB(t)
+	ctx := context.Background()
+
+	// Insert a post
+	post := testutil.BuildPost("post1", "test")
+	err := store.UpsertPost(ctx, post)
+	require.NoError(t, err)
+
+	// Create a cyclic dependency: c1 → c2 → c3 → c1
+	// Note: In a real scenario, this is impossible with Reddit's data model,
+	// but we're testing the validation logic's robustness.
+	comment1 := testutil.BuildComment("c1", "post1", "", 0)
+	comment1.ParentID = "t1_c3" // c1 depends on c3
+
+	comment2 := testutil.BuildComment("c2", "post1", "c1", 1)
+	comment2.ParentID = "t1_c1" // c2 depends on c1
+
+	comment3 := testutil.BuildComment("c3", "post1", "c2", 2)
+	comment3.ParentID = "t1_c2" // c3 depends on c2, creating cycle
+
+	comments := []*types.Comment{comment1, comment2, comment3}
+
+	// Attempt batch insert - should fail due to cycle detection
+	err = store.UpsertComments(ctx, comments)
+	require.Error(t, err, "should reject cyclic comment dependencies")
+	require.Contains(t, err.Error(), "unreachable", "error should mention unreachable node")
+	require.Contains(t, err.Error(), "cycle", "error should mention cycle as possible cause")
+
+	// Verify at least one comment ID is mentioned in the error
+	commentIDMentioned := false
+	for _, c := range comments {
+		if strings.Contains(err.Error(), c.ID) {
+			commentIDMentioned = true
+			break
+		}
+	}
+	require.True(t, commentIDMentioned, "error should identify at least one unreachable comment")
+
+	// Verify no comments were inserted (transaction rollback)
+	for _, c := range comments {
+		retrieved, err := store.GetComment(ctx, c.ID)
+		require.Error(t, err)
+		require.ErrorIs(t, err, sql.ErrNoRows, "no comments should be inserted on cycle error")
+		require.Nil(t, retrieved)
+	}
+}
+
+// TestUpsertComments_OrphanedCommentInBatch verifies that orphaned comments are detected.
+// An orphaned comment has a parent that doesn't exist in the batch or database.
+func TestUpsertComments_OrphanedCommentInBatch(t *testing.T) {
+	store := NewTestDB(t)
+	ctx := context.Background()
+
+	// Insert a post
+	post := testutil.BuildPost("post1", "test")
+	err := store.UpsertPost(ctx, post)
+	require.NoError(t, err)
+
+	t.Run("parent not in batch or database", func(t *testing.T) {
+		// Create a comment that references a non-existent parent
+		orphanComment := testutil.BuildComment("c1", "post1", "nonexistent", 1)
+
+		err := store.UpsertComments(ctx, []*types.Comment{orphanComment})
+		require.Error(t, err, "should reject orphaned comment")
+		require.Contains(t, err.Error(), "not in batch and not in database", "error should explain parent is missing")
+		require.Contains(t, err.Error(), "nonexistent", "error should identify the missing parent")
+
+		// Verify comment was not inserted (transaction rollback)
+		retrieved, err := store.GetComment(ctx, "c1")
+		require.Error(t, err)
+		require.ErrorIs(t, err, sql.ErrNoRows, "orphaned comment should not be inserted")
+		require.Nil(t, retrieved)
+	})
+
+	t.Run("parent exists in database - should succeed", func(t *testing.T) {
+		// First insert a parent comment
+		parentComment := testutil.BuildComment("c2", "post1", "", 0)
+		err := store.UpsertComments(ctx, []*types.Comment{parentComment})
+		require.NoError(t, err, "parent comment should be inserted successfully")
+
+		// Now insert a child that references the existing parent
+		childComment := testutil.BuildComment("c3", "post1", "c2", 1)
+		err = store.UpsertComments(ctx, []*types.Comment{childComment})
+		require.NoError(t, err, "child with existing parent should succeed")
+
+		// Verify both comments exist
+		retrievedParent, err := store.GetComment(ctx, "c2")
+		require.NoError(t, err)
+		require.NotNil(t, retrievedParent)
+
+		retrievedChild, err := store.GetComment(ctx, "c3")
+		require.NoError(t, err)
+		require.NotNil(t, retrievedChild)
+	})
+
+	t.Run("multiple orphaned comments in batch", func(t *testing.T) {
+		// Create multiple comments with non-existent parents
+		comments := []*types.Comment{
+			testutil.BuildComment("c4", "post1", "", 0),         // Valid top-level
+			testutil.BuildComment("c5", "post1", "missing1", 1), // Orphaned
+		}
+
+		err := store.UpsertComments(ctx, comments)
+		require.Error(t, err, "should reject batch with orphaned comment")
+		require.Contains(t, err.Error(), "not in batch and not in database", "error should explain parent is missing")
+
+		// Verify no comments were inserted (transaction rollback)
+		for _, c := range comments {
+			retrieved, err := store.GetComment(ctx, c.ID)
+			require.Error(t, err)
+			require.ErrorIs(t, err, sql.ErrNoRows, "no comments should be inserted when batch contains orphan")
+			require.Nil(t, retrieved)
+		}
+	})
+
+	t.Run("orphan with explicit t1_ prefix", func(t *testing.T) {
+		orphanComment := testutil.BuildComment("c_orphan", "post1", "", 0)
+		orphanComment.ParentID = "t1_nonexistent" // Explicit t1_ prefix
+
+		err := store.UpsertComments(ctx, []*types.Comment{orphanComment})
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "not in batch and not in database")
+	})
+}
+
+// TestUpsertComments_ParentMissingClosureEntries verifies detection of corrupted closure table.
+// Tests the scenario where a parent comment exists but has no closure entries.
+func TestUpsertComments_ParentMissingClosureEntries(t *testing.T) {
+	store := NewTestDB(t)
+	ctx := context.Background()
+
+	// Insert a post
+	post := testutil.BuildPost("post1", "test")
+	err := store.UpsertPost(ctx, post)
+	require.NoError(t, err)
+
+	// Manually insert a comment WITHOUT closure entries to simulate corruption.
+	// WARNING: This raw SQL bypasses validation and is brittle.
+	// The 31 parameters MUST match the exact column order in migrations/001_initial_schema.sql.
+	// If the schema changes, this test will break and must be updated.
+	// Columns: id, name, score, ups, downs, likes, created, created_utc,
+	//          approved_by, author, author_flair_css_class, author_flair_text, banned_by,
+	//          body, body_html, edited_is_edited, edited_timestamp, gilded,
+	//          link_author, link_id, link_title, link_url, num_reports, parent_id,
+	//          saved, score_hidden, subreddit, subreddit_id, distinguished, depth, post_id
+	insertQuery := `
+		INSERT INTO comments (
+			id, name, score, ups, downs, likes, created, created_utc,
+			approved_by, author, author_flair_css_class, author_flair_text, banned_by,
+			body, body_html, edited_is_edited, edited_timestamp, gilded,
+			link_author, link_id, link_title, link_url, num_reports, parent_id,
+			saved, score_hidden, subreddit, subreddit_id, distinguished, depth, post_id, fetched_at
+		) VALUES (
+			?, ?, ?, ?, ?, ?, ?, ?,
+			?, ?, ?, ?, ?,
+			?, ?, ?, ?, ?,
+			?, ?, ?, ?, ?, ?,
+			?, ?, ?, ?, ?, ?, ?, strftime('%s', 'now')
+		)
+	`
+
+	// Insert a corrupted parent comment (depth 0, but no closure entries)
+	_, err = store.db.ExecContext(ctx, insertQuery,
+		"corrupted", "t1_corrupted", 10, 10, 0, nil, 1234567890, 1234567890,
+		nil, "testuser", nil, nil, nil,
+		"corrupted comment", "<p>corrupted comment</p>", 0, 0, 0,
+		"testuser", "t3_post1", "Test Post", "https://reddit.com/test", nil, "t3_post1",
+		0, 0, "test", "t5_2qh1i", nil, 0, "post1",
+	)
+	require.NoError(t, err, "failed to insert corrupted comment")
+
+	// Verify the corrupted comment exists in the database
+	var exists bool
+	err = store.db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM comments WHERE id = ?)", "corrupted").Scan(&exists)
+	require.NoError(t, err)
+	require.True(t, exists, "corrupted comment should exist in database")
+
+	// Verify it has NO closure entries (simulating corruption)
+	var closureCount int
+	err = store.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM comment_closures WHERE descendant = ?", "corrupted").Scan(&closureCount)
+	require.NoError(t, err)
+	require.Equal(t, 0, closureCount, "corrupted comment should have no closure entries")
+
+	// Now try to insert a child comment that references the corrupted parent
+	childComment := testutil.BuildComment("c1", "post1", "corrupted", 1)
+
+	err = store.UpsertComments(ctx, []*types.Comment{childComment})
+	require.Error(t, err, "should reject child when parent has no closure entries")
+	require.Contains(t, err.Error(), "exists but has no closure entries", "error should mention missing closure entries")
+	require.Contains(t, err.Error(), "corrupted", "error should identify the corrupted parent")
+	require.Contains(t, err.Error(), "closure table corrupted", "error should mention table corruption")
+
+	// Verify child comment was not inserted (transaction rollback)
+	retrieved, err := store.GetComment(ctx, "c1")
+	require.Error(t, err)
+	require.ErrorIs(t, err, sql.ErrNoRows, "child comment should not be inserted when parent is corrupted")
+	require.Nil(t, retrieved)
+
+	// Verify the corrupted parent still exists (we didn't delete it)
+	retrievedParent, err := store.GetComment(ctx, "corrupted")
+	require.NoError(t, err, "corrupted parent should still exist in database")
+	require.NotNil(t, retrievedParent)
+	require.Equal(t, "corrupted", retrievedParent.ID)
 }

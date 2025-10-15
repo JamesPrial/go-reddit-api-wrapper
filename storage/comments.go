@@ -4,11 +4,20 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 )
+
+// isValidCommentSortField returns true if the field is allowed for sorting comments
+func isValidCommentSortField(field string) bool {
+	switch field {
+	case "score", "created_utc", "created":
+		return true
+	default:
+		return false
+	}
+}
 
 // UpsertComment inserts a new comment or updates an existing comment if it already exists.
 // The comment ID (comment.ID) is used as the unique identifier.
@@ -170,32 +179,93 @@ func (s *SQLiteStore) UpsertComments(ctx context.Context, comments []*types.Comm
 	}
 	defer tx.Rollback()
 
-	// Sort comments by depth to ensure parents are processed before children
-	// We need to calculate depths first
-	type commentWithDepth struct {
-		comment *types.Comment
-		depth   int
+	// Build dependency graph from comment relationships
+	type commentNode struct {
+		comment  *types.Comment
+		depth    int
+		children []*commentNode
 	}
 
-	commentsWithDepths := make([]commentWithDepth, 0, len(comments))
+	// Map comment ID to node
+	nodeMap := make(map[string]*commentNode, len(comments))
 	for _, c := range comments {
-		depth, err := calculateDepth(ctx, tx, c.ParentID)
-		if err != nil {
-			return fmt.Errorf("UpsertComments: failed to calculate depth for %s: %w", c.ID, err)
+		if _, exists := nodeMap[c.ID]; exists {
+			return fmt.Errorf("UpsertComments: duplicate comment ID %s in batch", c.ID)
 		}
-		commentsWithDepths = append(commentsWithDepths, commentWithDepth{
-			comment: c,
-			depth:   depth,
-		})
+		nodeMap[c.ID] = &commentNode{comment: c, depth: -1} // depth -1 means not calculated yet
 	}
 
-	// Sort by depth (lower depths first = parents before children)
-	sort.Slice(commentsWithDepths, func(i, j int) bool {
-		return commentsWithDepths[i].depth < commentsWithDepths[j].depth
-	})
+	// Link children to parents and identify root comments
+	var roots []*commentNode
+	for _, node := range nodeMap {
+		parentID := node.comment.ParentID
 
-	// Prepare statement for upsert
-	query := `
+		// Check for self-reference before any other processing
+		actualID := node.comment.ID
+		if parentID != "" && (parentID == actualID || parentID == "t1_"+actualID) {
+			return fmt.Errorf("UpsertComments: comment %s references itself as parent", actualID)
+		}
+
+		// Top-level comment must have post parent (t3_*)
+		// Empty ParentID is invalid data (including whitespace-only)
+		if strings.TrimSpace(parentID) == "" {
+			return fmt.Errorf("UpsertComments: comment %s has empty parent_id", node.comment.ID)
+		}
+		if strings.HasPrefix(parentID, "t3_") {
+			roots = append(roots, node)
+			node.depth = 0 // Top-level comments have depth 0
+			continue
+		}
+
+		// Extract actual parent ID (remove "t1_" prefix if present)
+		actualParentID := parentID
+		if strings.HasPrefix(parentID, "t1_") {
+			actualParentID = strings.TrimPrefix(parentID, "t1_")
+			if actualParentID == "" {
+				return fmt.Errorf("UpsertComments: malformed parent_id %s for comment %s (empty after prefix)", parentID, node.comment.ID)
+			}
+		}
+
+		// Link child to parent if parent is in this batch
+		if parent, exists := nodeMap[actualParentID]; exists {
+			parent.children = append(parent.children, node)
+		} else {
+			// Parent not in batch - it must already exist in DB
+			// Calculate its depth from DB to determine this comment's depth
+			parentDepth, err := calculateDepth(ctx, tx, parentID)
+			if err != nil {
+				return fmt.Errorf("UpsertComments: parent %s not in batch and not in database: %w", parentID, err)
+			}
+			node.depth = parentDepth + 1
+			roots = append(roots, node) // Treat as root since parent already inserted
+		}
+	}
+
+	// Calculate depths for comments whose parents are in the batch
+	// Use BFS to process parents before children
+	var orderedNodes []*commentNode
+	queue := roots
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		orderedNodes = append(orderedNodes, current)
+
+		// Set depth for children (parent depth + 1)
+		for _, child := range current.children {
+			child.depth = current.depth + 1
+			queue = append(queue, child)
+		}
+	}
+
+	// Verify ALL comments have depths calculated (check entire nodeMap, not just orderedNodes)
+	for id, node := range nodeMap {
+		if node.depth < 0 {
+			return fmt.Errorf("UpsertComments: comment %s unreachable - possible cycle, orphaned comment, or self-reference", id)
+		}
+	}
+
+	// Prepare statement for batch insert
+	upsertCommentQuery := `
 		INSERT INTO comments (
 			id, name, score, ups, downs, likes, created, created_utc,
 			approved_by, author, author_flair_css_class, author_flair_text, banned_by,
@@ -243,21 +313,18 @@ func (s *SQLiteStore) UpsertComments(ctx context.Context, comments []*types.Comm
 			fetched_at = strftime('%s', 'now')
 	`
 
-	stmt, err := tx.PrepareContext(ctx, query)
+	stmt, err := tx.PrepareContext(ctx, upsertCommentQuery)
 	if err != nil {
 		return fmt.Errorf("UpsertComments: failed to prepare statement: %w", err)
 	}
 	defer stmt.Close()
 
-	// Process each comment in depth order
-	for _, cwd := range commentsWithDepths {
-		comment := cwd.comment
+	deleteClosureQuery := `DELETE FROM comment_closures WHERE descendant = ?`
 
-		// Recalculate depth now that parents have been inserted
-		depth, err := calculateDepth(ctx, tx, comment.ParentID)
-		if err != nil {
-			return fmt.Errorf("UpsertComments: failed to recalculate depth for %s: %w", comment.ID, err)
-		}
+	// Insert comments in dependency order (orderedNodes is already in BFS order)
+	for _, node := range orderedNodes {
+		comment := node.comment
+		depth := node.depth
 
 		// Extract post_id
 		postID := extractPostID(comment.LinkID)
@@ -265,18 +332,19 @@ func (s *SQLiteStore) UpsertComments(ctx context.Context, comments []*types.Comm
 			return fmt.Errorf("UpsertComments: invalid link_id %s for comment %s", comment.LinkID, comment.ID)
 		}
 
-		// Convert to insert args
+		// Build arguments for insert
 		args := commentToInsertArgs(comment, depth)
 		args = append(args, postID)
 
-		// Execute upsert
-		if _, err := stmt.ExecContext(ctx, args...); err != nil {
+		// Execute insert
+		_, err := stmt.ExecContext(ctx, args...)
+		if err != nil {
 			return fmt.Errorf("UpsertComments: failed to upsert comment %s: %w", comment.ID, err)
 		}
 
-		// Delete old closure entries
-		deleteClosureQuery := `DELETE FROM comment_closures WHERE descendant = ?`
-		if _, err := tx.ExecContext(ctx, deleteClosureQuery, comment.ID); err != nil {
+		// Clear old closure entries for this comment
+		_, err = tx.ExecContext(ctx, deleteClosureQuery, comment.ID)
+		if err != nil {
 			return fmt.Errorf("UpsertComments: failed to delete old closure entries for %s: %w", comment.ID, err)
 		}
 
@@ -301,35 +369,31 @@ func (s *SQLiteStore) UpsertComments(ctx context.Context, comments []*types.Comm
 // Returns an empty slice if no comments exist for the post.
 // Supports filtering by MaxDepth and sorting via opts.
 func (s *SQLiteStore) GetCommentTree(ctx context.Context, postID string, opts *CommentTreeOptions) ([]*types.Comment, error) {
-	// Set defaults for options
-	maxDepth := 0 // 0 = unlimited
+	// Set default sort options
 	sortBy := "created_utc"
 	sortDir := "asc"
+	maxDepth := 0 // 0 = unlimited
 
 	if opts != nil {
 		maxDepth = opts.MaxDepth
-		if opts.SortBy != "" {
+
+		// Validate sort field against whitelist
+		if opts.SortBy != "" && isValidCommentSortField(opts.SortBy) {
 			sortBy = opts.SortBy
 		}
+
+		// Validate sort direction
 		if opts.SortDir != "" {
-			sortDir = opts.SortDir
+			dir := strings.ToUpper(opts.SortDir)
+			if isValidSortDirection(dir) {
+				sortDir = strings.ToLower(opts.SortDir)
+			}
 		}
 	}
 
-	// Validate sort direction
-	if sortDir != "asc" && sortDir != "desc" {
-		sortDir = "asc" // Default to asc
-	}
-
-	// Validate sortBy field
-	validSortFields := map[string]bool{
-		"score":       true,
-		"created_utc": true,
-		"created":     true,
-	}
-	if !validSortFields[sortBy] {
-		sortBy = "created_utc" // Default to created_utc
-	}
+	// SECURITY: sortBy and sortDir are validated against whitelists above.
+	// They CANNOT be parameterized as they are SQL identifiers (column names).
+	// Never remove the whitelist validation without replacing with equivalent protection.
 
 	s.logger.Debug("getting comment tree",
 		"post_id", postID,
@@ -401,11 +465,23 @@ func (s *SQLiteStore) GetCommentTree(ctx context.Context, postID string, opts *C
 		if comment.ParentID == "" || strings.HasPrefix(comment.ParentID, "t3_") {
 			topLevel = append(topLevel, comment)
 		} else {
-			// This is a child comment - extract parent ID without prefix
-			parentID := comment.ParentID
-			// Remove "t1_" prefix if present
-			if strings.HasPrefix(parentID, "t1_") {
-				parentID = parentID[3:]
+			// This is a child comment - parent should be another comment (t1_)
+			if !strings.HasPrefix(comment.ParentID, "t1_") {
+				s.logger.Warn("invalid parent_id format for child comment",
+					"comment_id", comment.ID,
+					"parent_id", comment.ParentID,
+				)
+				continue // Skip this comment with invalid parent format
+			}
+
+			// Extract parent ID without "t1_" prefix
+			parentID := strings.TrimPrefix(comment.ParentID, "t1_")
+			if parentID == "" {
+				s.logger.Warn("malformed parent_id (empty after prefix removal)",
+					"comment_id", comment.ID,
+					"parent_id", comment.ParentID,
+				)
+				continue // Skip this malformed comment
 			}
 
 			// Find parent in map and add to Replies
@@ -481,9 +557,7 @@ func calculateDepth(ctx context.Context, tx *sql.Tx, parentID string) (int, erro
 	err := tx.QueryRowContext(ctx, query, actualParentID).Scan(&parentDepth)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			// Parent doesn't exist yet - could be processing out of order
-			// Default to depth 1 (assume immediate child of post)
-			return 1, nil
+			return 0, fmt.Errorf("parent comment not found: %s", actualParentID)
 		}
 		return 0, fmt.Errorf("failed to query parent depth for %s: %w", actualParentID, err)
 	}
@@ -555,10 +629,17 @@ func insertClosureEntries(ctx context.Context, tx *sql.Tx, commentID, parentID s
 	}
 
 	if rowsAffected == 0 {
-		// Parent has no closure entries yet - this could happen during batch inserts
-		// We'll just log a debug message and continue
-		// The closure table will be incomplete, but subsequent operations may fix it
-		return fmt.Errorf("parent comment %s has no closure entries (may not exist)", actualParentID)
+		// Parent comment has no closure entries - verify if parent exists at all
+		var parentExists bool
+		err := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM comments WHERE id = ?)", actualParentID).Scan(&parentExists)
+		if err != nil {
+			return fmt.Errorf("failed to check parent existence: %w", err)
+		}
+		if !parentExists {
+			return fmt.Errorf("parent comment %s does not exist", actualParentID)
+		}
+		// Parent exists but has no closure entries - this indicates corruption
+		return fmt.Errorf("parent comment %s exists but has no closure entries (closure table corrupted)", actualParentID)
 	}
 
 	return nil
