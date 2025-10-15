@@ -22,13 +22,15 @@ import (
 )
 
 const (
-	// maxBufferSize is the maximum size of buffers to keep in the pool.
+	// MAX_BUFFER_SIZE is the maximum size of buffers to keep in the pool.
 	// Buffers larger than this will be discarded to prevent excessive memory usage.
-	maxBufferSize = 256 * 1024 // 256KB - increased from 10MB for better memory efficiency
-	// initialBufferSize is the initial allocation size for new buffers
-	initialBufferSize = 8 * 1024 // 8KB - increased for better performance
-	// maxResponseBodySize limits the size of HTTP response bodies to prevent DoS
-	maxResponseBodySize = 10 * 1024 * 1024 // 10MB
+	MAX_BUFFER_SIZE = 256 * 1024 // 256KB - increased from 10MB for better memory efficiency
+	// INITIAL_BUFFER_SIZE is the initial allocation size for new buffers
+	INITIAL_BUFFER_SIZE = 8 * 1024 // 8KB - increased for better performance
+	// MAX_RESPONSE_BODY_SIZE limits the size of HTTP response bodies to prevent DoS
+	MAX_RESPONSE_BODY_SIZE = 10 * 1024 * 1024 // 10MB
+
+	TRUNCATE_LEN = 200 // Length to truncate body snippets in errors and logs
 )
 
 var (
@@ -36,7 +38,7 @@ var (
 		New: func() interface{} {
 			// Pre-allocate buffers with a reasonable initial size
 			buf := new(bytes.Buffer)
-			buf.Grow(initialBufferSize)
+			buf.Grow(INITIAL_BUFFER_SIZE)
 			return buf
 		},
 	}
@@ -72,7 +74,7 @@ func putBuffer(buf *bytes.Buffer) {
 	cap := buf.Cap()
 
 	// Don't return oversized buffers to the pool to prevent memory bloat
-	if cap > maxBufferSize {
+	if cap > MAX_BUFFER_SIZE {
 		atomic.AddInt64(&bufferPoolStats.discarded, 1)
 		return
 	}
@@ -141,7 +143,7 @@ func NewClientWithRateLimit(httpClient *http.Client, baseURL string, userAgent s
 
 	parsedURL, err := url.Parse(baseURL)
 	if err != nil {
-		return nil, &pkgerrs.ClientError{Err: err}
+		return nil, &RequestBuildError{Operation: "parse_base_url", URL: baseURL, Err: err}
 	}
 	if !strings.HasSuffix(parsedURL.Path, "/") {
 		parsedURL.Path += "/"
@@ -187,7 +189,7 @@ func (c *Client) SetLogBodyLimit(limit int) {
 func (c *Client) NewRequest(ctx context.Context, method, path string, body io.Reader, params ...url.Values) (*http.Request, error) {
 	u, err := c.BaseURL.Parse(path)
 	if err != nil {
-		return nil, &pkgerrs.ClientError{Err: err}
+		return nil, &RequestBuildError{Operation: "parse_path", URL: path, Err: err}
 	}
 
 	// Add query parameters if provided
@@ -203,7 +205,7 @@ func (c *Client) NewRequest(ctx context.Context, method, path string, body io.Re
 
 	req, err := http.NewRequestWithContext(ctx, method, u.String(), body)
 	if err != nil {
-		return nil, &pkgerrs.ClientError{Err: err}
+		return nil, &RequestBuildError{Operation: "create_request", URL: u.String(), Err: err}
 	}
 
 	req.Header.Set("User-Agent", c.UserAgent)
@@ -220,14 +222,15 @@ func (c *Client) doRequest(req *http.Request) ([]byte, *http.Response, error) {
 	// Rate limiting
 	if err := c.waitForRateLimit(ctx); err != nil {
 		c.logWaitFailure(ctx, req, err)
-		return nil, nil, &pkgerrs.ClientError{Err: err}
+		return nil, nil, &RateLimitError{Reason: "wait_failed", Err: err}
 	}
 
 	// Execute request
 	resp, err := c.client.Do(req)
 	if err != nil {
-		c.logTransportError(ctx, req, c.clock.Since(start), err)
-		return nil, nil, &pkgerrs.ClientError{Err: err}
+		duration := c.clock.Since(start)
+		c.logTransportError(ctx, req, duration, err)
+		return nil, nil, &TransportError{Method: req.Method, URL: req.URL.String(), Duration: duration, Err: err}
 	}
 	defer resp.Body.Close()
 
@@ -239,21 +242,21 @@ func (c *Client) doRequest(req *http.Request) ([]byte, *http.Response, error) {
 	defer putBuffer(buf)
 
 	// Limit response body size
-	limitedReader := io.LimitReader(resp.Body, maxResponseBodySize)
+	limitedReader := io.LimitReader(resp.Body, MAX_RESPONSE_BODY_SIZE)
 	bytesRead, err := io.Copy(buf, limitedReader)
 	if err != nil {
 		c.logBodyReadError(ctx, req, resp, c.clock.Since(start), err)
-		return nil, resp, &pkgerrs.ClientError{Err: err}
+		return nil, resp, &ResponseReadError{URL: req.URL.String(), BytesRead: bytesRead, Err: err}
 	}
 
 	// Check if we hit the size limit
-	if bytesRead == maxResponseBodySize {
+	if bytesRead == MAX_RESPONSE_BODY_SIZE {
 		// Try reading one more byte to see if there's more data
 		var extraByte [1]byte
 		if n, _ := resp.Body.Read(extraByte[:]); n > 0 {
-			err := fmt.Errorf("response body exceeded max size of %d bytes", maxResponseBodySize)
+			err := fmt.Errorf("response body exceeded max size of %d bytes", MAX_RESPONSE_BODY_SIZE)
 			c.logBodyReadError(ctx, req, resp, c.clock.Since(start), err)
-			return nil, resp, &pkgerrs.ClientError{Err: err}
+			return nil, resp, &ResponseReadError{URL: req.URL.String(), BytesRead: bytesRead, MaxSize: MAX_RESPONSE_BODY_SIZE}
 		}
 	}
 
@@ -283,7 +286,8 @@ func (c *Client) Do(req *http.Request, v *types.Thing) error {
 	if v != nil && len(bodyBytes) > 0 {
 		if err := json.Unmarshal(bodyBytes, v); err != nil {
 			c.logDecodeError(req.Context(), req, resp, err)
-			return &pkgerrs.ClientError{Err: err}
+			snippet := truncateBody(bodyBytes, TRUNCATE_LEN)
+			return &DecodeError{Operation: "unmarshal_thing", BodySnippet: snippet, Err: err}
 		}
 	}
 
@@ -304,7 +308,8 @@ func (c *Client) DoThingArray(req *http.Request) ([]*types.Thing, error) {
 	if len(bodyBytes) > 0 && bodyBytes[0] == '[' {
 		// It's an array response
 		if err := json.Unmarshal(bodyBytes, &result); err != nil {
-			return nil, &pkgerrs.ClientError{Err: fmt.Errorf("failed to parse array response: %w", err)}
+			snippet := truncateBody(bodyBytes, TRUNCATE_LEN)
+			return nil, &DecodeError{Operation: "unmarshal_array", BodySnippet: snippet, Err: err}
 		}
 	} else if len(bodyBytes) > 0 && bodyBytes[0] == '{' {
 		// It's a single object - could be a Listing or an error
@@ -318,17 +323,30 @@ func (c *Client) DoThingArray(req *http.Request) ([]*types.Thing, error) {
 			if err := json.Unmarshal(bodyBytes, &errObj); err == nil && errObj.Error != "" {
 				return nil, &pkgerrs.APIError{StatusCode: resp.StatusCode, ErrorCode: errObj.Error, Message: errObj.Message}
 			}
-			return nil, &pkgerrs.ClientError{Err: fmt.Errorf("failed to parse response: %w", err)}
+			snippet := truncateBody(bodyBytes, TRUNCATE_LEN)
+			return nil, &DecodeError{Operation: "unmarshal_single_thing", BodySnippet: snippet, Err: err}
 		}
 
 		// If it's a Listing with comments, wrap it in an array
 		if singleThing.Kind == "Listing" {
 			result = []*types.Thing{&singleThing}
 		} else {
-			return nil, &pkgerrs.ClientError{Err: fmt.Errorf("unexpected response kind: %s", singleThing.Kind)}
+			snippet := truncateBody(bodyBytes, TRUNCATE_LEN)
+			return nil, &ResponseValidationError{
+				Issue:       "unexpected_response_kind",
+				Expected:    "Listing",
+				Actual:      singleThing.Kind,
+				BodySnippet: snippet,
+			}
 		}
 	} else {
-		return nil, &pkgerrs.ClientError{Err: fmt.Errorf("empty or invalid response from Reddit")}
+		snippet := truncateBody(bodyBytes, 200)
+		return nil, &ResponseValidationError{
+			Issue:       "empty_or_invalid_response",
+			Expected:    "JSON object or array",
+			Actual:      "empty or invalid",
+			BodySnippet: snippet,
+		}
 	}
 
 	return result, nil
@@ -352,7 +370,8 @@ func (c *Client) DoMoreChildren(req *http.Request) ([]*types.Thing, error) {
 	}
 
 	if err := json.Unmarshal(bodyBytes, &response); err != nil {
-		return nil, &pkgerrs.ClientError{Err: fmt.Errorf("failed to parse morechildren response: %w", err)}
+		snippet := truncateBody(bodyBytes, TRUNCATE_LEN)
+		return nil, &DecodeError{Operation: "unmarshal_morechildren", BodySnippet: snippet, Err: err}
 	}
 
 	// Check for API errors
@@ -673,4 +692,16 @@ func contextOrBackground(ctx context.Context) context.Context {
 		return ctx
 	}
 	return context.Background()
+}
+
+// truncateBody returns a truncated string representation of the body for error messages.
+// If the body is shorter than maxLen, it returns the full body as a string.
+func truncateBody(body []byte, maxLen int) string {
+	if len(body) == 0 {
+		return ""
+	}
+	if len(body) <= maxLen {
+		return string(body)
+	}
+	return string(body[:maxLen]) + "..."
 }

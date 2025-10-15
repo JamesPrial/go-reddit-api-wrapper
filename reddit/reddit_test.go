@@ -113,7 +113,7 @@ func TestNewClient(t *testing.T) {
 				ClientSecret: "secret",
 			},
 			wantError: true,
-			errorType: "ConfigError",
+			errorType: "ValidationError",
 		},
 		{
 			name: "missing client secret",
@@ -121,7 +121,7 @@ func TestNewClient(t *testing.T) {
 				ClientID: "id",
 			},
 			wantError: true,
-			errorType: "ConfigError",
+			errorType: "ValidationError",
 		},
 		{
 			name: "valid config",
@@ -143,6 +143,11 @@ func TestNewClient(t *testing.T) {
 				if tt.errorType == "ConfigError" {
 					if _, ok := err.(*pkgerrs.ConfigError); !ok {
 						t.Errorf("expected ConfigError, got %T", err)
+					}
+				}
+				if tt.errorType == "ValidationError" {
+					if _, ok := err.(*validator.ValidationError); !ok {
+						t.Errorf("expected ValidationError, got %T", err)
 					}
 				}
 			} else {
@@ -171,12 +176,12 @@ func TestNewClient_InvalidUserAgent(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error but got none")
 	}
-	var configErr *pkgerrs.ConfigError
-	if !errors.As(err, &configErr) {
-		t.Fatalf("expected ConfigError, got %T", err)
+	var validationErr *validator.ValidationError
+	if !errors.As(err, &validationErr) {
+		t.Fatalf("expected ValidationError, got %T", err)
 	}
-	if !strings.Contains(configErr.Message, "invalid user agent") {
-		t.Fatalf("expected invalid user agent message, got %s", configErr.Message)
+	if !strings.Contains(validationErr.Reason, "invalid user agent") {
+		t.Fatalf("expected invalid user agent message, got %s", validationErr.Reason)
 	}
 }
 
@@ -240,12 +245,12 @@ func TestNewClient_HTTPClientTimeoutHandling(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected error but got none")
 		}
-		var configErr *pkgerrs.ConfigError
-		if !errors.As(err, &configErr) {
-			t.Fatalf("expected ConfigError, got %T", err)
+		var validationErr *validator.ValidationError
+		if !errors.As(err, &validationErr) {
+			t.Fatalf("expected ValidationError, got %T", err)
 		}
-		if !strings.Contains(configErr.Message, "timeout too short") {
-			t.Fatalf("expected timeout too short message, got %s", configErr.Message)
+		if !strings.Contains(validationErr.Reason, "timeout too short") {
+			t.Fatalf("expected timeout too short message, got %s", validationErr.Reason)
 		}
 	})
 
@@ -532,7 +537,7 @@ func TestClient_GetSubreddit(t *testing.T) {
 				return &mockHTTPClient{}
 			},
 			wantError: true,
-			errorType: "ConfigError",
+			errorType: "ValidationError",
 		},
 		{
 			name:      "request creation error",
@@ -594,6 +599,10 @@ func TestClient_GetSubreddit(t *testing.T) {
 					case "ConfigError":
 						if _, ok := err.(*pkgerrs.ConfigError); !ok {
 							t.Errorf("expected ConfigError, got %T", err)
+						}
+					case "ValidationError":
+						if _, ok := err.(*validator.ValidationError); !ok {
+							t.Errorf("expected ValidationError, got %T", err)
 						}
 					case "RequestError":
 						if _, ok := err.(*pkgerrs.RequestError); !ok {
@@ -774,7 +783,7 @@ func TestClient_getPostsErrors(t *testing.T) {
 				Subreddit: "ab",
 			},
 			httpClient:  &mockHTTPClient{},
-			wantErrType: "ConfigError",
+			wantErrType: "ValidationError",
 		},
 		{
 			name: "invalid pagination",
@@ -783,7 +792,7 @@ func TestClient_getPostsErrors(t *testing.T) {
 				Pagination: types.Pagination{After: "t3_a", Before: "t3_b"},
 			},
 			httpClient:  &mockHTTPClient{},
-			wantErrType: "ConfigError",
+			wantErrType: "ValidationError",
 		},
 		{
 			name:    "request creation error",
@@ -826,6 +835,10 @@ func TestClient_getPostsErrors(t *testing.T) {
 			case "ConfigError":
 				if _, ok := err.(*pkgerrs.ConfigError); !ok {
 					t.Fatalf("expected ConfigError, got %T", err)
+				}
+			case "ValidationError":
+				if _, ok := err.(*validator.ValidationError); !ok {
+					t.Fatalf("expected ValidationError, got %T", err)
 				}
 			case "RequestError":
 				if _, ok := err.(*pkgerrs.RequestError); !ok {
@@ -998,7 +1011,7 @@ func TestClient_GetComments(t *testing.T) {
 				return &mockHTTPClient{}
 			},
 			wantError: true,
-			errorType: "ConfigError",
+			errorType: "ValidationError",
 		},
 		{
 			name: "missing post ID",
@@ -1022,7 +1035,7 @@ func TestClient_GetComments(t *testing.T) {
 				return &mockHTTPClient{}
 			},
 			wantError: true,
-			errorType: "ConfigError",
+			errorType: "ValidationError",
 		},
 		{
 			name: "API error",
@@ -1109,6 +1122,10 @@ func TestClient_GetComments(t *testing.T) {
 					case "ConfigError":
 						if _, ok := err.(*pkgerrs.ConfigError); !ok {
 							t.Errorf("expected ConfigError, got %T: %v", err, err)
+						}
+					case "ValidationError":
+						if _, ok := err.(*validator.ValidationError); !ok {
+							t.Errorf("expected ValidationError, got %T: %v", err, err)
 						}
 					case "RequestError":
 						if _, ok := err.(*pkgerrs.RequestError); !ok {
@@ -1279,6 +1296,10 @@ func TestClient_GetCommentsMultiple(t *testing.T) {
 						if _, ok := err.(*pkgerrs.ConfigError); !ok {
 							t.Errorf("expected ConfigError, got %T", err)
 						}
+					case "ValidationError":
+						if _, ok := err.(*validator.ValidationError); !ok {
+							t.Errorf("expected ValidationError, got %T", err)
+						}
 					case "ContextError":
 						if !errors.Is(err, context.Canceled) {
 							t.Errorf("expected context.Canceled, got %v", err)
@@ -1348,7 +1369,7 @@ func TestClient_GetMoreComments(t *testing.T) {
 				return &mockHTTPClient{}
 			},
 			wantError: true,
-			errorType: "ConfigError",
+			errorType: "ValidationError",
 		},
 		{
 			name: "empty comment IDs",
@@ -1460,7 +1481,7 @@ func TestClient_GetMoreComments(t *testing.T) {
 			},
 			setupMock: func() HTTPClient { return &mockHTTPClient{} },
 			wantError: true,
-			errorType: "ConfigError",
+			errorType: "ValidationError",
 		},
 		{
 			name: "request creation failure",
@@ -1511,6 +1532,10 @@ func TestClient_GetMoreComments(t *testing.T) {
 					case "ConfigError":
 						if _, ok := err.(*pkgerrs.ConfigError); !ok {
 							t.Errorf("expected ConfigError, got %T: %v", err, err)
+						}
+					case "ValidationError":
+						if _, ok := err.(*validator.ValidationError); !ok {
+							t.Errorf("expected ValidationError, got %T: %v", err, err)
 						}
 					case "RequestError":
 						if _, ok := err.(*pkgerrs.RequestError); !ok {
