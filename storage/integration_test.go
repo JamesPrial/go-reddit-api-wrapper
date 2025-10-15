@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	graw "github.com/jamesprial/go-reddit-api-wrapper/reddit"
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
+	graw "github.com/jamesprial/go-reddit-api-wrapper/reddit"
 	"github.com/jamesprial/go-reddit-api-wrapper/storage/testutil"
 )
 
