@@ -13,14 +13,14 @@ import (
 	"sync/atomic"
 	"time"
 
-	pkgerrs "github.com/jamesprial/go-reddit-api-wrapper/pkg/errors"
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/clock"
 )
 
 const (
 	defaultTokenEndpointPath = "api/v1/access_token"
 	// maxResponseBodySize limits the size of HTTP response bodies to prevent DoS
-	maxResponseBodySize = 10 * 1024 * 1024 // 10MB
+	maxResponseBodySize   = 10 * 1024 * 1024   // 10MB
+	maxTokenExpirySeconds = 365 * 24 * 60 * 60 // 1 year in seconds
 )
 
 // tokenCache holds cached token data immutably
@@ -60,7 +60,7 @@ func NewAuthenticator(httpClient *http.Client, username, password, clientID, cli
 
 	parsedURL, err := url.Parse(baseURL)
 	if err != nil {
-		return nil, &pkgerrs.AuthError{Err: fmt.Errorf("failed to parse base URL: %w", err)}
+		return nil, &ConfigError{Field: "base_url", Value: baseURL, Err: err}
 	}
 	if !strings.HasSuffix(parsedURL.Path, "/") {
 		parsedURL.Path += "/"
@@ -69,7 +69,7 @@ func NewAuthenticator(httpClient *http.Client, username, password, clientID, cli
 
 	resolvedTokenURL, err := parsedURL.Parse(tokenPath)
 	if err != nil {
-		return nil, &pkgerrs.AuthError{Err: fmt.Errorf("failed to parse token endpoint path: %w", err)}
+		return nil, &ConfigError{Field: "token_path", Value: tokenPath, Err: err}
 	}
 
 	// Prepare form data upfront
@@ -139,7 +139,7 @@ func (a *Authenticator) GetToken(ctx context.Context) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.tokenURL.String(), strings.NewReader(data))
 	if err != nil {
 		a.logAuthError(ctx, "failed to create token request", err)
-		return "", &pkgerrs.AuthError{Err: fmt.Errorf("failed to create token request: %w", err)}
+		return "", &TokenError{Operation: "fetch", Err: err}
 	}
 
 	req.SetBasicAuth(a.clientID, a.clientSecret)
@@ -151,7 +151,7 @@ func (a *Authenticator) GetToken(ctx context.Context) (string, error) {
 	resp, err := a.client.Do(req)
 	if err != nil {
 		a.logAuthError(ctx, "failed to execute token request", err)
-		return "", &pkgerrs.AuthError{Err: fmt.Errorf("failed to execute token request: %w", err)}
+		return "", &TokenError{Operation: "fetch", Err: err}
 	}
 	defer resp.Body.Close()
 
@@ -160,22 +160,16 @@ func (a *Authenticator) GetToken(ctx context.Context) (string, error) {
 	bodyBytes, err := io.ReadAll(limitedReader)
 	if err != nil {
 		a.logAuthError(ctx, "failed to read token response", err)
-		// Error reading the response body.
-		return "", &pkgerrs.AuthError{
-			StatusCode: resp.StatusCode,
-			Err:        fmt.Errorf("failed to read response body: %w", err),
-		}
+		return "", &TokenError{Operation: "fetch", HTTPStatus: resp.StatusCode, Err: err}
 	}
 	// Check if we hit the size limit
 	if int64(len(bodyBytes)) == maxResponseBodySize {
 		// Try reading one more byte to see if there's more data
 		var extraByte [1]byte
 		if n, _ := resp.Body.Read(extraByte[:]); n > 0 {
-			a.logAuthError(ctx, "response body too large", fmt.Errorf("exceeded max size of %d bytes", maxResponseBodySize))
-			return "", &pkgerrs.AuthError{
-				StatusCode: resp.StatusCode,
-				Err:        fmt.Errorf("response body exceeded max size of %d bytes", maxResponseBodySize),
-			}
+			err := fmt.Errorf("response body exceeded max size of %d bytes", maxResponseBodySize)
+			a.logAuthError(ctx, "response body too large", err)
+			return "", &TokenError{Operation: "fetch", HTTPStatus: resp.StatusCode, Body: string(bodyBytes[:1000]), Err: err}
 		}
 	}
 
@@ -183,51 +177,32 @@ func (a *Authenticator) GetToken(ctx context.Context) (string, error) {
 	a.logAuthHTTPResult(ctx, resp.StatusCode, duration, bodyBytes)
 
 	if resp.StatusCode != http.StatusOK {
-		return "", &pkgerrs.AuthError{
-			StatusCode: resp.StatusCode,
-			Body:       string(bodyBytes),
-		}
+		return "", &TokenError{Operation: "fetch", HTTPStatus: resp.StatusCode, Body: string(bodyBytes)}
 	}
 
 	var tokenResp tokenResponse
 	if err := json.Unmarshal(bodyBytes, &tokenResp); err != nil {
 		a.logAuthError(ctx, "failed to decode token response", err)
-		return "", &pkgerrs.AuthError{
-			StatusCode: resp.StatusCode,
-			Body:       string(bodyBytes),
-			Err:        fmt.Errorf("failed to unmarshal token response: %w", err),
-		}
+		return "", &TokenError{Operation: "fetch", HTTPStatus: resp.StatusCode, Body: string(bodyBytes), Err: err}
 	}
 
 	if tokenResp.AccessToken == "" {
-		emptyErr := fmt.Errorf("access token was empty in response")
-		a.logAuthError(ctx, "received empty access token", emptyErr)
-		return "", &pkgerrs.AuthError{
-			StatusCode: resp.StatusCode,
-			Body:       string(bodyBytes),
-			Err:        emptyErr,
-		}
+		err := fmt.Errorf("access token was empty in response")
+		a.logAuthError(ctx, "received empty access token", err)
+		return "", &TokenError{Operation: "fetch", HTTPStatus: resp.StatusCode, Body: string(bodyBytes), Err: err}
 	}
 
 	// Validate ExpiresIn bounds to prevent integer overflow and invalid values
-	const maxTokenExpirySeconds = 365 * 24 * 60 * 60 // 1 year in seconds
+
 	if tokenResp.ExpiresIn < 0 {
-		expiryErr := fmt.Errorf("invalid expires_in value: %d (cannot be negative)", tokenResp.ExpiresIn)
-		a.logAuthError(ctx, "received negative expires_in", expiryErr)
-		return "", &pkgerrs.AuthError{
-			StatusCode: resp.StatusCode,
-			Body:       string(bodyBytes),
-			Err:        expiryErr,
-		}
+		err := fmt.Errorf("invalid expires_in value: %d (cannot be negative)", tokenResp.ExpiresIn)
+		a.logAuthError(ctx, "received negative expires_in", err)
+		return "", &TokenError{Operation: "fetch", HTTPStatus: resp.StatusCode, Body: string(bodyBytes), Err: err}
 	}
 	if tokenResp.ExpiresIn > maxTokenExpirySeconds {
-		expiryErr := fmt.Errorf("invalid expires_in value: %d (exceeds maximum of %d seconds)", tokenResp.ExpiresIn, maxTokenExpirySeconds)
-		a.logAuthError(ctx, "received expires_in exceeding maximum", expiryErr)
-		return "", &pkgerrs.AuthError{
-			StatusCode: resp.StatusCode,
-			Body:       string(bodyBytes),
-			Err:        expiryErr,
-		}
+		err := fmt.Errorf("invalid expires_in value: %d (exceeds maximum of %d seconds)", tokenResp.ExpiresIn, maxTokenExpirySeconds)
+		a.logAuthError(ctx, "received expires_in exceeding maximum", err)
+		return "", &TokenError{Operation: "fetch", HTTPStatus: resp.StatusCode, Body: string(bodyBytes), Err: err}
 	}
 
 	// Cache the token with tiered expiry thresholds based on token lifetime
