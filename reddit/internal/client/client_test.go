@@ -39,8 +39,8 @@ func TestNewClient_DefaultRateLimiter(t *testing.T) {
 func TestNewClient_InvalidBaseURL(t *testing.T) {
 	_, err := NewClient(nil, "://bad", "agent", nil)
 	testutil.AssertError(t, err)
-	var clientErr *pkgerrs.ClientError
-	testutil.AssertErrorType(t, err, &clientErr)
+	var reqErr *RequestBuildError
+	testutil.AssertErrorType(t, err, &reqErr)
 }
 
 func TestNewClient_BaseURLHandling(t *testing.T) {
@@ -82,8 +82,8 @@ func TestClient_NewRequestInvalidPath(t *testing.T) {
 
 	_, err = c.NewRequest(context.Background(), http.MethodGet, "%zz", nil)
 	testutil.AssertError(t, err)
-	var clientErr *pkgerrs.ClientError
-	testutil.AssertErrorType(t, err, &clientErr)
+	var reqErr *RequestBuildError
+	testutil.AssertErrorType(t, err, &reqErr)
 }
 
 func TestClient_NewRequestPreservesBody(t *testing.T) {
@@ -203,8 +203,8 @@ func TestClient_DoTransportErrorWrapped(t *testing.T) {
 
 	err = c.Do(req, nil)
 	testutil.AssertError(t, err)
-	var clientErr *pkgerrs.ClientError
-	testutil.AssertErrorType(t, err, &clientErr)
+	var transportErr *TransportError
+	testutil.AssertErrorType(t, err, &transportErr)
 
 	if !errors.Is(err, expectedErr) {
 		t.Fatalf("expected wrapped error %v, got %v", expectedErr, err)
@@ -246,8 +246,8 @@ func TestClient_DoJSONDecodeErrorWrapped(t *testing.T) {
 	var thing types.Thing
 	err = c.Do(req, &thing)
 	testutil.AssertError(t, err)
-	var clientErr *pkgerrs.ClientError
-	testutil.AssertErrorType(t, err, &clientErr)
+	var decodeErr *DecodeError
+	testutil.AssertErrorType(t, err, &decodeErr)
 }
 
 // failingReader simulates a body read error
@@ -282,8 +282,8 @@ func TestClient_DoBodyReadError(t *testing.T) {
 
 	err = c.Do(req, nil)
 	testutil.AssertError(t, err)
-	var clientErr *pkgerrs.ClientError
-	testutil.AssertErrorType(t, err, &clientErr)
+	var readErr *ResponseReadError
+	testutil.AssertErrorType(t, err, &readErr)
 	testutil.AssertStringContains(t, err.Error(), "simulated read failure")
 }
 
@@ -607,15 +607,12 @@ func TestAPIError_ErrorFormatting(t *testing.T) {
 	}
 }
 
-func TestClientError_Unwrap(t *testing.T) {
+func TestRequestBuildError_Unwrap(t *testing.T) {
 	inner := errors.New("boom")
-	err := &pkgerrs.ClientError{Err: inner}
+	err := &RequestBuildError{Operation: "test", Err: inner}
 
 	if !errors.Is(err, inner) {
 		t.Fatalf("expected errors.Is to unwrap inner error")
-	}
-	if err.Error() != inner.Error() {
-		t.Fatalf("expected Error to match inner error message")
 	}
 }
 
@@ -694,9 +691,9 @@ func TestClient_DoThingArray_APIErrorResponse(t *testing.T) {
 
 	// Error objects without "kind" field unmarshal as Thing with empty kind,
 	// which triggers "unexpected response kind" error
-	var clientErr *pkgerrs.ClientError
-	testutil.AssertErrorType(t, err, &clientErr)
-	testutil.AssertStringContains(t, err.Error(), "unexpected response kind")
+	var validationErr *ResponseValidationError
+	testutil.AssertErrorType(t, err, &validationErr)
+	testutil.AssertStringContains(t, err.Error(), "unexpected_response_kind")
 }
 
 func TestClient_DoThingArray_EmptyResponse(t *testing.T) {
@@ -719,8 +716,8 @@ func TestClient_DoThingArray_EmptyResponse(t *testing.T) {
 		t.Fatalf("expected nil Things on error, got %v", things)
 	}
 
-	var clientErr *pkgerrs.ClientError
-	testutil.AssertErrorType(t, err, &clientErr)
+	var validationErr *ResponseValidationError
+	testutil.AssertErrorType(t, err, &validationErr)
 }
 
 func TestClient_DoThingArray_InvalidJSON(t *testing.T) {
@@ -743,8 +740,8 @@ func TestClient_DoThingArray_InvalidJSON(t *testing.T) {
 		t.Fatalf("expected nil Things on error, got %v", things)
 	}
 
-	var clientErr *pkgerrs.ClientError
-	testutil.AssertErrorType(t, err, &clientErr)
+	var decodeErr *DecodeError
+	testutil.AssertErrorType(t, err, &decodeErr)
 }
 
 func TestClient_DoThingArray_UnexpectedKind(t *testing.T) {
@@ -767,9 +764,9 @@ func TestClient_DoThingArray_UnexpectedKind(t *testing.T) {
 		t.Fatalf("expected nil Things on error, got %v", things)
 	}
 
-	var clientErr *pkgerrs.ClientError
-	testutil.AssertErrorType(t, err, &clientErr)
-	testutil.AssertStringContains(t, err.Error(), "unexpected response kind")
+	var validationErr *ResponseValidationError
+	testutil.AssertErrorType(t, err, &validationErr)
+	testutil.AssertStringContains(t, err.Error(), "unexpected_response_kind")
 }
 
 func TestClient_DoMoreChildren_Success(t *testing.T) {
@@ -867,8 +864,8 @@ func TestClient_DoMoreChildren_InvalidJSON(t *testing.T) {
 		t.Fatalf("expected nil Things on error, got %v", things)
 	}
 
-	var clientErr *pkgerrs.ClientError
-	testutil.AssertErrorType(t, err, &clientErr)
+	var decodeErr *DecodeError
+	testutil.AssertErrorType(t, err, &decodeErr)
 }
 
 func TestClient_DoMoreChildren_MalformedStructure(t *testing.T) {
