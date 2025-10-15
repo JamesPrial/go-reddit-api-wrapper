@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/golang-migrate/migrate/v4"
@@ -19,6 +20,15 @@ import (
 type Config struct {
 	// DBPath specifies the path to the SQLite database file.
 	// Use ":memory:" for an in-memory database (useful for testing).
+	//
+	// IMPORTANT: In-memory databases are automatically configured with a single shared connection
+	// (MaxOpenConns=1, MaxIdleConns=1) regardless of Config values, because SQLite in-memory
+	// databases are isolated per connection. This means:
+	//   - No concurrent database operations (all operations are serialized)
+	//   - WAL journal mode is not available (SQLite uses default mode instead)
+	//   - Suitable for testing but not for production workloads requiring concurrency
+	//
+	// Supports standard ":memory:" format and URI formats like "file::memory:" or "file:name?mode=memory".
 	// If empty, defaults to "reddit.db" in the current directory.
 	DBPath string
 
@@ -80,11 +90,46 @@ func NewSQLiteStore(cfg *Config) (*SQLiteStore, error) {
 		logger = slog.Default()
 	}
 
+	// For in-memory databases, force a single connection to ensure schema consistency
+	// SQLite in-memory databases are isolated per connection, so we must use exactly one connection
+	// to ensure migrations and queries see the same schema
+	// Detect all in-memory formats: ":memory:", "file::memory:", and "file:name?mode=memory"
+	isMemory := dbPath == ":memory:" ||
+		strings.Contains(dbPath, "mode=memory") ||
+		strings.Contains(dbPath, "file::memory:")
+	if isMemory {
+		maxOpenConns = 1
+		maxIdleConns = 1
+		logger.Info("detected in-memory database, forcing single connection for schema consistency")
+	}
+
 	// Build DSN with SQLite pragmas for optimal performance
-	// _journal_mode=WAL: Write-Ahead Logging enables concurrent reads during writes
-	// _foreign_keys=ON: Enforce foreign key constraints (important for referential integrity)
-	// _busy_timeout=5000: Wait up to 5 seconds if database is locked
-	dsn := fmt.Sprintf("file:%s?_journal_mode=WAL&_foreign_keys=ON&_busy_timeout=5000", dbPath)
+	var dsn string
+	if isMemory {
+		// For in-memory databases, handle different formats
+		// Note: WAL journal mode is not supported for in-memory databases
+		// Note: _busy_timeout is unnecessary with single connection (no lock contention)
+		if strings.HasPrefix(dbPath, "file:") {
+			// URI format is already provided, just add foreign keys if not present
+			if strings.Contains(dbPath, "?") {
+				dsn = fmt.Sprintf("%s&_foreign_keys=ON", dbPath)
+			} else {
+				dsn = fmt.Sprintf("%s?_foreign_keys=ON", dbPath)
+			}
+		} else if dbPath == ":memory:" {
+			// Standard memory format, use shared cache
+			dsn = "file::memory:?cache=shared&_foreign_keys=ON"
+		} else {
+			// Other format, wrap in file: URI
+			dsn = fmt.Sprintf("file:%s?cache=shared&mode=memory&_foreign_keys=ON", dbPath)
+		}
+	} else {
+		// For file-based databases, use standard pragmas
+		// _journal_mode=WAL: Write-Ahead Logging enables concurrent reads during writes
+		// _foreign_keys=ON: Enforce foreign key constraints (important for referential integrity)
+		// _busy_timeout=5000: Wait up to 5 seconds if database is locked
+		dsn = fmt.Sprintf("file:%s?_journal_mode=WAL&_foreign_keys=ON&_busy_timeout=5000", dbPath)
+	}
 
 	// Open database connection
 	db, err := sql.Open("sqlite3", dsn)

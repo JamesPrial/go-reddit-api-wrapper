@@ -18,9 +18,8 @@ func NewTestDB(t *testing.T) *SQLiteStore {
 	t.Helper()
 
 	cfg := &Config{
-		DBPath:         ":memory:",
-		MaxOpenConns:   5,
-		MaxIdleConns:   2,
+		DBPath: ":memory:",
+		// MaxOpenConns and MaxIdleConns are auto-configured to 1 for :memory: databases
 		MigrationsPath: "migrations",
 	}
 
