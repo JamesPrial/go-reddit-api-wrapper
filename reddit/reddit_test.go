@@ -15,7 +15,6 @@ import (
 	"testing"
 	"time"
 
-	pkgerrs "github.com/jamesprial/go-reddit-api-wrapper/pkg/errors"
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/parse"
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/validator"
@@ -141,8 +140,8 @@ func TestNewClient(t *testing.T) {
 					t.Error("expected error but got none")
 				}
 				if tt.errorType == "ConfigError" {
-					if _, ok := err.(*pkgerrs.ConfigError); !ok {
-						t.Errorf("expected ConfigError, got %T", err)
+					if _, ok := err.(*ConfigError); !ok {
+						t.Errorf("expected NetworkError, got %T", err)
 					}
 				}
 				if tt.errorType == "ValidationError" {
@@ -307,7 +306,7 @@ func TestNewClientWithContext_InvalidAuthURL(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error but got none")
 	}
-	var configErr *pkgerrs.ConfigError
+	var configErr *ConfigError
 	if !errors.As(err, &configErr) {
 		t.Fatalf("expected ConfigError, got %T", err)
 	}
@@ -339,7 +338,7 @@ func TestNewClientWithContext_AuthenticationFailure(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error but got none")
 	}
-	var authErr *pkgerrs.AuthError
+	var authErr *AuthError
 	if !errors.As(err, &authErr) {
 		t.Fatalf("expected AuthError, got %T", err)
 	}
@@ -420,7 +419,7 @@ func TestClient_Me(t *testing.T) {
 				return &mockTokenProvider{err: errors.New("auth failed")}
 			},
 			wantError: true,
-			errorType: "AuthError",
+			errorType: "*AuthError",
 		},
 		{
 			name: "request creation error",
@@ -433,20 +432,20 @@ func TestClient_Me(t *testing.T) {
 			},
 			setupAuth: nil,
 			wantError: true,
-			errorType: "RequestError",
+			errorType: "*ParseError",
 		},
 		{
 			name: "API error",
 			setupMock: func() HTTPClient {
 				return &mockHTTPClient{
 					doFunc: func(req *http.Request, v *types.Thing) error {
-						return &pkgerrs.APIError{StatusCode: http.StatusForbidden, Message: "API error"}
+						return &APIError{StatusCode: http.StatusForbidden, Message: "API error"}
 					},
 				}
 			},
 			setupAuth: nil,
 			wantError: true,
-			errorType: "APIError",
+			errorType: "*APIError",
 		},
 	}
 
@@ -465,17 +464,21 @@ func TestClient_Me(t *testing.T) {
 				}
 				if tt.errorType != "" {
 					switch tt.errorType {
-					case "AuthError":
-						if _, ok := err.(*pkgerrs.AuthError); !ok {
-							t.Errorf("expected AuthError, got %T: %v", err, err)
+					case "*AuthError":
+						if _, ok := err.(*AuthError); !ok {
+							t.Errorf("expected *AuthError, got %T: %v", err, err)
 						}
-					case "RequestError":
-						if _, ok := err.(*pkgerrs.RequestError); !ok {
-							t.Errorf("expected RequestError, got %T: %v", err, err)
+					case "*NetworkError":
+						if _, ok := err.(*NetworkError); !ok {
+							t.Errorf("expected *NetworkError, got %T: %v", err, err)
 						}
-					case "APIError":
-						if _, ok := err.(*pkgerrs.APIError); !ok {
-							t.Errorf("expected APIError, got %T: %v", err, err)
+					case "*APIError":
+						if _, ok := err.(*APIError); !ok {
+							t.Errorf("expected *APIError, got %T: %v", err, err)
+						}
+					case "*ParseError":
+						if _, ok := err.(*ParseError); !ok {
+							t.Errorf("expected *ParseError, got %T: %v", err, err)
 						}
 					}
 				}
@@ -537,7 +540,7 @@ func TestClient_GetSubreddit(t *testing.T) {
 				return &mockHTTPClient{}
 			},
 			wantError: true,
-			errorType: "ValidationError",
+			errorType: "*ValidationError",
 		},
 		{
 			name:      "request creation error",
@@ -550,7 +553,7 @@ func TestClient_GetSubreddit(t *testing.T) {
 				}
 			},
 			wantError: true,
-			errorType: "RequestError",
+			errorType: "*ParseError",
 		},
 		{
 			name:      "unexpected response type",
@@ -568,7 +571,7 @@ func TestClient_GetSubreddit(t *testing.T) {
 				}
 			},
 			wantError: true,
-			errorType: "ParseError",
+			errorType: "*ParseError",
 		},
 	}
 
@@ -596,21 +599,21 @@ func TestClient_GetSubreddit(t *testing.T) {
 				}
 				if tt.errorType != "" {
 					switch tt.errorType {
-					case "ConfigError":
-						if _, ok := err.(*pkgerrs.ConfigError); !ok {
-							t.Errorf("expected ConfigError, got %T", err)
+					case "*ConfigError":
+						if _, ok := err.(*ConfigError); !ok {
+							t.Errorf("expected *ConfigError, got %T", err)
 						}
-					case "ValidationError":
-						if _, ok := err.(*validator.ValidationError); !ok {
-							t.Errorf("expected ValidationError, got %T", err)
+					case "*ValidationError":
+						if _, ok := err.(*ValidationError); !ok {
+							t.Errorf("expected *ValidationError, got %T", err)
 						}
-					case "RequestError":
-						if _, ok := err.(*pkgerrs.RequestError); !ok {
-							t.Errorf("expected RequestError, got %T", err)
+					case "*NetworkError":
+						if _, ok := err.(*NetworkError); !ok {
+							t.Errorf("expected *NetworkError, got %T", err)
 						}
-					case "ParseError":
-						if _, ok := err.(*pkgerrs.ParseError); !ok {
-							t.Errorf("expected ParseError, got %T", err)
+					case "*ParseError":
+						if _, ok := err.(*ParseError); !ok {
+							t.Errorf("expected *ParseError, got %T", err)
 						}
 					}
 				}
@@ -783,7 +786,7 @@ func TestClient_getPostsErrors(t *testing.T) {
 				Subreddit: "ab",
 			},
 			httpClient:  &mockHTTPClient{},
-			wantErrType: "ValidationError",
+			wantErrType: "*ValidationError",
 		},
 		{
 			name: "invalid pagination",
@@ -792,7 +795,7 @@ func TestClient_getPostsErrors(t *testing.T) {
 				Pagination: types.Pagination{After: "t3_a", Before: "t3_b"},
 			},
 			httpClient:  &mockHTTPClient{},
-			wantErrType: "ValidationError",
+			wantErrType: "*ValidationError",
 		},
 		{
 			name:    "request creation error",
@@ -802,14 +805,14 @@ func TestClient_getPostsErrors(t *testing.T) {
 					return nil, errors.New("boom")
 				},
 			},
-			wantErrType: "RequestError",
+			wantErrType: "*ParseError",
 		},
 		{
 			name:        "auth token error",
 			request:     nil,
 			httpClient:  &mockHTTPClient{},
 			auth:        &mockTokenProvider{err: errors.New("token failure")},
-			wantErrType: "AuthError",
+			wantErrType: "*AuthError",
 		},
 		{
 			name:    "parse error",
@@ -820,7 +823,7 @@ func TestClient_getPostsErrors(t *testing.T) {
 					return nil
 				},
 			},
-			wantErrType: "ParseError",
+			wantErrType: "*ParseError",
 		},
 	}
 
@@ -832,25 +835,25 @@ func TestClient_getPostsErrors(t *testing.T) {
 				t.Fatal("expected error but got none")
 			}
 			switch tt.wantErrType {
-			case "ConfigError":
-				if _, ok := err.(*pkgerrs.ConfigError); !ok {
-					t.Fatalf("expected ConfigError, got %T", err)
+			case "*ConfigError":
+				if _, ok := err.(*ConfigError); !ok {
+					t.Fatalf("expected *ConfigError, got %T", err)
 				}
-			case "ValidationError":
-				if _, ok := err.(*validator.ValidationError); !ok {
-					t.Fatalf("expected ValidationError, got %T", err)
+			case "*ValidationError":
+				if _, ok := err.(*ValidationError); !ok {
+					t.Fatalf("expected *ValidationError, got %T", err)
 				}
-			case "RequestError":
-				if _, ok := err.(*pkgerrs.RequestError); !ok {
-					t.Fatalf("expected RequestError, got %T", err)
+			case "*NetworkError":
+				if _, ok := err.(*NetworkError); !ok {
+					t.Fatalf("expected *NetworkError, got %T", err)
 				}
-			case "AuthError":
-				if _, ok := err.(*pkgerrs.AuthError); !ok {
-					t.Fatalf("expected AuthError, got %T", err)
+			case "*AuthError":
+				if _, ok := err.(*AuthError); !ok {
+					t.Fatalf("expected *AuthError, got %T", err)
 				}
-			case "ParseError":
-				if _, ok := err.(*pkgerrs.ParseError); !ok {
-					t.Fatalf("expected ParseError, got %T", err)
+			case "*ParseError":
+				if _, ok := err.(*ParseError); !ok {
+					t.Fatalf("expected *ParseError, got %T", err)
 				}
 			default:
 				t.Fatalf("unhandled error type %q", tt.wantErrType)
@@ -988,7 +991,7 @@ func TestClient_GetComments(t *testing.T) {
 				return &mockHTTPClient{}
 			},
 			wantError: true,
-			errorType: "ConfigError",
+			errorType: "*ConfigError",
 		},
 		{
 			name: "missing subreddit",
@@ -999,7 +1002,7 @@ func TestClient_GetComments(t *testing.T) {
 				return &mockHTTPClient{}
 			},
 			wantError: true,
-			errorType: "ConfigError",
+			errorType: "*ConfigError",
 		},
 		{
 			name: "invalid subreddit",
@@ -1011,7 +1014,7 @@ func TestClient_GetComments(t *testing.T) {
 				return &mockHTTPClient{}
 			},
 			wantError: true,
-			errorType: "ValidationError",
+			errorType: "*ValidationError",
 		},
 		{
 			name: "missing post ID",
@@ -1022,7 +1025,7 @@ func TestClient_GetComments(t *testing.T) {
 				return &mockHTTPClient{}
 			},
 			wantError: true,
-			errorType: "ConfigError",
+			errorType: "*ConfigError",
 		},
 		{
 			name: "invalid pagination",
@@ -1035,7 +1038,7 @@ func TestClient_GetComments(t *testing.T) {
 				return &mockHTTPClient{}
 			},
 			wantError: true,
-			errorType: "ValidationError",
+			errorType: "*ValidationError",
 		},
 		{
 			name: "API error",
@@ -1046,12 +1049,12 @@ func TestClient_GetComments(t *testing.T) {
 			setupMock: func() HTTPClient {
 				return &mockHTTPClient{
 					doThingArrayFunc: func(req *http.Request) ([]*types.Thing, error) {
-						return nil, &pkgerrs.APIError{StatusCode: http.StatusNotFound, Message: "post not found"}
+						return nil, &APIError{StatusCode: http.StatusNotFound, Message: "post not found"}
 					},
 				}
 			},
 			wantError: true,
-			errorType: "APIError",
+			errorType: "*APIError",
 		},
 		{
 			name: "request creation error",
@@ -1067,7 +1070,7 @@ func TestClient_GetComments(t *testing.T) {
 				}
 			},
 			wantError: true,
-			errorType: "RequestError",
+			errorType: "*ParseError",
 		},
 		{
 			name: "auth token error",
@@ -1082,7 +1085,7 @@ func TestClient_GetComments(t *testing.T) {
 				return &mockTokenProvider{err: errors.New("token fail")}
 			},
 			wantError: true,
-			errorType: "AuthError",
+			errorType: "*AuthError",
 		},
 		{
 			name: "parse error",
@@ -1100,7 +1103,7 @@ func TestClient_GetComments(t *testing.T) {
 				}
 			},
 			wantError: true,
-			errorType: "ParseError",
+			errorType: "*ParseError",
 		},
 	}
 
@@ -1119,29 +1122,29 @@ func TestClient_GetComments(t *testing.T) {
 				}
 				if tt.errorType != "" {
 					switch tt.errorType {
-					case "ConfigError":
-						if _, ok := err.(*pkgerrs.ConfigError); !ok {
-							t.Errorf("expected ConfigError, got %T: %v", err, err)
+					case "*ConfigError":
+						if _, ok := err.(*ConfigError); !ok {
+							t.Errorf("expected *ConfigError, got %T: %v", err, err)
 						}
-					case "ValidationError":
-						if _, ok := err.(*validator.ValidationError); !ok {
-							t.Errorf("expected ValidationError, got %T: %v", err, err)
+					case "*ValidationError":
+						if _, ok := err.(*ValidationError); !ok {
+							t.Errorf("expected *ValidationError, got %T: %v", err, err)
 						}
-					case "RequestError":
-						if _, ok := err.(*pkgerrs.RequestError); !ok {
-							t.Errorf("expected RequestError, got %T: %v", err, err)
+					case "*NetworkError":
+						if _, ok := err.(*NetworkError); !ok {
+							t.Errorf("expected *NetworkError, got %T: %v", err, err)
 						}
-					case "APIError":
-						if _, ok := err.(*pkgerrs.APIError); !ok {
-							t.Errorf("expected APIError, got %T: %v", err, err)
+					case "*APIError":
+						if _, ok := err.(*APIError); !ok {
+							t.Errorf("expected *APIError, got %T: %v", err, err)
 						}
-					case "AuthError":
-						if _, ok := err.(*pkgerrs.AuthError); !ok {
-							t.Errorf("expected AuthError, got %T: %v", err, err)
+					case "*AuthError":
+						if _, ok := err.(*AuthError); !ok {
+							t.Errorf("expected *AuthError, got %T: %v", err, err)
 						}
-					case "ParseError":
-						if _, ok := err.(*pkgerrs.ParseError); !ok {
-							t.Errorf("expected ParseError, got %T: %v", err, err)
+					case "*ParseError":
+						if _, ok := err.(*ParseError); !ok {
+							t.Errorf("expected *ParseError, got %T: %v", err, err)
 						}
 					}
 				}
@@ -1188,7 +1191,7 @@ func TestClient_GetCommentsMultiple(t *testing.T) {
 			},
 			setupMock: func() HTTPClient { return &mockHTTPClient{} },
 			wantError: true,
-			errorType: "ConfigError",
+			errorType: "*ConfigError",
 		},
 		{
 			name: "multiple successful requests",
@@ -1292,13 +1295,13 @@ func TestClient_GetCommentsMultiple(t *testing.T) {
 				}
 				if tt.errorType != "" {
 					switch tt.errorType {
-					case "ConfigError":
-						if _, ok := err.(*pkgerrs.ConfigError); !ok {
-							t.Errorf("expected ConfigError, got %T", err)
+					case "*ConfigError":
+						if _, ok := err.(*ConfigError); !ok {
+							t.Errorf("expected *ConfigError, got %T", err)
 						}
-					case "ValidationError":
-						if _, ok := err.(*validator.ValidationError); !ok {
-							t.Errorf("expected ValidationError, got %T", err)
+					case "*ValidationError":
+						if _, ok := err.(*ValidationError); !ok {
+							t.Errorf("expected *ValidationError, got %T", err)
 						}
 					case "ContextError":
 						if !errors.Is(err, context.Canceled) {
@@ -1358,7 +1361,7 @@ func TestClient_GetMoreComments(t *testing.T) {
 				return &mockHTTPClient{}
 			},
 			wantError: true,
-			errorType: "ConfigError",
+			errorType: "*ConfigError",
 		},
 		{
 			name: "missing link ID",
@@ -1369,7 +1372,7 @@ func TestClient_GetMoreComments(t *testing.T) {
 				return &mockHTTPClient{}
 			},
 			wantError: true,
-			errorType: "ValidationError",
+			errorType: "*ValidationError",
 		},
 		{
 			name: "empty comment IDs",
@@ -1481,7 +1484,7 @@ func TestClient_GetMoreComments(t *testing.T) {
 			},
 			setupMock: func() HTTPClient { return &mockHTTPClient{} },
 			wantError: true,
-			errorType: "ValidationError",
+			errorType: "*ValidationError",
 		},
 		{
 			name: "request creation failure",
@@ -1497,7 +1500,7 @@ func TestClient_GetMoreComments(t *testing.T) {
 				}
 			},
 			wantError: true,
-			errorType: "RequestError",
+			errorType: "*ParseError",
 		},
 		{
 			name: "auth token failure",
@@ -1510,7 +1513,7 @@ func TestClient_GetMoreComments(t *testing.T) {
 				return &mockTokenProvider{err: errors.New("token fail")}
 			},
 			wantError: true,
-			errorType: "AuthError",
+			errorType: "*AuthError",
 		},
 	}
 
@@ -1529,21 +1532,25 @@ func TestClient_GetMoreComments(t *testing.T) {
 				}
 				if tt.errorType != "" {
 					switch tt.errorType {
-					case "ConfigError":
-						if _, ok := err.(*pkgerrs.ConfigError); !ok {
-							t.Errorf("expected ConfigError, got %T: %v", err, err)
+					case "*ConfigError":
+						if _, ok := err.(*ConfigError); !ok {
+							t.Errorf("expected *ConfigError, got %T: %v", err, err)
 						}
-					case "ValidationError":
-						if _, ok := err.(*validator.ValidationError); !ok {
-							t.Errorf("expected ValidationError, got %T: %v", err, err)
+					case "*ValidationError":
+						if _, ok := err.(*ValidationError); !ok {
+							t.Errorf("expected *ValidationError, got %T: %v", err, err)
 						}
-					case "RequestError":
-						if _, ok := err.(*pkgerrs.RequestError); !ok {
-							t.Errorf("expected RequestError, got %T: %v", err, err)
+					case "*NetworkError":
+						if _, ok := err.(*NetworkError); !ok {
+							t.Errorf("expected *NetworkError, got %T: %v", err, err)
 						}
-					case "AuthError":
-						if _, ok := err.(*pkgerrs.AuthError); !ok {
-							t.Errorf("expected AuthError, got %T: %v", err, err)
+					case "*AuthError":
+						if _, ok := err.(*AuthError); !ok {
+							t.Errorf("expected *AuthError, got %T: %v", err, err)
+						}
+					case "*ParseError":
+						if _, ok := err.(*ParseError); !ok {
+							t.Errorf("expected *ParseError, got %T: %v", err, err)
 						}
 					}
 				}
@@ -1640,14 +1647,14 @@ func TestBuildPaginationParams(t *testing.T) {
 
 func TestErrorTypes(t *testing.T) {
 	t.Run("ConfigError", func(t *testing.T) {
-		err := &pkgerrs.ConfigError{Message: "test error"}
+		err := &ConfigError{Message: "test error"}
 		if !strings.Contains(err.Error(), "test error") {
 			t.Errorf("expected error message to contain 'test error', got %s", err.Error())
 		}
 	})
 
 	t.Run("AuthError", func(t *testing.T) {
-		err := &pkgerrs.AuthError{Message: "auth failed", Err: errors.New("underlying")}
+		err := &AuthError{Message: "auth failed", Err: errors.New("underlying")}
 		errStr := err.Error()
 		if !strings.Contains(errStr, "auth failed") {
 			t.Errorf("expected error message to contain 'auth failed', got %s", errStr)
@@ -1661,22 +1668,15 @@ func TestErrorTypes(t *testing.T) {
 		}
 	})
 
-	t.Run("StateError", func(t *testing.T) {
-		err := &pkgerrs.StateError{Message: "not connected"}
-		if !strings.Contains(err.Error(), "not connected") {
-			t.Errorf("expected error message to contain 'not connected', got %s", err.Error())
-		}
-	})
-
 	t.Run("RequestError", func(t *testing.T) {
-		err := &pkgerrs.RequestError{
-			Operation: "get posts",
-			URL:       "https://oauth.reddit.com/hot",
-			Err:       errors.New("network error"),
+		err := &NetworkError{
+			Method: "GET",
+			URL:    "https://oauth.reddit.com/hot",
+			Err:    errors.New("network error"),
 		}
 		errStr := err.Error()
-		if !strings.Contains(errStr, "get posts") {
-			t.Errorf("expected error message to contain 'get posts', got %s", errStr)
+		if !strings.Contains(errStr, "GET") {
+			t.Errorf("expected error message to contain 'GET', got %s", errStr)
 		}
 		if !strings.Contains(errStr, "https://oauth.reddit.com/hot") {
 			t.Errorf("expected error message to contain URL, got %s", errStr)
@@ -1687,7 +1687,7 @@ func TestErrorTypes(t *testing.T) {
 	})
 
 	t.Run("ParseError", func(t *testing.T) {
-		err := &pkgerrs.ParseError{
+		err := &ParseError{
 			Operation: "parse posts",
 			Err:       errors.New("invalid JSON"),
 		}
@@ -1701,7 +1701,7 @@ func TestErrorTypes(t *testing.T) {
 	})
 
 	t.Run("APIError", func(t *testing.T) {
-		err := &pkgerrs.APIError{
+		err := &APIError{
 			ErrorCode: "403",
 			Message:   "Forbidden",
 			Details:   "private subreddit",

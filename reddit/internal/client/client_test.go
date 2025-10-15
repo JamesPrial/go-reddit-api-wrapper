@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	pkgerrs "github.com/jamesprial/go-reddit-api-wrapper/pkg/errors"
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/clock"
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/testutil"
@@ -600,7 +599,7 @@ func TestClient_ProactiveRateLimiting(t *testing.T) {
 }
 
 func TestAPIError_ErrorFormatting(t *testing.T) {
-	err := &pkgerrs.APIError{StatusCode: http.StatusServiceUnavailable, Message: "temporary outage"}
+	err := &APIError{StatusCode: http.StatusServiceUnavailable, Message: "temporary outage"}
 
 	if got := err.Error(); got != "API request failed with status 503: temporary outage" {
 		t.Fatalf("unexpected error string: %q", got)
@@ -839,7 +838,7 @@ func TestClient_DoMoreChildren_APIError(t *testing.T) {
 		t.Fatalf("expected nil Things on error, got %v", things)
 	}
 
-	var apiErr *pkgerrs.APIError
+	var apiErr *APIError
 	testutil.AssertErrorType(t, err, &apiErr)
 	testutil.AssertStringContains(t, err.Error(), "THREAD_LOCKED")
 }

@@ -113,7 +113,6 @@ func (e *DecodeError) Unwrap() error {
 	return e.Err
 }
 
-
 // ResponseValidationError represents errors that occur when the response structure
 // is invalid or unexpected (e.g., wrong type, missing required fields, unexpected format).
 type ResponseValidationError struct {
@@ -140,3 +139,22 @@ func (e *ResponseValidationError) Error() string {
 
 // Unwrap is not implemented for ResponseValidationError because it doesn't wrap another error
 // (it represents a validation issue, not an underlying error).
+
+// APIError represents an error response from the Reddit API.
+// This is an internal type that gets translated to the public graw.APIError.
+type APIError struct {
+	StatusCode int         // The HTTP status code
+	ErrorCode  string      // The error code from Reddit (if available)
+	Message    string      // The error message from Reddit
+	Details    interface{} // Any additional error details from the API
+}
+
+func (e *APIError) Error() string {
+	if e.ErrorCode != "" {
+		return fmt.Sprintf("reddit API error (status %d, code %s): %s", e.StatusCode, e.ErrorCode, e.Message)
+	}
+	return fmt.Sprintf("API request failed with status %d: %s", e.StatusCode, e.Message)
+}
+
+// Unwrap is not implemented for APIError because it doesn't wrap another error
+// (it represents an API-level error response).

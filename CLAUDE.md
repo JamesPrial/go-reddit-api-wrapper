@@ -101,9 +101,10 @@ go run ./cmd/examples/analyzer
   - Request/Response types (`PostsRequest`, `CommentsRequest`, `MoreCommentsRequest`, etc.)
   - Custom unmarshalers for handling Reddit's mixed-type fields (UnmarshalJSON implementations)
 
-- **`pkg/errors/` Package**: Typed error hierarchy
-  - `ConfigError`, `AuthError`, `StateError`, `RequestError`, `ParseError`, `APIError`, `ClientError`
-  - All errors implement `Unwrap()` for error chain inspection
+- **`reddit/errors.go`**: Public error types (exported from `graw` package)
+  - `ConfigError`, `ValidationError`, `AuthError`, `APIError`, `RateLimitError`, `NetworkError`, `ParseError`
+  - All errors that wrap underlying errors implement `Unwrap()` for error chain inspection
+  - Internal packages (`auth`, `client`, `parse`, `validator`) have their own error types that get translated to public types via translation layer in `reddit.go`
 
 - **`pkg/validation/` Package**: Validation utilities
   - Input sanitization and format validation

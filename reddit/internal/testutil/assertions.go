@@ -16,10 +16,10 @@ package testutil
 
 import (
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
-	pkgerrs "github.com/jamesprial/go-reddit-api-wrapper/pkg/errors"
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 )
 
@@ -82,13 +82,30 @@ func AssertAPIError(t *testing.T, err error, expectedStatus int) {
 		t.Fatalf("expected APIError with status %d, got nil", expectedStatus)
 	}
 
-	var apiErr *pkgerrs.APIError
-	if !errors.As(err, &apiErr) {
-		t.Fatalf("expected APIError with status %d, got %T: %v", expectedStatus, err, err)
+	// Try to extract status code from error using reflection
+	// This works with any error type that has a StatusCode field
+	v := reflect.ValueOf(err)
+	if v.Kind() == reflect.Ptr {
+		v = v.Elem()
 	}
 
-	if apiErr.StatusCode != expectedStatus {
-		t.Fatalf("expected APIError with status %d, got status %d: %v", expectedStatus, apiErr.StatusCode, err)
+	if v.Kind() != reflect.Struct {
+		t.Fatalf("expected APIError with status %d, got %T (not a struct): %v", expectedStatus, err, err)
+	}
+
+	statusCodeField := v.FieldByName("StatusCode")
+	if !statusCodeField.IsValid() {
+		t.Fatalf("expected APIError with status %d, got %T (does not have StatusCode field): %v", expectedStatus, err, err)
+	}
+
+	if statusCodeField.Kind() != reflect.Int {
+		t.Fatalf("expected APIError with status %d, got %T (StatusCode is not an int): %v", expectedStatus, err, err)
+	}
+
+	statusCode := int(statusCodeField.Int())
+
+	if statusCode != expectedStatus {
+		t.Fatalf("expected APIError with status %d, got status %d: %v", expectedStatus, statusCode, err)
 	}
 }
 

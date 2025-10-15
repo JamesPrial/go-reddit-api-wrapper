@@ -15,7 +15,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	pkgerrs "github.com/jamesprial/go-reddit-api-wrapper/pkg/errors"
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/clock"
 	"golang.org/x/time/rate"
@@ -268,7 +267,7 @@ func (c *Client) doRequest(req *http.Request) ([]byte, *http.Response, error) {
 
 	// Check HTTP status
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return bodyBytes, resp, &pkgerrs.APIError{StatusCode: resp.StatusCode, Message: "request failed"}
+		return bodyBytes, resp, &APIError{StatusCode: resp.StatusCode, Message: "request failed"}
 	}
 
 	return bodyBytes, resp, nil
@@ -321,7 +320,7 @@ func (c *Client) DoThingArray(req *http.Request) ([]*types.Thing, error) {
 				Message string `json:"message"`
 			}
 			if err := json.Unmarshal(bodyBytes, &errObj); err == nil && errObj.Error != "" {
-				return nil, &pkgerrs.APIError{StatusCode: resp.StatusCode, ErrorCode: errObj.Error, Message: errObj.Message}
+				return nil, &APIError{StatusCode: resp.StatusCode, ErrorCode: errObj.Error, Message: errObj.Message}
 			}
 			snippet := truncateBody(bodyBytes, TRUNCATE_LEN)
 			return nil, &DecodeError{Operation: "unmarshal_single_thing", BodySnippet: snippet, Err: err}
@@ -376,7 +375,7 @@ func (c *Client) DoMoreChildren(req *http.Request) ([]*types.Thing, error) {
 
 	// Check for API errors
 	if len(response.JSON.Errors) > 0 {
-		return nil, &pkgerrs.APIError{StatusCode: resp.StatusCode, Message: fmt.Sprintf("API error: %v", response.JSON.Errors[0])}
+		return nil, &APIError{StatusCode: resp.StatusCode, Message: fmt.Sprintf("API error: %v", response.JSON.Errors[0])}
 	}
 
 	return response.JSON.Data.Things, nil
