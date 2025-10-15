@@ -10,11 +10,39 @@ import (
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 )
 
+// isValidPostSortField returns true if the field is allowed for sorting posts
+func isValidPostSortField(field string) bool {
+	switch field {
+	case "created_utc", "score", "num_comments", "fetched_at":
+		return true
+	default:
+		return false
+	}
+}
+
+// isValidSortDirection returns true if the direction is ASC or DESC
+func isValidSortDirection(dir string) bool {
+	return dir == "ASC" || dir == "DESC"
+}
+
 // UpsertPost inserts a new post or updates an existing post if it already exists.
 // The post ID (post.ID) is used as the unique identifier.
 // Sets fetched_at to current Unix timestamp on both insert and update.
 // Returns an error if the operation fails.
 func (s *SQLiteStore) UpsertPost(ctx context.Context, post *types.Post) error {
+	if post == nil {
+		return fmt.Errorf("UpsertPost: post cannot be nil")
+	}
+	if post.ID == "" {
+		return fmt.Errorf("UpsertPost: post.ID cannot be empty")
+	}
+	if post.Name == "" {
+		return fmt.Errorf("UpsertPost: post.Name cannot be empty")
+	}
+	if post.Subreddit == "" {
+		return fmt.Errorf("UpsertPost: post.Subreddit cannot be empty")
+	}
+
 	s.logger.Debug("upserting post", "post_id", post.ID, "subreddit", post.Subreddit)
 
 	// Build the upsert query with all 36 columns
@@ -191,31 +219,25 @@ func (s *SQLiteStore) ListPosts(ctx context.Context, opts *ListPostsOptions) ([]
 	sortDir := "DESC"        // Default sort direction
 
 	if opts != nil {
-		// Validate and set sort field
-		if opts.SortBy != "" {
-			switch opts.SortBy {
-			case "created_utc", "score", "num_comments", "fetched_at":
-				orderBy = opts.SortBy
-			default:
-				// Use default if invalid
-				s.logger.Debug("invalid sort_by field, using default", "sort_by", opts.SortBy)
-			}
+		// Validate sort parameters against whitelist
+		if opts.SortBy != "" && isValidPostSortField(opts.SortBy) {
+			orderBy = opts.SortBy
 		}
 
-		// Validate and set sort direction
 		if opts.SortDir != "" {
-			switch strings.ToUpper(opts.SortDir) {
-			case "ASC":
-				sortDir = "ASC"
-			case "DESC":
-				sortDir = "DESC"
-			default:
-				// Use default if invalid
-				s.logger.Debug("invalid sort_dir, using default", "sort_dir", opts.SortDir)
+			dir := strings.ToUpper(opts.SortDir)
+			if isValidSortDirection(dir) {
+				sortDir = dir
 			}
 		}
 	}
 
+	// SECURITY: orderBy and sortDir are validated against whitelists above.
+	// They CANNOT be parameterized as they are SQL identifiers (column names).
+	// Never remove the whitelist validation without replacing with equivalent protection.
+	if !isValidPostSortField(orderBy) || !isValidSortDirection(sortDir) {
+		return nil, fmt.Errorf("ListPosts: invalid sort parameters")
+	}
 	query.WriteString(fmt.Sprintf(" ORDER BY %s %s", orderBy, sortDir))
 
 	// Add LIMIT and OFFSET
@@ -302,14 +324,8 @@ func (s *SQLiteStore) UpsertPosts(ctx context.Context, posts []*types.Post) erro
 		return fmt.Errorf("UpsertPosts: failed to begin transaction: %w", err)
 	}
 
-	// Ensure rollback on error
-	defer func() {
-		if err != nil {
-			if rbErr := tx.Rollback(); rbErr != nil {
-				s.logger.Debug("failed to rollback transaction", "error", rbErr)
-			}
-		}
-	}()
+	// Ensure rollback on error or panic (safe to call after Commit)
+	defer tx.Rollback()
 
 	// Prepare the upsert statement
 	query := `
@@ -376,7 +392,10 @@ func (s *SQLiteStore) UpsertPosts(ctx context.Context, posts []*types.Post) erro
 	defer stmt.Close()
 
 	// Execute statement for each post
-	for _, post := range posts {
+	for i, post := range posts {
+		if post == nil {
+			return fmt.Errorf("UpsertPosts: post at index %d is nil", i)
+		}
 		args := postToInsertArgs(post)
 		_, err := stmt.ExecContext(ctx, args...)
 		if err != nil {
