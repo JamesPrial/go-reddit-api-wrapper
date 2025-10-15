@@ -113,19 +113,6 @@ func (e *DecodeError) Unwrap() error {
 	return e.Err
 }
 
-// APIError represents an error response from the Reddit API.
-type APIError struct {
-	// StatusCode is the HTTP status code
-	StatusCode int
-	// ErrorCode is the error code from Reddit (if available)
-	ErrorCode string
-	// Message is the error message from Reddit
-	Message string
-}
-
-func (e *APIError) Error() string {
-	return fmt.Sprintf("reddit API error (status %d, code %s): %s", e.StatusCode, e.ErrorCode, e.Message)
-}
 
 // ResponseValidationError represents errors that occur when the response structure
 // is invalid or unexpected (e.g., wrong type, missing required fields, unexpected format).

@@ -268,7 +268,7 @@ func (c *Client) doRequest(req *http.Request) ([]byte, *http.Response, error) {
 
 	// Check HTTP status
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return bodyBytes, resp, &APIError{StatusCode: resp.StatusCode, Message: "request failed"}
+		return bodyBytes, resp, &pkgerrs.APIError{StatusCode: resp.StatusCode, Message: "request failed"}
 	}
 
 	return bodyBytes, resp, nil
@@ -321,7 +321,7 @@ func (c *Client) DoThingArray(req *http.Request) ([]*types.Thing, error) {
 				Message string `json:"message"`
 			}
 			if err := json.Unmarshal(bodyBytes, &errObj); err == nil && errObj.Error != "" {
-				return nil, &APIError{StatusCode: resp.StatusCode, ErrorCode: errObj.Error, Message: errObj.Message}
+				return nil, &pkgerrs.APIError{StatusCode: resp.StatusCode, ErrorCode: errObj.Error, Message: errObj.Message}
 			}
 			snippet := truncateBody(bodyBytes, TRUNCATE_LEN)
 			return nil, &DecodeError{Operation: "unmarshal_single_thing", BodySnippet: snippet, Err: err}
