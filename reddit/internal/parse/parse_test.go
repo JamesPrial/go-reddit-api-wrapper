@@ -85,6 +85,11 @@ func TestParseThing(t *testing.T) {
 
 			if tt.expectError {
 				testutil.AssertError(t, err)
+				// Check for specific error types
+				if tt.name == "nil thing" || tt.name == "unknown kind" {
+					var kindErr *KindError
+					testutil.AssertErrorType(t, err, &kindErr)
+				}
 			} else {
 				testutil.AssertNoError(t, err)
 				if result == nil {
@@ -141,6 +146,14 @@ func TestParseListing(t *testing.T) {
 
 			if tt.expectError {
 				testutil.AssertError(t, err)
+				// Check for specific error types
+				if tt.name == "nil thing" || tt.name == "wrong kind" {
+					var kindErr *KindError
+					testutil.AssertErrorType(t, err, &kindErr)
+				} else if tt.name == "invalid JSON" {
+					var unmarshalErr *UnmarshalError
+					testutil.AssertErrorType(t, err, &unmarshalErr)
+				}
 			} else {
 				testutil.AssertNoError(t, err)
 				if result == nil {
@@ -208,6 +221,14 @@ func TestParsePost(t *testing.T) {
 
 			if tt.expectError {
 				testutil.AssertError(t, err)
+				// Check for specific error types
+				if tt.name == "nil thing" || tt.name == "wrong kind" {
+					var kindErr *KindError
+					testutil.AssertErrorType(t, err, &kindErr)
+				} else if tt.name == "invalid JSON" {
+					var unmarshalErr *UnmarshalError
+					testutil.AssertErrorType(t, err, &unmarshalErr)
+				}
 			} else {
 				testutil.AssertNoError(t, err)
 				if result == nil {
@@ -296,6 +317,14 @@ func TestParseComment(t *testing.T) {
 
 			if tt.expectError {
 				testutil.AssertError(t, err)
+				// Check for specific error types
+				if tt.name == "nil thing" || tt.name == "wrong kind" {
+					var kindErr *KindError
+					testutil.AssertErrorType(t, err, &kindErr)
+				} else if tt.name == "invalid JSON" {
+					var unmarshalErr *UnmarshalError
+					testutil.AssertErrorType(t, err, &unmarshalErr)
+				}
 			} else {
 				testutil.AssertNoError(t, err)
 				if result == nil {
@@ -349,6 +378,14 @@ func TestParseSubreddit(t *testing.T) {
 
 			if tt.expectError {
 				testutil.AssertError(t, err)
+				// Check for specific error types
+				if tt.name == "nil thing" || tt.name == "wrong kind" {
+					var kindErr *KindError
+					testutil.AssertErrorType(t, err, &kindErr)
+				} else if tt.name == "invalid JSON" {
+					var unmarshalErr *UnmarshalError
+					testutil.AssertErrorType(t, err, &unmarshalErr)
+				}
 			} else {
 				testutil.AssertNoError(t, err)
 				if result == nil {
@@ -401,6 +438,14 @@ func TestParseAccount(t *testing.T) {
 
 			if tt.expectError {
 				testutil.AssertError(t, err)
+				// Check for specific error types
+				if tt.name == "nil thing" || tt.name == "wrong kind" {
+					var kindErr *KindError
+					testutil.AssertErrorType(t, err, &kindErr)
+				} else if tt.name == "invalid JSON" {
+					var unmarshalErr *UnmarshalError
+					testutil.AssertErrorType(t, err, &unmarshalErr)
+				}
 			} else {
 				testutil.AssertNoError(t, err)
 				if result == nil {
@@ -452,6 +497,14 @@ func TestParseMessage(t *testing.T) {
 
 			if tt.expectError {
 				testutil.AssertError(t, err)
+				// Check for specific error types
+				if tt.name == "nil thing" || tt.name == "wrong kind" {
+					var kindErr *KindError
+					testutil.AssertErrorType(t, err, &kindErr)
+				} else if tt.name == "invalid JSON" {
+					var unmarshalErr *UnmarshalError
+					testutil.AssertErrorType(t, err, &unmarshalErr)
+				}
 			} else {
 				testutil.AssertNoError(t, err)
 				if result == nil {
@@ -509,6 +562,14 @@ func TestParseMore(t *testing.T) {
 
 			if tt.expectError {
 				testutil.AssertError(t, err)
+				// Check for specific error types
+				if tt.name == "nil thing" || tt.name == "wrong kind" {
+					var kindErr *KindError
+					testutil.AssertErrorType(t, err, &kindErr)
+				} else if tt.name == "invalid JSON" {
+					var unmarshalErr *UnmarshalError
+					testutil.AssertErrorType(t, err, &unmarshalErr)
+				}
 			} else {
 				testutil.AssertNoError(t, err)
 				if result == nil {
@@ -586,6 +647,11 @@ func TestExtractPosts(t *testing.T) {
 
 			if tt.expectError {
 				testutil.AssertError(t, err)
+				// Check for specific error types
+				if tt.name == "nil listing" || tt.name == "wrong kind" {
+					var kindErr *KindError
+					testutil.AssertErrorType(t, err, &kindErr)
+				}
 			} else {
 				testutil.AssertNoError(t, err)
 				if len(posts) != tt.expectCount {
@@ -710,6 +776,11 @@ func TestExtractComments(t *testing.T) {
 
 			if tt.expectError {
 				testutil.AssertError(t, err)
+				// Check for specific error types
+				if tt.name == "wrong kind" {
+					var kindErr *KindError
+					testutil.AssertErrorType(t, err, &kindErr)
+				}
 			} else {
 				testutil.AssertNoError(t, err)
 				if len(comments) != tt.expectComments {
@@ -833,6 +904,11 @@ func TestExtractPostAndComments(t *testing.T) {
 
 			if tt.expectError {
 				testutil.AssertError(t, err)
+				// Check for specific error types
+				if tt.name == "nil response" || tt.name == "empty response" {
+					var extractErr *ExtractionError
+					testutil.AssertErrorType(t, err, &extractErr)
+				}
 			} else {
 				// For the "invalid second listing" case, we expect an error about comment extraction
 				// but the post should still be returned
@@ -1283,6 +1359,9 @@ func TestParsePost_MaliciousData(t *testing.T) {
 				if result != nil {
 					t.Errorf("expected nil result on error, got %v", result)
 				}
+				// Validation errors should be ValidationError type
+				var validationErr *ValidationError
+				testutil.AssertErrorType(t, err, &validationErr)
 			} else {
 				testutil.AssertNoError(t, err)
 				if result == nil {
@@ -1382,6 +1461,9 @@ func TestParseComment_MaliciousData(t *testing.T) {
 				if result != nil {
 					t.Errorf("expected nil result on error, got %v", result)
 				}
+				// Validation errors should be ValidationError type
+				var validationErr *ValidationError
+				testutil.AssertErrorType(t, err, &validationErr)
 			} else {
 				testutil.AssertNoError(t, err)
 				if result == nil {
@@ -1409,7 +1491,7 @@ func TestParseListing_MaliciousData(t *testing.T) {
 				Build().
 				ToThing(),
 			expectError: true,
-			errorText:   "invalid AfterFullname from Reddit API",
+			errorText:   "AfterFullname",
 		},
 		{
 			name: "invalid AfterFullname - SQL injection",
@@ -1418,7 +1500,7 @@ func TestParseListing_MaliciousData(t *testing.T) {
 				Build().
 				ToThing(),
 			expectError: true,
-			errorText:   "invalid AfterFullname from Reddit API",
+			errorText:   "AfterFullname",
 		},
 		{
 			name: "invalid BeforeFullname - wrong format",
@@ -1427,7 +1509,7 @@ func TestParseListing_MaliciousData(t *testing.T) {
 				Build().
 				ToThing(),
 			expectError: true,
-			errorText:   "invalid BeforeFullname from Reddit API",
+			errorText:   "BeforeFullname",
 		},
 		{
 			name: "valid pagination tokens",
@@ -1461,6 +1543,9 @@ func TestParseListing_MaliciousData(t *testing.T) {
 				if result != nil {
 					t.Errorf("expected nil result on error, got %v", result)
 				}
+				// Validation errors should be ValidationError type
+				var validationErr *ValidationError
+				testutil.AssertErrorType(t, err, &validationErr)
 			} else {
 				testutil.AssertNoError(t, err)
 				if result == nil {
@@ -1534,6 +1619,9 @@ func TestParseSubreddit_MaliciousData(t *testing.T) {
 				if result != nil {
 					t.Errorf("expected nil result on error, got %v", result)
 				}
+				// Validation errors should be ValidationError type
+				var validationErr *ValidationError
+				testutil.AssertErrorType(t, err, &validationErr)
 			} else {
 				testutil.AssertNoError(t, err)
 				if result == nil {
