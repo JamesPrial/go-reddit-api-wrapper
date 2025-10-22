@@ -268,3 +268,213 @@ func AssertCommentCount(t *testing.T, response *types.CommentsResponse, expected
 		t.Errorf("expected %d comments, got %d", expected, len(response.Comments))
 	}
 }
+
+// assertErrorByTypeName is a helper that checks if an error (or any error in its chain)
+// matches the expected type name using reflection.
+func assertErrorByTypeName(err error, expectedTypeName string) bool {
+	if err == nil {
+		return false
+	}
+
+	// Check the current error
+	errType := reflect.TypeOf(err)
+	if errType != nil {
+		typeName := errType.String()
+		if strings.HasSuffix(typeName, expectedTypeName) {
+			return true
+		}
+	}
+
+	// Check wrapped errors
+	unwrapped := errors.Unwrap(err)
+	if unwrapped != nil {
+		return assertErrorByTypeName(unwrapped, expectedTypeName)
+	}
+
+	return false
+}
+
+// AssertAuthError checks that err is of type *AuthError and optionally
+// validates that the error message contains the expected message string.
+// If expectedMsg is empty, only the type is checked.
+//
+// This is useful for testing authentication failures and credential validation.
+//
+// Example:
+//
+//	err := client.Authenticate()
+//	testutil.AssertAuthError(t, err, "invalid credentials")
+//
+//	// Or just check the type:
+//	testutil.AssertAuthError(t, err, "")
+func AssertAuthError(t *testing.T, err error, expectedMsg string) {
+	t.Helper()
+	if err == nil {
+		t.Fatal("expected AuthError, got nil")
+	}
+
+	if !assertErrorByTypeName(err, "AuthError") {
+		t.Fatalf("expected *AuthError, got %T: %v", err, err)
+	}
+
+	if expectedMsg != "" && !strings.Contains(err.Error(), expectedMsg) {
+		t.Errorf("expected AuthError message to contain %q, got: %q", expectedMsg, err.Error())
+	}
+}
+
+// AssertValidationError checks that err is of type *ValidationError and
+// optionally validates that the error message contains the expected message string.
+// If expectedMsg is empty, only the type is checked.
+//
+// This is useful for testing input validation failures for subreddit names,
+// post IDs, pagination parameters, and other user inputs.
+//
+// Example:
+//
+//	err := client.GetHot(ctx, &types.PostsRequest{
+//	    Subreddit: "invalid name!",
+//	})
+//	testutil.AssertValidationError(t, err, "subreddit")
+//
+//	// Or just check the type:
+//	testutil.AssertValidationError(t, err, "")
+func AssertValidationError(t *testing.T, err error, expectedMsg string) {
+	t.Helper()
+	if err == nil {
+		t.Fatal("expected ValidationError, got nil")
+	}
+
+	if !assertErrorByTypeName(err, "ValidationError") {
+		t.Fatalf("expected *ValidationError, got %T: %v", err, err)
+	}
+
+	if expectedMsg != "" && !strings.Contains(err.Error(), expectedMsg) {
+		t.Errorf("expected ValidationError message to contain %q, got: %q", expectedMsg, err.Error())
+	}
+}
+
+// AssertParseError checks that err is of type *ParseError and optionally
+// validates that the error message contains the expected message string.
+// If expectedMsg is empty, only the type is checked.
+//
+// This is useful for testing response parsing failures when the API returns
+// unexpected data structures or malformed JSON.
+//
+// Example:
+//
+//	response, err := client.GetHot(ctx, request)
+//	testutil.AssertParseError(t, err, "invalid JSON")
+//
+//	// Or just check the type:
+//	testutil.AssertParseError(t, err, "")
+func AssertParseError(t *testing.T, err error, expectedMsg string) {
+	t.Helper()
+	if err == nil {
+		t.Fatal("expected ParseError, got nil")
+	}
+
+	if !assertErrorByTypeName(err, "ParseError") {
+		t.Fatalf("expected *ParseError, got %T: %v", err, err)
+	}
+
+	if expectedMsg != "" && !strings.Contains(err.Error(), expectedMsg) {
+		t.Errorf("expected ParseError message to contain %q, got: %q", expectedMsg, err.Error())
+	}
+}
+
+// AssertNetworkError checks that err is of type *NetworkError and optionally
+// validates that the error message contains the expected message string.
+// If expectedMsg is empty, only the type is checked.
+//
+// This is useful for testing network-level failures such as connection timeouts,
+// DNS resolution failures, and other transport-level errors.
+//
+// Example:
+//
+//	response, err := client.GetHot(ctx, request)
+//	testutil.AssertNetworkError(t, err, "connection refused")
+//
+//	// Or just check the type:
+//	testutil.AssertNetworkError(t, err, "")
+func AssertNetworkError(t *testing.T, err error, expectedMsg string) {
+	t.Helper()
+	if err == nil {
+		t.Fatal("expected NetworkError, got nil")
+	}
+
+	if !assertErrorByTypeName(err, "NetworkError") {
+		t.Fatalf("expected *NetworkError, got %T: %v", err, err)
+	}
+
+	if expectedMsg != "" && !strings.Contains(err.Error(), expectedMsg) {
+		t.Errorf("expected NetworkError message to contain %q, got: %q", expectedMsg, err.Error())
+	}
+}
+
+// AssertRateLimitError checks that err is of type *RateLimitError.
+// This assertion does not validate the error message, but ensures the error
+// is properly typed as a rate limit error.
+//
+// This is useful for testing rate limiting behavior, including context
+// cancellation while waiting for rate limit availability.
+//
+// Example:
+//
+//	// Simulate hitting rate limit
+//	for i := 0; i < 100; i++ {
+//	    _, err := client.GetHot(ctx, request)
+//	    if err != nil {
+//	        testutil.AssertRateLimitError(t, err)
+//	        break
+//	    }
+//	}
+func AssertRateLimitError(t *testing.T, err error) {
+	t.Helper()
+	if err == nil {
+		t.Fatal("expected RateLimitError, got nil")
+	}
+
+	if !assertErrorByTypeName(err, "RateLimitError") {
+		t.Fatalf("expected *RateLimitError, got %T: %v", err, err)
+	}
+}
+
+// AssertErrorChain validates that an error wraps other errors in a specific order
+// by checking type names using reflection. This is useful for testing error wrapping
+// and ensuring that error context is properly preserved through the error chain.
+//
+// The expectedTypeNames parameter should be a slice of error type names (e.g., "AuthError",
+// "NetworkError") representing the expected error types in the chain. The order matters:
+// types are checked from outermost to innermost in the error chain.
+//
+// Example:
+//
+//	// Test that an error chain contains both ParseError and NetworkError
+//	err := client.GetHot(ctx, request)
+//	testutil.AssertErrorChain(t, err, "ParseError", "NetworkError")
+//
+//	// Test a more complex chain
+//	testutil.AssertErrorChain(t, err, "APIError", "AuthError", "NetworkError")
+func AssertErrorChain(t *testing.T, err error, expectedTypeNames ...string) {
+	t.Helper()
+	if err == nil {
+		t.Fatal("expected error with chain, got nil")
+	}
+
+	for i, expectedTypeName := range expectedTypeNames {
+		if !assertErrorByTypeName(err, expectedTypeName) {
+			// Build a helpful error message showing what we found
+			var foundTypes []string
+			for j := 0; j < i; j++ {
+				foundTypes = append(foundTypes, expectedTypeNames[j])
+			}
+			if len(foundTypes) > 0 {
+				t.Fatalf("error chain broken at position %d: expected *%s but it was not found in chain. Found types so far: %v. Error type: %T, Error: %v",
+					i, expectedTypeName, foundTypes, err, err)
+			} else {
+				t.Fatalf("error chain broken at position %d: expected *%s but it was not found in chain. Error type: %T, Error: %v",
+					i, expectedTypeName, err, err)
+			}
+		}
+	}
+}

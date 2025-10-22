@@ -10,22 +10,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/client"
-	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/clock"
-	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/parse"
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/testutil"
-	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/validator"
 )
-
-// Note: mockTokenProvider is defined in reddit_test.go and shared across all test files
 
 // TestProactiveRateLimitingBehavior tests proactive rate limiting when approaching limits
 func TestProactiveRateLimitingBehavior(t *testing.T) {
 	var requestCount int64
 	var mu sync.Mutex
-
-	// Create mock clock
-	mockClock := clock.NewMockClock(time.Time{})
 
 	// Create account using builder
 	account := testutil.NewAccount("testuser123").
@@ -46,7 +37,7 @@ func TestProactiveRateLimitingBehavior(t *testing.T) {
 
 		// Simulate rate limit headers that decrease with each request
 		remaining := 60 - int(currentCount%10)
-		reset := int(mockClock.Now().Unix()) + 300
+		reset := int(time.Now().Unix()) + 300
 		w.Header().Set("X-Ratelimit-Remaining", strconv.Itoa(remaining))
 		w.Header().Set("X-Ratelimit-Reset", strconv.Itoa(reset))
 		w.Header().Set("X-Ratelimit-Used", strconv.Itoa(int(currentCount%10)))
@@ -55,23 +46,13 @@ func TestProactiveRateLimitingBehavior(t *testing.T) {
 		originalHandler.ServeHTTP(w, r)
 	})
 
-	// Create client with rate limiting
-	httpClient := &http.Client{Timeout: 30 * time.Second}
-	rateLimitConfig := client.RateLimitConfig{
+	// Create client with rate limiting using the factory
+	config := RateLimitConfig{
 		RequestsPerMinute:  60,
 		Burst:              10,
 		ProactiveThreshold: 8, // Start being proactive at 8 remaining
 	}
-
-	internalClient, err := client.NewClientWithRateLimit(httpClient, server.URL(), "test/1.0", nil, rateLimitConfig, mockClock)
-	testutil.AssertNoError(t, err)
-
-	client := &Reddit{
-		httpClient: internalClient,
-		parser:     parse.NewParser(nil),
-		validator:  validator.NewValidator(),
-		auth:       &mockTokenProvider{token: "test_token"},
-	}
+	client := NewTestClientWithRateLimit(server.URL(), config)
 
 	ctx := context.Background()
 
@@ -81,7 +62,7 @@ func TestProactiveRateLimitingBehavior(t *testing.T) {
 		var wg sync.WaitGroup
 		results := make(chan bool, numRequests)
 
-		startTime := mockClock.Now()
+		startTime := time.Now()
 
 		for i := 0; i < numRequests; i++ {
 			wg.Add(1)
@@ -93,14 +74,14 @@ func TestProactiveRateLimitingBehavior(t *testing.T) {
 				results <- true
 			}(i)
 
-			// Simulate some time passing between request initiations
-			mockClock.Advance(100 * time.Millisecond)
+			// Small delay between request initiations
+			time.Sleep(10 * time.Millisecond)
 		}
 
 		wg.Wait()
 		close(results)
 
-		totalTime := mockClock.Since(startTime)
+		totalTime := time.Since(startTime)
 		successCount := 0
 		for success := range results {
 			if success {
@@ -108,7 +89,7 @@ func TestProactiveRateLimitingBehavior(t *testing.T) {
 			}
 		}
 
-		t.Logf("Completed %d requests in mock time %v", numRequests, totalTime)
+		t.Logf("Completed %d requests in %v", numRequests, totalTime)
 		t.Logf("Total requests made: %d", requestCount)
 
 		// Verify we made the expected number of requests
@@ -128,9 +109,6 @@ func TestRateLimitRecoveryPatterns(t *testing.T) {
 	var requestCount int64
 	var hitRateLimit bool
 	var mu sync.Mutex
-
-	// Create mock clock
-	mockClock := clock.NewMockClock(time.Time{})
 
 	// Create account using builder
 	account := testutil.NewAccount("testuser123").
@@ -154,7 +132,7 @@ func TestRateLimitRecoveryPatterns(t *testing.T) {
 		// After 5 requests, start returning 429
 		if currentCount >= 5 && currentCount < 8 {
 			w.Header().Set("X-Ratelimit-Remaining", "0")
-			w.Header().Set("X-Ratelimit-Reset", strconv.Itoa(int(mockClock.Now().Unix())+2)) // 2 seconds
+			w.Header().Set("X-Ratelimit-Reset", strconv.Itoa(int(time.Now().Unix())+2)) // 2 seconds
 			w.WriteHeader(http.StatusTooManyRequests)
 			w.Write([]byte(`{"message":"Too Many Requests","error":"rate_limit_exceeded"}`))
 			return
@@ -162,7 +140,7 @@ func TestRateLimitRecoveryPatterns(t *testing.T) {
 
 		// Normal response - use builder
 		w.Header().Set("X-Ratelimit-Remaining", "10")
-		w.Header().Set("X-Ratelimit-Reset", strconv.Itoa(int(mockClock.Now().Unix())+300))
+		w.Header().Set("X-Ratelimit-Reset", strconv.Itoa(int(time.Now().Unix())+300))
 
 		thing := testutil.NewAccount("testuser123").
 			WithID("user123").
@@ -173,22 +151,12 @@ func TestRateLimitRecoveryPatterns(t *testing.T) {
 	})
 
 	// Create client with rate limiting
-	httpClient := &http.Client{Timeout: 30 * time.Second}
-	rateLimitConfig := client.RateLimitConfig{
+	config := RateLimitConfig{
 		RequestsPerMinute:  60,
 		Burst:              5,
 		ProactiveThreshold: 3,
 	}
-
-	internalClient, err := client.NewClientWithRateLimit(httpClient, server.URL(), "test/1.0", nil, rateLimitConfig, mockClock)
-	testutil.AssertNoError(t, err)
-
-	client := &Reddit{
-		httpClient: internalClient,
-		parser:     parse.NewParser(nil),
-		validator:  validator.NewValidator(),
-		auth:       &mockTokenProvider{token: "test_token"},
-	}
+	client := NewTestClientWithRateLimit(server.URL(), config)
 
 	ctx := context.Background()
 
@@ -213,12 +181,12 @@ func TestRateLimitRecoveryPatterns(t *testing.T) {
 				t.Logf("Request %d succeeded", i+1)
 			}
 
-			// Advance mock time between requests
-			mockClock.Advance(100 * time.Millisecond)
+			// Small delay between requests
+			time.Sleep(50 * time.Millisecond)
 		}
 
-		// Advance time past the rate limit reset to allow recovery
-		mockClock.Advance(3 * time.Second)
+		// Wait for rate limit reset period to pass
+		time.Sleep(2500 * time.Millisecond)
 
 		t.Logf("Success: %d, Errors: %d", successCount, errorCount)
 
@@ -244,9 +212,6 @@ func TestBurstCapacityHandling(t *testing.T) {
 	var requestCount int64
 	var mu sync.Mutex
 
-	// Create mock clock
-	mockClock := clock.NewMockClock(time.Time{})
-
 	// Create account using builder
 	account := testutil.NewAccount("testuser123").
 		WithID("user123").
@@ -265,7 +230,7 @@ func TestBurstCapacityHandling(t *testing.T) {
 
 		// Always allow requests, but track rate limit headers
 		w.Header().Set("X-Ratelimit-Remaining", "50")
-		w.Header().Set("X-Ratelimit-Reset", strconv.Itoa(int(mockClock.Now().Unix())+300))
+		w.Header().Set("X-Ratelimit-Reset", strconv.Itoa(int(time.Now().Unix())+300))
 		w.Header().Set("Content-Type", "application/json")
 
 		thing := testutil.NewAccount("testuser123").
@@ -276,28 +241,18 @@ func TestBurstCapacityHandling(t *testing.T) {
 	})
 
 	// Create client with burst capacity
-	httpClient := &http.Client{Timeout: 30 * time.Second}
-	rateLimitConfig := client.RateLimitConfig{
+	config := RateLimitConfig{
 		RequestsPerMinute:  30, // 0.5 per second
 		Burst:              10, // Allow burst of 10
 		ProactiveThreshold: 5,
 	}
-
-	internalClient, err := client.NewClientWithRateLimit(httpClient, server.URL(), "test/1.0", nil, rateLimitConfig, mockClock)
-	testutil.AssertNoError(t, err)
-
-	client := &Reddit{
-		httpClient: internalClient,
-		parser:     parse.NewParser(nil),
-		validator:  validator.NewValidator(),
-		auth:       &mockTokenProvider{token: "test_token"},
-	}
+	client := NewTestClientWithRateLimit(server.URL(), config)
 
 	ctx := context.Background()
 
 	t.Run("BurstCapacity", func(t *testing.T) {
 		// Test burst capacity - make 8 requests quickly
-		burstStart := mockClock.Now()
+		burstStart := time.Now()
 		var wg sync.WaitGroup
 		burstSuccess := make(chan bool, 8)
 
@@ -321,7 +276,7 @@ func TestBurstCapacityHandling(t *testing.T) {
 		wg.Wait()
 		close(burstSuccess)
 
-		burstDuration := mockClock.Since(burstStart)
+		burstDuration := time.Since(burstStart)
 		burstSuccessCount := 0
 		for success := range burstSuccess {
 			if success {
@@ -329,25 +284,25 @@ func TestBurstCapacityHandling(t *testing.T) {
 			}
 		}
 
-		t.Logf("Burst of 8 requests completed in mock time %v with %d successes", burstDuration, burstSuccessCount)
+		t.Logf("Burst of 8 requests completed in %v with %d successes", burstDuration, burstSuccessCount)
 
 		// Most of the burst should succeed (within burst capacity)
 		if burstSuccessCount < 6 {
 			t.Errorf("Expected at least 6 successful requests in burst, got %d", burstSuccessCount)
 		}
 
-		// Advance time for burst to recover
-		t.Logf("Advancing time for burst recovery...")
-		mockClock.Advance(5 * time.Second)
+		// Wait for burst to recover
+		t.Logf("Waiting for burst recovery...")
+		time.Sleep(5 * time.Second)
 
 		// Test that burst has recovered
-		recoveryStart := mockClock.Now()
+		recoveryStart := time.Now()
 		_, err := client.Me(ctx)
-		recoveryDuration := mockClock.Since(recoveryStart)
+		recoveryDuration := time.Since(recoveryStart)
 
 		testutil.AssertNoError(t, err)
 
-		t.Logf("Recovery request completed in mock time %v", recoveryDuration)
+		t.Logf("Recovery request completed in %v", recoveryDuration)
 	})
 }
 
@@ -355,9 +310,6 @@ func TestBurstCapacityHandling(t *testing.T) {
 func TestMalformedRateLimitHeaders(t *testing.T) {
 	var requestCount int64
 	var mu sync.Mutex
-
-	// Create mock clock
-	mockClock := clock.NewMockClock(time.Time{})
 
 	// Create account using builder
 	account := testutil.NewAccount("testuser123").
@@ -383,11 +335,11 @@ func TestMalformedRateLimitHeaders(t *testing.T) {
 		case 1:
 			// Non-numeric remaining
 			w.Header().Set("X-Ratelimit-Remaining", "invalid")
-			w.Header().Set("X-Ratelimit-Reset", strconv.Itoa(int(mockClock.Now().Unix())+300))
+			w.Header().Set("X-Ratelimit-Reset", strconv.Itoa(int(time.Now().Unix())+300))
 		case 2:
 			// Negative remaining
 			w.Header().Set("X-Ratelimit-Remaining", "-5")
-			w.Header().Set("X-Ratelimit-Reset", strconv.Itoa(int(mockClock.Now().Unix())+300))
+			w.Header().Set("X-Ratelimit-Reset", strconv.Itoa(int(time.Now().Unix())+300))
 		case 3:
 			// Non-numeric reset
 			w.Header().Set("X-Ratelimit-Remaining", "10")
@@ -402,7 +354,7 @@ func TestMalformedRateLimitHeaders(t *testing.T) {
 		default:
 			// Normal headers
 			w.Header().Set("X-Ratelimit-Remaining", "50")
-			w.Header().Set("X-Ratelimit-Reset", strconv.Itoa(int(mockClock.Now().Unix())+300))
+			w.Header().Set("X-Ratelimit-Reset", strconv.Itoa(int(time.Now().Unix())+300))
 		}
 
 		thing := testutil.NewAccount("testuser123").
@@ -413,22 +365,12 @@ func TestMalformedRateLimitHeaders(t *testing.T) {
 	})
 
 	// Create client
-	httpClient := &http.Client{Timeout: 30 * time.Second}
-	rateLimitConfig := client.RateLimitConfig{
+	config := RateLimitConfig{
 		RequestsPerMinute:  60,
 		Burst:              10,
 		ProactiveThreshold: 5,
 	}
-
-	internalClient, err := client.NewClientWithRateLimit(httpClient, server.URL(), "test/1.0", nil, rateLimitConfig, mockClock)
-	testutil.AssertNoError(t, err)
-
-	client := &Reddit{
-		httpClient: internalClient,
-		parser:     parse.NewParser(nil),
-		validator:  validator.NewValidator(),
-		auth:       &mockTokenProvider{token: "test_token"},
-	}
+	client := NewTestClientWithRateLimit(server.URL(), config)
 
 	ctx := context.Background()
 
@@ -444,8 +386,8 @@ func TestMalformedRateLimitHeaders(t *testing.T) {
 				t.Logf("Request %d succeeded despite malformed headers", i+1)
 			}
 
-			// Advance mock time between requests
-			mockClock.Advance(100 * time.Millisecond)
+			// Small delay between requests
+			time.Sleep(50 * time.Millisecond)
 		}
 
 		t.Logf("Successfully handled %d/7 requests with malformed headers", successCount)
@@ -461,9 +403,6 @@ func TestMalformedRateLimitHeaders(t *testing.T) {
 func TestConcurrentRateLimiting(t *testing.T) {
 	var requestCount int64
 	var mu sync.Mutex
-
-	// Create mock clock
-	mockClock := clock.NewMockClock(time.Time{})
 
 	// Create account using builder
 	account := testutil.NewAccount("testuser123").
@@ -484,7 +423,7 @@ func TestConcurrentRateLimiting(t *testing.T) {
 
 		// Simulate rate limiting headers with plenty of headroom
 		remaining := 100 - int(currentCount%10)
-		reset := int(mockClock.Now().Unix()) + 60
+		reset := int(time.Now().Unix()) + 60
 
 		w.Header().Set("X-Ratelimit-Remaining", strconv.Itoa(remaining))
 		w.Header().Set("X-Ratelimit-Reset", strconv.Itoa(reset))
@@ -498,23 +437,12 @@ func TestConcurrentRateLimiting(t *testing.T) {
 	})
 
 	// Create client with generous rate limiting to avoid blocking
-	// Note: The golang.org/x/time/rate limiter uses real time, so we use a high limit
-	httpClient := &http.Client{Timeout: 30 * time.Second}
-	rateLimitConfig := client.RateLimitConfig{
+	config := RateLimitConfig{
 		RequestsPerMinute:  600, // High limit to avoid real blocking
 		Burst:              50,
 		ProactiveThreshold: 10,
 	}
-
-	internalClient, err := client.NewClientWithRateLimit(httpClient, server.URL(), "test/1.0", nil, rateLimitConfig, mockClock)
-	testutil.AssertNoError(t, err)
-
-	client := &Reddit{
-		httpClient: internalClient,
-		parser:     parse.NewParser(nil),
-		validator:  validator.NewValidator(),
-		auth:       &mockTokenProvider{token: "test_token"},
-	}
+	client := NewTestClientWithRateLimit(server.URL(), config)
 
 	ctx := context.Background()
 
@@ -525,7 +453,7 @@ func TestConcurrentRateLimiting(t *testing.T) {
 		var wg sync.WaitGroup
 		results := make(chan bool, numGoroutines*requestsPerGoroutine)
 
-		startTime := mockClock.Now()
+		startTime := time.Now()
 
 		for i := 0; i < numGoroutines; i++ {
 			wg.Add(1)
@@ -547,7 +475,7 @@ func TestConcurrentRateLimiting(t *testing.T) {
 		wg.Wait()
 		close(results)
 
-		totalTime := mockClock.Since(startTime)
+		totalTime := time.Since(startTime)
 		successCount := 0
 		totalRequests := 0
 
@@ -563,7 +491,7 @@ func TestConcurrentRateLimiting(t *testing.T) {
 		t.Logf("Concurrent test completed:")
 		t.Logf("  Total requests: %d", totalRequests)
 		t.Logf("  Successful: %d (%.1f%%)", successCount, successRate)
-		t.Logf("  Mock time elapsed: %v", totalTime)
+		t.Logf("  Time elapsed: %v", totalTime)
 		t.Logf("  Actual server requests: %d", requestCount)
 
 		// Should have high success rate with generous limits
@@ -582,9 +510,6 @@ func TestConcurrentRateLimiting(t *testing.T) {
 func TestRateLimitEdgeCases(t *testing.T) {
 	var requestCount int64
 	var mu sync.Mutex
-
-	// Create mock clock
-	mockClock := clock.NewMockClock(time.Time{})
 
 	// Create account using builder
 	account := testutil.NewAccount("testuser123").
@@ -610,23 +535,23 @@ func TestRateLimitEdgeCases(t *testing.T) {
 		case 1:
 			// Zero remaining
 			w.Header().Set("X-Ratelimit-Remaining", "0")
-			w.Header().Set("X-Ratelimit-Reset", strconv.Itoa(int(mockClock.Now().Unix())+1))
+			w.Header().Set("X-Ratelimit-Reset", strconv.Itoa(int(time.Now().Unix())+1))
 		case 2:
 			// One remaining
 			w.Header().Set("X-Ratelimit-Remaining", "1")
-			w.Header().Set("X-Ratelimit-Reset", strconv.Itoa(int(mockClock.Now().Unix())+300))
+			w.Header().Set("X-Ratelimit-Reset", strconv.Itoa(int(time.Now().Unix())+300))
 		case 3:
 			// Reset time in the past
 			w.Header().Set("X-Ratelimit-Remaining", "10")
-			w.Header().Set("X-Ratelimit-Reset", strconv.Itoa(int(mockClock.Now().Unix())-3600))
+			w.Header().Set("X-Ratelimit-Reset", strconv.Itoa(int(time.Now().Unix())-3600))
 		case 4:
 			// Reset time far in future
 			w.Header().Set("X-Ratelimit-Remaining", "5")
-			w.Header().Set("X-Ratelimit-Reset", strconv.Itoa(int(mockClock.Now().Unix())+86400)) // 24 hours
+			w.Header().Set("X-Ratelimit-Reset", strconv.Itoa(int(time.Now().Unix())+86400)) // 24 hours
 		default:
 			// Normal values
 			w.Header().Set("X-Ratelimit-Remaining", "30")
-			w.Header().Set("X-Ratelimit-Reset", strconv.Itoa(int(mockClock.Now().Unix())+300))
+			w.Header().Set("X-Ratelimit-Reset", strconv.Itoa(int(time.Now().Unix())+300))
 		}
 
 		thing := testutil.NewAccount("testuser123").
@@ -637,22 +562,12 @@ func TestRateLimitEdgeCases(t *testing.T) {
 	})
 
 	// Create client
-	httpClient := &http.Client{Timeout: 30 * time.Second}
-	rateLimitConfig := client.RateLimitConfig{
+	config := RateLimitConfig{
 		RequestsPerMinute:  60,
 		Burst:              10,
 		ProactiveThreshold: 5,
 	}
-
-	internalClient, err := client.NewClientWithRateLimit(httpClient, server.URL(), "test/1.0", nil, rateLimitConfig, mockClock)
-	testutil.AssertNoError(t, err)
-
-	client := &Reddit{
-		httpClient: internalClient,
-		parser:     parse.NewParser(nil),
-		validator:  validator.NewValidator(),
-		auth:       &mockTokenProvider{token: "test_token"},
-	}
+	client := NewTestClientWithRateLimit(server.URL(), config)
 
 	ctx := context.Background()
 
@@ -661,9 +576,9 @@ func TestRateLimitEdgeCases(t *testing.T) {
 		var results []string
 
 		for i := 0; i < 6; i++ {
-			start := mockClock.Now()
+			start := time.Now()
 			_, err := client.Me(ctx)
-			duration := mockClock.Since(start)
+			duration := time.Since(start)
 
 			if err != nil {
 				results = append(results, "Request "+strconv.Itoa(i+1)+": FAILED ("+err.Error()+")")
@@ -672,8 +587,8 @@ func TestRateLimitEdgeCases(t *testing.T) {
 				successCount++
 			}
 
-			// Advance mock time between requests
-			mockClock.Advance(200 * time.Millisecond)
+			// Small delay between requests
+			time.Sleep(100 * time.Millisecond)
 		}
 
 		for _, result := range results {

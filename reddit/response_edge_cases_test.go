@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -17,52 +16,17 @@ import (
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/validator"
 )
 
-// customResponseServer is a helper for creating test servers with custom response handlers.
-// This allows full control over the HTTP response for testing edge cases.
-type customResponseServer struct {
-	server  *httptest.Server
-	handler http.HandlerFunc
-}
-
-// newCustomResponseServer creates a new test server with a custom handler function.
-// The handler receives the ResponseWriter and Request and can write any response.
-func newCustomResponseServer(handler http.HandlerFunc) *customResponseServer {
-	srv := &customResponseServer{
-		handler: handler,
-	}
-	srv.server = httptest.NewServer(handler)
-	return srv
-}
-
-// Close shuts down the test server.
-func (s *customResponseServer) Close() {
-	if s.server != nil {
-		s.server.Close()
-	}
-}
-
-// URL returns the base URL of the test server.
-func (s *customResponseServer) URL() string {
-	if s.server != nil {
-		return s.server.URL
-	}
-	return ""
-}
-
 // TestMalformedJSONResponse tests handling of malformed JSON responses
 func TestMalformedJSONResponse(t *testing.T) {
 	t.Parallel()
 
-	customServer := newCustomResponseServer(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		// Return malformed JSON (unterminated array)
-		w.Write([]byte(`{"kind": "Listing", "data": {"children": [`))
-	})
-	defer customServer.Close()
+	server := testutil.NewMockServer().
+		WithMalformedJSON().
+		Start()
+	defer server.Close()
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := client.NewClient(httpClient, customServer.URL(), "test/1.0", nil)
+	internalClient, err := client.NewClient(httpClient, server.URL(), "test/1.0", nil)
 	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
@@ -88,16 +52,13 @@ func TestMalformedJSONResponse(t *testing.T) {
 func TestEmptyResponse(t *testing.T) {
 	t.Parallel()
 
-	customServer := newCustomResponseServer(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		// Return completely empty response
-		w.Write([]byte(""))
-	})
-	defer customServer.Close()
+	server := testutil.NewMockServer().
+		WithEmptyResponse().
+		Start()
+	defer server.Close()
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := client.NewClient(httpClient, customServer.URL(), "test/1.0", nil)
+	internalClient, err := client.NewClient(httpClient, server.URL(), "test/1.0", nil)
 	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
@@ -117,7 +78,7 @@ func TestEmptyResponse(t *testing.T) {
 func TestUnexpectedResponseStructure(t *testing.T) {
 	t.Parallel()
 
-	customServer := newCustomResponseServer(func(w http.ResponseWriter, r *http.Request) {
+	server := testutil.NewCustomResponseServer(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 
@@ -130,10 +91,10 @@ func TestUnexpectedResponseStructure(t *testing.T) {
 		}
 		json.NewEncoder(w).Encode(unexpectedStruct)
 	})
-	defer customServer.Close()
+	defer server.Close()
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := client.NewClient(httpClient, customServer.URL(), "test/1.0", nil)
+	internalClient, err := client.NewClient(httpClient, server.URL, "test/1.0", nil)
 	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
@@ -153,7 +114,7 @@ func TestUnexpectedResponseStructure(t *testing.T) {
 func TestNullFieldsInResponse(t *testing.T) {
 	t.Parallel()
 
-	customServer := newCustomResponseServer(func(w http.ResponseWriter, r *http.Request) {
+	server := testutil.NewCustomResponseServer(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 
@@ -171,10 +132,10 @@ func TestNullFieldsInResponse(t *testing.T) {
 		}
 		json.NewEncoder(w).Encode(responseWithNulls)
 	})
-	defer customServer.Close()
+	defer server.Close()
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := client.NewClient(httpClient, customServer.URL(), "test/1.0", nil)
+	internalClient, err := client.NewClient(httpClient, server.URL, "test/1.0", nil)
 	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
@@ -315,7 +276,7 @@ func TestUnicodeAndSpecialCharacters(t *testing.T) {
 func TestResponseWithExtraFields(t *testing.T) {
 	t.Parallel()
 
-	customServer := newCustomResponseServer(func(w http.ResponseWriter, r *http.Request) {
+	server := testutil.NewCustomResponseServer(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 
@@ -339,10 +300,10 @@ func TestResponseWithExtraFields(t *testing.T) {
 		}
 		json.NewEncoder(w).Encode(responseWithExtras)
 	})
-	defer customServer.Close()
+	defer server.Close()
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := client.NewClient(httpClient, customServer.URL(), "test/1.0", nil)
+	internalClient, err := client.NewClient(httpClient, server.URL, "test/1.0", nil)
 	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
@@ -371,7 +332,7 @@ func TestResponseWithExtraFields(t *testing.T) {
 func TestResponseWithWrongTypes(t *testing.T) {
 	t.Parallel()
 
-	customServer := newCustomResponseServer(func(w http.ResponseWriter, r *http.Request) {
+	server := testutil.NewCustomResponseServer(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 
@@ -388,10 +349,10 @@ func TestResponseWithWrongTypes(t *testing.T) {
 		}
 		json.NewEncoder(w).Encode(responseWithWrongTypes)
 	})
-	defer customServer.Close()
+	defer server.Close()
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := client.NewClient(httpClient, customServer.URL(), "test/1.0", nil)
+	internalClient, err := client.NewClient(httpClient, server.URL, "test/1.0", nil)
 	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
@@ -414,7 +375,7 @@ func TestResponseWithWrongTypes(t *testing.T) {
 func TestPartialResponse(t *testing.T) {
 	t.Parallel()
 
-	customServer := newCustomResponseServer(func(w http.ResponseWriter, r *http.Request) {
+	server := testutil.NewCustomResponseServer(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 
@@ -430,10 +391,10 @@ func TestPartialResponse(t *testing.T) {
 		}
 		json.NewEncoder(w).Encode(partialResponse)
 	})
-	defer customServer.Close()
+	defer server.Close()
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := client.NewClient(httpClient, customServer.URL(), "test/1.0", nil)
+	internalClient, err := client.NewClient(httpClient, server.URL, "test/1.0", nil)
 	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
@@ -467,7 +428,7 @@ func TestPartialResponse(t *testing.T) {
 func TestResponseWithNewlinesAndWhitespace(t *testing.T) {
 	t.Parallel()
 
-	customServer := newCustomResponseServer(func(w http.ResponseWriter, r *http.Request) {
+	server := testutil.NewCustomResponseServer(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 
@@ -485,10 +446,10 @@ func TestResponseWithNewlinesAndWhitespace(t *testing.T) {
 		}`
 		w.Write([]byte(whitespaceResponse))
 	})
-	defer customServer.Close()
+	defer server.Close()
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := client.NewClient(httpClient, customServer.URL(), "test/1.0", nil)
+	internalClient, err := client.NewClient(httpClient, server.URL, "test/1.0", nil)
 	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
@@ -517,7 +478,7 @@ func TestResponseWithNewlinesAndWhitespace(t *testing.T) {
 func TestResponseStreamError(t *testing.T) {
 	t.Parallel()
 
-	customServer := newCustomResponseServer(func(w http.ResponseWriter, r *http.Request) {
+	server := testutil.NewCustomResponseServer(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 
@@ -529,10 +490,10 @@ func TestResponseStreamError(t *testing.T) {
 			conn.Close()
 		}
 	})
-	defer customServer.Close()
+	defer server.Close()
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := client.NewClient(httpClient, customServer.URL(), "test/1.0", nil)
+	internalClient, err := client.NewClient(httpClient, server.URL, "test/1.0", nil)
 	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
@@ -562,15 +523,15 @@ func TestResponseStreamError(t *testing.T) {
 func TestResponseWithInvalidContentType(t *testing.T) {
 	t.Parallel()
 
-	customServer := newCustomResponseServer(func(w http.ResponseWriter, r *http.Request) {
+	server := testutil.NewCustomResponseServer(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain") // Wrong content type
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"kind": "t5", "data": {"display_name": "testsub"}}`))
 	})
-	defer customServer.Close()
+	defer server.Close()
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := client.NewClient(httpClient, customServer.URL(), "test/1.0", nil)
+	internalClient, err := client.NewClient(httpClient, server.URL, "test/1.0", nil)
 	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
