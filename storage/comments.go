@@ -24,6 +24,11 @@ func isValidCommentSortField(field string) bool {
 // This method maintains the closure table for efficient tree queries.
 // Returns an error if the operation fails.
 func (s *SQLiteStore) UpsertComment(ctx context.Context, comment *types.Comment) error {
+	// Validate input
+	if comment == nil {
+		return fmt.Errorf("UpsertComment: comment cannot be nil")
+	}
+
 	// Begin transaction for atomicity (comment + closure entries)
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -188,7 +193,10 @@ func (s *SQLiteStore) UpsertComments(ctx context.Context, comments []*types.Comm
 
 	// Map comment ID to node
 	nodeMap := make(map[string]*commentNode, len(comments))
-	for _, c := range comments {
+	for i, c := range comments {
+		if c == nil {
+			return fmt.Errorf("UpsertComments: comment at index %d is nil", i)
+		}
 		if _, exists := nodeMap[c.ID]; exists {
 			return fmt.Errorf("UpsertComments: duplicate comment ID %s in batch", c.ID)
 		}

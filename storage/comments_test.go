@@ -69,6 +69,17 @@ func TestUpsertComment(t *testing.T) {
 	require.Equal(t, "Updated body", updated.Body)
 }
 
+// TestUpsertComment_NilInput verifies that nil comment input is rejected with a descriptive error.
+func TestUpsertComment_NilInput(t *testing.T) {
+	store := NewTestDB(t)
+	ctx := context.Background()
+
+	// Attempt to upsert a nil comment
+	err := store.UpsertComment(ctx, nil)
+	require.Error(t, err, "should reject nil comment input")
+	require.Contains(t, err.Error(), "comment cannot be nil", "error should mention nil input")
+}
+
 // TestGetComment verifies that comments can be retrieved by ID.
 func TestGetComment(t *testing.T) {
 	store := NewTestDB(t)
@@ -388,6 +399,83 @@ func TestCommentClosureTable(t *testing.T) {
 		require.True(t, found, "expected closure entry (%s, %s, %d) not found",
 			expected.ancestor, expected.descendant, expected.depth)
 	}
+}
+
+// TestUpsertComments_NilElementInBatch verifies that nil elements in the batch are rejected.
+func TestUpsertComments_NilElementInBatch(t *testing.T) {
+	store := NewTestDB(t)
+	ctx := context.Background()
+
+	// Insert a post
+	post := testutil.BuildPost("post1", "test")
+	err := store.UpsertPost(ctx, post)
+	require.NoError(t, err)
+
+	t.Run("nil element at beginning", func(t *testing.T) {
+		comments := []*types.Comment{
+			nil, // Nil element
+			testutil.BuildComment("c1", "post1", "", 0),
+		}
+
+		err := store.UpsertComments(ctx, comments)
+		require.Error(t, err, "should reject batch with nil element")
+		require.Contains(t, err.Error(), "comment at index 0 is nil", "error should identify nil element at index 0")
+
+		// Verify no comments were inserted (transaction rollback)
+		retrieved, err := store.GetComment(ctx, "c1")
+		require.Error(t, err)
+		require.ErrorIs(t, err, sql.ErrNoRows, "no comments should be inserted on nil element error")
+		require.Nil(t, retrieved)
+	})
+
+	t.Run("nil element in middle", func(t *testing.T) {
+		comments := []*types.Comment{
+			testutil.BuildComment("c2", "post1", "", 0),
+			nil, // Nil element at index 1
+			testutil.BuildComment("c3", "post1", "", 0),
+		}
+
+		err := store.UpsertComments(ctx, comments)
+		require.Error(t, err, "should reject batch with nil element in middle")
+		require.Contains(t, err.Error(), "comment at index 1 is nil", "error should identify nil element at index 1")
+
+		// Verify no comments were inserted (transaction rollback)
+		retrieved, err := store.GetComment(ctx, "c2")
+		require.Error(t, err)
+		require.ErrorIs(t, err, sql.ErrNoRows, "no comments should be inserted on nil element error")
+		require.Nil(t, retrieved)
+	})
+
+	t.Run("nil element at end", func(t *testing.T) {
+		comments := []*types.Comment{
+			testutil.BuildComment("c4", "post1", "", 0),
+			testutil.BuildComment("c5", "post1", "", 0),
+			nil, // Nil element at end
+		}
+
+		err := store.UpsertComments(ctx, comments)
+		require.Error(t, err, "should reject batch with nil element at end")
+		require.Contains(t, err.Error(), "comment at index 2 is nil", "error should identify nil element at index 2")
+
+		// Verify no comments were inserted (transaction rollback)
+		retrieved, err := store.GetComment(ctx, "c4")
+		require.Error(t, err)
+		require.ErrorIs(t, err, sql.ErrNoRows, "no comments should be inserted on nil element error")
+		require.Nil(t, retrieved)
+	})
+
+	t.Run("multiple nil elements", func(t *testing.T) {
+		comments := []*types.Comment{
+			nil, // Nil element
+			testutil.BuildComment("c6", "post1", "", 0),
+			nil, // Another nil element
+		}
+
+		err := store.UpsertComments(ctx, comments)
+		require.Error(t, err, "should reject batch with multiple nil elements")
+		// Should fail on first nil element
+		require.Contains(t, err.Error(), "comment at index 0 is nil", "error should identify first nil element")
+	})
 }
 
 // TestUpsertComments_DuplicateIDInBatch verifies that duplicate comment IDs in a batch are rejected.
