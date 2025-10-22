@@ -312,7 +312,7 @@ func NewClientWithContext(ctx context.Context, config *Config) (*Reddit, error) 
 		DefaultTimeout,
 	)
 	if err != nil {
-		return nil, err
+		return nil, translateValidationError(err)
 	}
 
 	// Create authenticator
@@ -584,7 +584,19 @@ func (r *Reddit) getPosts(ctx context.Context, request *types.PostsRequest, sort
 	var result types.Thing
 	err = r.httpClient.Do(httpReq, &result)
 	if err != nil {
-		return nil, wrapDoError(err, "get "+sort+" posts", path)
+		if r.handleAuthError(err) {
+			httpReq, reqErr := r.httpClient.NewRequest(ctx, http.MethodGet, path, nil, params)
+			if reqErr != nil {
+				return nil, wrapDoError(reqErr, "create request", path)
+			}
+			if err := r.addAuthHeaders(ctx, httpReq); err != nil {
+				return nil, &AuthError{Message: "failed to add auth headers on retry", Err: err}
+			}
+			err = r.httpClient.Do(httpReq, &result)
+		}
+		if err != nil {
+			return nil, wrapDoError(err, "get "+sort+" posts", path)
+		}
 	}
 
 	posts, err := r.parser.ExtractPosts(ctx, &result)
@@ -667,7 +679,19 @@ func (r *Reddit) GetComments(ctx context.Context, request *types.CommentsRequest
 
 	result, err := r.httpClient.DoThingArray(httpReq)
 	if err != nil {
-		return nil, wrapDoError(err, "get comments", path)
+		if r.handleAuthError(err) {
+			httpReq, reqErr := r.httpClient.NewRequest(ctx, http.MethodGet, path, nil, params)
+			if reqErr != nil {
+				return nil, wrapDoError(reqErr, "create request", path)
+			}
+			if err := r.addAuthHeaders(ctx, httpReq); err != nil {
+				return nil, &AuthError{Message: "failed to add auth headers on retry", Err: err}
+			}
+			result, err = r.httpClient.DoThingArray(httpReq)
+		}
+		if err != nil {
+			return nil, wrapDoError(err, "get comments", path)
+		}
 	}
 
 	// Parse the post and comments
@@ -895,7 +919,9 @@ func (r *Reddit) GetMoreComments(ctx context.Context, request *types.MoreComment
 	}
 
 	// Create POST request with form data
-	req, err := r.httpClient.NewRequest(ctx, http.MethodPost, MoreChildrenURL, strings.NewReader(formData.Encode()))
+	payload := formData.Encode()
+
+	req, err := r.httpClient.NewRequest(ctx, http.MethodPost, MoreChildrenURL, strings.NewReader(payload))
 	if err != nil {
 		return nil, wrapDoError(err, "create request", MoreChildrenURL)
 	}
@@ -911,7 +937,20 @@ func (r *Reddit) GetMoreComments(ctx context.Context, request *types.MoreComment
 	// Make authenticated request to morechildren endpoint
 	things, err := r.httpClient.DoMoreChildren(req)
 	if err != nil {
-		return nil, wrapDoError(err, "get more comments", MoreChildrenURL)
+		if r.handleAuthError(err) {
+			req, reqErr := r.httpClient.NewRequest(ctx, http.MethodPost, MoreChildrenURL, strings.NewReader(payload))
+			if reqErr != nil {
+				return nil, wrapDoError(reqErr, "create request", MoreChildrenURL)
+			}
+			if err := r.addAuthHeaders(ctx, req); err != nil {
+				return nil, &AuthError{Message: "failed to add auth headers on retry", Err: err}
+			}
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			things, err = r.httpClient.DoMoreChildren(req)
+		}
+		if err != nil {
+			return nil, wrapDoError(err, "get more comments", MoreChildrenURL)
+		}
 	}
 
 	// Extract comments from the response
