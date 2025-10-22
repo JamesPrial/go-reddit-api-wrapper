@@ -3,6 +3,7 @@ package testutil
 
 import (
 	"context"
+	"sync/atomic"
 
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 )
@@ -200,6 +201,9 @@ func DefaultAccount() *types.AccountData {
 // It returns a configurable token and error, allowing tests to simulate both successful
 // and failed authentication scenarios.
 //
+// Call tracking is thread-safe using atomic counters. Use GetCallCount() and InvalidateCallCount()
+// to retrieve the number of calls made to each method.
+//
 // Example:
 //
 //	// Successful auth
@@ -209,28 +213,63 @@ func DefaultAccount() *types.AccountData {
 //	// Failed auth
 //	mockAuth := &testutil.MockTokenProvider{Err: errors.New("auth failed")}
 //	token, err := mockAuth.GetToken(ctx)
+//
+//	// Check call counts
+//	getCount := mockAuth.GetCallCount()
+//	invalidateCount := mockAuth.InvalidateCallCount()
 type MockTokenProvider struct {
 	// Token is the token to return from GetToken
 	Token string
 	// Err is the error to return from GetToken (if set, Token is ignored)
 	Err error
-	// InvalidateCount tracks how many times InvalidateToken was called
+	// InvalidateCount tracks how many times InvalidateToken was called (deprecated, use InvalidateCallCount())
+	// Kept for backward compatibility. This field is updated atomically alongside the internal counter.
 	InvalidateCount int
+
+	// Internal atomic counters for thread-safe call tracking
+	getCalls        atomic.Int32
+	invalidateCalls atomic.Int32
 }
 
 // GetToken returns the configured token or error.
 // This implements the TokenProvider interface.
+// The call count is tracked atomically and can be retrieved with GetCallCount().
 func (m *MockTokenProvider) GetToken(ctx context.Context) (string, error) {
+	m.getCalls.Add(1)
 	if m.Err != nil {
 		return "", m.Err
 	}
 	return m.Token, nil
 }
 
-// InvalidateToken increments the InvalidateCount.
+// InvalidateToken increments the invalidate call counters.
 // This implements the TokenProvider interface.
+// The call count is tracked atomically and can be retrieved with InvalidateCallCount().
 func (m *MockTokenProvider) InvalidateToken() {
+	m.invalidateCalls.Add(1)
+	// Update legacy field for backward compatibility
 	m.InvalidateCount++
+}
+
+// GetCallCount returns the number of times GetToken was called.
+// This method is thread-safe.
+func (m *MockTokenProvider) GetCallCount() int {
+	return int(m.getCalls.Load())
+}
+
+// InvalidateCallCount returns the number of times InvalidateToken was called.
+// This method is thread-safe.
+func (m *MockTokenProvider) InvalidateCallCount() int {
+	return int(m.invalidateCalls.Load())
+}
+
+// ResetCallCounts resets both GetToken and InvalidateToken call counters to zero.
+// This is useful for resetting the mock state between test phases.
+// Note: This also resets the deprecated InvalidateCount field.
+func (m *MockTokenProvider) ResetCallCounts() {
+	m.getCalls.Store(0)
+	m.invalidateCalls.Store(0)
+	m.InvalidateCount = 0
 }
 
 // stringPtr returns a pointer to the given string.
