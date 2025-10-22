@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/client"
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/parse"
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/validator"
 )
@@ -62,11 +63,14 @@ func (m *mockHTTPClient) DoMoreChildren(req *http.Request) ([]*types.Thing, erro
 
 // mockTokenProvider implements the TokenProvider interface for testing
 type mockTokenProvider struct {
-	token string
-	err   error
+	token           string
+	err             error
+	getCalls        atomic.Int32
+	invalidateCalls atomic.Int32
 }
 
 func (m *mockTokenProvider) GetToken(ctx context.Context) (string, error) {
+	m.getCalls.Add(1)
 	if m.err != nil {
 		return "", m.err
 	}
@@ -74,7 +78,34 @@ func (m *mockTokenProvider) GetToken(ctx context.Context) (string, error) {
 }
 
 func (m *mockTokenProvider) InvalidateToken() {
-	// No-op for mock
+	m.invalidateCalls.Add(1)
+}
+
+type stubParser struct {
+	parseThingFunc             func(ctx context.Context, thing *types.Thing) (any, error)
+	extractPostsFunc           func(ctx context.Context, thing *types.Thing) ([]*types.Post, error)
+	extractPostAndCommentsFunc func(ctx context.Context, things []*types.Thing) (*types.CommentsResponse, error)
+}
+
+func (s *stubParser) ParseThing(ctx context.Context, thing *types.Thing) (any, error) {
+	if s.parseThingFunc != nil {
+		return s.parseThingFunc(ctx, thing)
+	}
+	return nil, nil
+}
+
+func (s *stubParser) ExtractPosts(ctx context.Context, thing *types.Thing) ([]*types.Post, error) {
+	if s.extractPostsFunc != nil {
+		return s.extractPostsFunc(ctx, thing)
+	}
+	return nil, nil
+}
+
+func (s *stubParser) ExtractPostAndComments(ctx context.Context, things []*types.Thing) (*types.CommentsResponse, error) {
+	if s.extractPostAndCommentsFunc != nil {
+		return s.extractPostAndCommentsFunc(ctx, things)
+	}
+	return &types.CommentsResponse{}, nil
 }
 
 func newTestClient(httpClient HTTPClient, auth TokenProvider) *Reddit {
@@ -145,7 +176,7 @@ func TestNewClient(t *testing.T) {
 					}
 				}
 				if tt.errorType == "ValidationError" {
-					if _, ok := err.(*validator.ValidationError); !ok {
+					if _, ok := err.(*ValidationError); !ok {
 						t.Errorf("expected ValidationError, got %T", err)
 					}
 				}
@@ -175,7 +206,7 @@ func TestNewClient_InvalidUserAgent(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error but got none")
 	}
-	var validationErr *validator.ValidationError
+	var validationErr *ValidationError
 	if !errors.As(err, &validationErr) {
 		t.Fatalf("expected ValidationError, got %T", err)
 	}
@@ -244,7 +275,7 @@ func TestNewClient_HTTPClientTimeoutHandling(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected error but got none")
 		}
-		var validationErr *validator.ValidationError
+		var validationErr *ValidationError
 		if !errors.As(err, &validationErr) {
 			t.Fatalf("expected ValidationError, got %T", err)
 		}
@@ -344,6 +375,163 @@ func TestNewClientWithContext_AuthenticationFailure(t *testing.T) {
 	}
 	if !strings.Contains(authErr.Error(), "failed to authenticate") {
 		t.Fatalf("expected authenticate failure message, got %v", authErr)
+	}
+}
+
+func TestGetHot_RetryOnUnauthorized(t *testing.T) {
+	var doCalls atomic.Int32
+	tp := &mockTokenProvider{token: "token"}
+
+	mockClient := &mockHTTPClient{
+		doFunc: func(req *http.Request, v *types.Thing) error {
+			call := doCalls.Add(1)
+			if call == 1 {
+				return &client.APIError{StatusCode: http.StatusUnauthorized, Message: "unauthorized"}
+			}
+			v.Kind = "Listing"
+			v.Data = json.RawMessage(`{"children":[]}`)
+			return nil
+		},
+	}
+
+	r := newTestClient(mockClient, tp)
+	r.parser = &stubParser{
+		extractPostsFunc: func(ctx context.Context, thing *types.Thing) ([]*types.Post, error) {
+			return []*types.Post{}, nil
+		},
+		parseThingFunc: func(ctx context.Context, thing *types.Thing) (any, error) {
+			return &types.ListingData{}, nil
+		},
+	}
+
+	resp, err := r.GetHot(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("expected retry to succeed, got error: %v", err)
+	}
+	if resp == nil {
+		t.Fatal("expected response after retry")
+	}
+
+	if got := doCalls.Load(); got != 2 {
+		t.Fatalf("expected 2 Do calls, got %d", got)
+	}
+	if got := tp.invalidateCalls.Load(); got != 1 {
+		t.Fatalf("expected token to be invalidated once, got %d", got)
+	}
+	if got := tp.getCalls.Load(); got < 2 {
+		t.Fatalf("expected GetToken called at least twice, got %d", got)
+	}
+}
+
+func TestGetComments_RetryOnUnauthorized(t *testing.T) {
+	var doCalls atomic.Int32
+	tp := &mockTokenProvider{token: "token"}
+
+	mockClient := &mockHTTPClient{
+		doThingArrayFunc: func(req *http.Request) ([]*types.Thing, error) {
+			call := doCalls.Add(1)
+			if call == 1 {
+				return nil, &client.APIError{StatusCode: http.StatusUnauthorized, Message: "unauthorized"}
+			}
+			return []*types.Thing{}, nil
+		},
+	}
+
+	r := newTestClient(mockClient, tp)
+	r.parser = &stubParser{
+		extractPostAndCommentsFunc: func(ctx context.Context, things []*types.Thing) (*types.CommentsResponse, error) {
+			return &types.CommentsResponse{}, nil
+		},
+	}
+
+	req := &types.CommentsRequest{
+		Subreddit: "golang",
+		PostID:    "abc123",
+	}
+
+	resp, err := r.GetComments(context.Background(), req)
+	if err != nil {
+		t.Fatalf("expected retry to succeed, got error: %v", err)
+	}
+	if resp == nil {
+		t.Fatal("expected response after retry")
+	}
+
+	if got := doCalls.Load(); got != 2 {
+		t.Fatalf("expected 2 DoThingArray calls, got %d", got)
+	}
+	if got := tp.invalidateCalls.Load(); got != 1 {
+		t.Fatalf("expected token to be invalidated once, got %d", got)
+	}
+	if got := tp.getCalls.Load(); got < 2 {
+		t.Fatalf("expected GetToken called at least twice, got %d", got)
+	}
+}
+
+func TestGetMoreComments_RetryOnUnauthorized(t *testing.T) {
+	var doCalls atomic.Int32
+	tp := &mockTokenProvider{token: "token"}
+
+	mockClient := &mockHTTPClient{
+		doMoreChildrenFunc: func(req *http.Request) ([]*types.Thing, error) {
+			call := doCalls.Add(1)
+			if call == 1 {
+				return nil, &client.APIError{StatusCode: http.StatusUnauthorized, Message: "unauthorized"}
+			}
+			return []*types.Thing{
+				{Kind: "t1"},
+			}, nil
+		},
+	}
+
+	r := newTestClient(mockClient, tp)
+	r.parser = &stubParser{
+		parseThingFunc: func(ctx context.Context, thing *types.Thing) (any, error) {
+			return &types.Comment{
+				ThingData: types.ThingData{
+					ID:   "comment1",
+					Name: "t1_comment1",
+				},
+				Votable: types.Votable{
+					Score: 1,
+					Ups:   1,
+					Downs: 0,
+				},
+				Created: types.Created{
+					Created:    1700000000,
+					CreatedUTC: 1700000000,
+				},
+				Body:        "test",
+				Subreddit:   "golang",
+				SubredditID: "t5_golang",
+				Author:      "tester",
+				ParentID:    "t1_parent0",
+				LinkID:      "t3_postid",
+			}, nil
+		},
+	}
+
+	req := &types.MoreCommentsRequest{
+		LinkID:     "t3_postid",
+		CommentIDs: []string{"comment1"},
+	}
+
+	resp, err := r.GetMoreComments(context.Background(), req)
+	if err != nil {
+		t.Fatalf("expected retry to succeed, got error: %v", err)
+	}
+	if len(resp) != 1 {
+		t.Fatalf("expected 1 comment after retry, got %d", len(resp))
+	}
+
+	if got := doCalls.Load(); got != 2 {
+		t.Fatalf("expected 2 DoMoreChildren calls, got %d", got)
+	}
+	if got := tp.invalidateCalls.Load(); got != 1 {
+		t.Fatalf("expected token to be invalidated once, got %d", got)
+	}
+	if got := tp.getCalls.Load(); got < 2 {
+		t.Fatalf("expected GetToken called at least twice, got %d", got)
 	}
 }
 

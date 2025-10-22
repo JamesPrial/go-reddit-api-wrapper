@@ -267,7 +267,31 @@ func (c *Client) doRequest(req *http.Request) ([]byte, *http.Response, error) {
 
 	// Check HTTP status
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return bodyBytes, resp, &APIError{StatusCode: resp.StatusCode, Message: "request failed"}
+		apiErr := &APIError{StatusCode: resp.StatusCode}
+
+		if len(bodyBytes) > 0 {
+			if errCode, msg, details := extractAPIErrorDetails(bodyBytes); errCode != "" || msg != "" || details != nil {
+				if errCode != "" {
+					apiErr.ErrorCode = errCode
+				}
+				if msg != "" {
+					apiErr.Message = msg
+				}
+				if details != nil {
+					apiErr.Details = details
+				}
+			}
+		}
+
+		if apiErr.Message == "" {
+			if statusText := http.StatusText(resp.StatusCode); statusText != "" {
+				apiErr.Message = statusText
+			} else {
+				apiErr.Message = "request failed"
+			}
+		}
+
+		return bodyBytes, resp, apiErr
 	}
 
 	return bodyBytes, resp, nil
@@ -703,4 +727,71 @@ func truncateBody(body []byte, maxLen int) string {
 		return string(body)
 	}
 	return string(body[:maxLen]) + "..."
+}
+
+// extractAPIErrorDetails attempts to parse a Reddit API error payload and return structured details.
+func extractAPIErrorDetails(body []byte) (code string, message string, details interface{}) {
+	var parsed map[string]interface{}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return "", "", nil
+	}
+
+	if val, ok := parsed["message"].(string); ok && val != "" {
+		message = val
+	}
+
+	switch v := parsed["error"].(type) {
+	case string:
+		code = v
+	case float64:
+		code = strconv.FormatInt(int64(v), 10)
+	case json.Number:
+		code = v.String()
+	}
+
+	if message == "" {
+		if val, ok := parsed["reason"].(string); ok {
+			message = val
+		} else if val, ok := parsed["explanation"].(string); ok {
+			message = val
+		} else if val, ok := parsed["error_description"].(string); ok {
+			message = val
+		}
+	}
+
+	if detailsVal, ok := parsed["details"]; ok {
+		details = detailsVal
+	}
+
+	// Handle nested JSON error format: {"json":{"errors":[["CODE","message",...]]}}
+	if jsonObj, ok := parsed["json"].(map[string]interface{}); ok {
+		if errorsList, ok := jsonObj["errors"].([]interface{}); ok && len(errorsList) > 0 {
+			if first, ok := errorsList[0].([]interface{}); ok {
+				if len(first) > 0 {
+					if code == "" {
+						if str, ok := first[0].(string); ok {
+							code = str
+						}
+					}
+				}
+				if len(first) > 1 && message == "" {
+					if str, ok := first[1].(string); ok {
+						message = str
+					}
+				}
+				if len(first) > 2 && details == nil {
+					details = first[2]
+				}
+			}
+		}
+		if details == nil && len(jsonObj) > 0 {
+			details = jsonObj
+		}
+	}
+
+	if details == nil && len(parsed) > 0 {
+		details = parsed
+	}
+
+	return code, message, details
 }
