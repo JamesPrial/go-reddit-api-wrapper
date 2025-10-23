@@ -13,8 +13,8 @@ import (
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 	graw "github.com/jamesprial/go-reddit-api-wrapper/reddit"
 	"github.com/jamesprial/go-reddit-api-wrapper/storage"
-	_ "github.com/jamesprial/go-reddit-api-wrapper/storage/sqlite" // Register SQLite backend
 	"github.com/jamesprial/go-reddit-api-wrapper/storage/internal/testutil"
+	_ "github.com/jamesprial/go-reddit-api-wrapper/storage/sqlite" // Register SQLite backend
 )
 
 // Integration tests for storage layer with real Reddit API data.

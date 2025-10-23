@@ -7,6 +7,7 @@ import (
 
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 	"github.com/jamesprial/go-reddit-api-wrapper/storage/internal/testutil"
+	sqlite "github.com/jamesprial/go-reddit-api-wrapper/storage/sqlite"
 	"github.com/stretchr/testify/require"
 )
 
@@ -91,6 +92,7 @@ func TestEvictStale(t *testing.T) {
 
 	t.Run("evict old entries", func(t *testing.T) {
 		store := NewTestDB(t)
+		sqliteStore := store.(*sqlite.SQLiteStore)
 		// Insert some posts
 		posts := []*types.Post{
 			testutil.BuildPost("old1", "golang"),
@@ -103,23 +105,21 @@ func TestEvictStale(t *testing.T) {
 			require.NoError(t, err)
 		}
 
-		// Note: This test would require direct database access to set old timestamps
-		// which is not available through the public API
-		oldTimestamp := time.Now().Add(-2 * time.Hour).Unix()
-		_ = oldTimestamp // Unused for now, but keep the timestamp for reference
+		// Set historical timestamps for old posts
+		oldTimestamp := time.Now().Add(-2 * time.Hour)
+		err := sqlite.SetPostFetchedAt(sqliteStore, ctx, "old1", oldTimestamp)
+		require.NoError(t, err)
+		err = sqlite.SetPostFetchedAt(sqliteStore, ctx, "old2", oldTimestamp)
+		require.NoError(t, err)
 
 		// Insert comments for the old and new posts
 		oldComments := testutil.BuildCommentTree("old1", 0, 2) // 2 top-level comments
 		recentComments := testutil.BuildCommentTree("recent", 0, 2)
 
-		err := store.UpsertComments(ctx, oldComments)
+		err = store.UpsertComments(ctx, oldComments)
 		require.NoError(t, err)
 		err = store.UpsertComments(ctx, recentComments)
 		require.NoError(t, err)
-
-		// Update fetched_at for old comments would require direct database access
-		// which is not available through the public API
-		_ = oldComments // Keep for reference
 
 		// Verify we have all entries before eviction
 		preStats, err := store.GetStats(ctx)
@@ -204,6 +204,7 @@ func TestEvictStale(t *testing.T) {
 
 	t.Run("evict respects time boundary", func(t *testing.T) {
 		store := NewTestDB(t)
+		sqliteStore := store.(*sqlite.SQLiteStore)
 		// Insert posts at different times
 		posts := []*types.Post{
 			testutil.BuildPost("veryold", "golang"),
@@ -216,20 +217,21 @@ func TestEvictStale(t *testing.T) {
 			require.NoError(t, err)
 		}
 
+		// Set historical timestamps for posts
 		now := time.Now()
-		veryOld := now.Add(-3 * time.Hour).Unix()
-		old := now.Add(-90 * time.Minute).Unix()
-		_ = veryOld
-		_ = old
+		veryOldTime := now.Add(-3 * time.Hour)
+		oldTime := now.Add(-90 * time.Minute)
 
-		// Note: Setting old timestamps would require direct database access
-		// Skipping timestamp update for now
+		err := sqlite.SetPostFetchedAt(sqliteStore, ctx, "veryold", veryOldTime)
+		require.NoError(t, err)
+		err = sqlite.SetPostFetchedAt(sqliteStore, ctx, "old", oldTime)
+		require.NoError(t, err)
 
 		// Evict entries older than 2 hours
 		evicted, err := store.EvictStale(ctx, 2*time.Hour)
 		require.NoError(t, err)
-		// Since we can't set old timestamps, expect 0 evictions
-		require.Equal(t, int64(0), evicted, "no old posts should exist")
+		// Should evict only the very old post (>2 hours), keep old (90 minutes) and recent
+		require.Equal(t, int64(1), evicted, "should evict only the very old post (>2 hours)")
 
 		// Verify very old is gone, but old and recent remain
 		_, err = store.GetPost(ctx, "veryold")

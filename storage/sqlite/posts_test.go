@@ -7,8 +7,8 @@ import (
 
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 	"github.com/jamesprial/go-reddit-api-wrapper/storage"
-	_ "github.com/jamesprial/go-reddit-api-wrapper/storage/sqlite" // Register SQLite backend
 	"github.com/jamesprial/go-reddit-api-wrapper/storage/internal/testutil"
+	_ "github.com/jamesprial/go-reddit-api-wrapper/storage/sqlite" // Register SQLite backend
 	"github.com/stretchr/testify/require"
 )
 
