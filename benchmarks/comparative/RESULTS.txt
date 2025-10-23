@@ -1,0 +1,38 @@
+goos: linux
+goarch: amd64
+pkg: github.com/jamesprial/go-reddit-api-wrapper/benchmarks/comparative
+cpu: 13th Gen Intel(R) Core(TM) i7-13700F
+BenchmarkComparison_GetPosts_OurClient/small_10posts-24         	      10	   1827680 ns/op	   9.30 MB/s	  148645 B/op	     532 allocs/op
+BenchmarkComparison_GetPosts_OurClient/medium_100posts-24       	      10	   5438626 ns/op	  25.37 MB/s	 1042268 B/op	    3452 allocs/op
+BenchmarkComparison_GetPosts_OurClient/large_1000posts-24       	      10	  27025422 ns/op	  51.80 MB/s	11652144 B/op	   32134 allocs/op
+BenchmarkComparison_GetPosts_RawHTTP/small_10posts-24           	      10	    311192 ns/op	  54.63 MB/s	  166496 B/op	    1064 allocs/op
+BenchmarkComparison_GetPosts_RawHTTP/medium_100posts-24         	      10	   1236726 ns/op	 111.58 MB/s	 1331116 B/op	    9058 allocs/op
+BenchmarkComparison_GetPosts_RawHTTP/large_1000posts-24         	      10	  12904974 ns/op	 108.49 MB/s	12867868 B/op	   88330 allocs/op
+BenchmarkComparison_ParseResponse_OurClient/small_10posts-24    	      10	    327799 ns/op	   38184 B/op	      56 allocs/op
+BenchmarkComparison_ParseResponse_OurClient/medium_100posts-24  	      10	   2734279 ns/op	  299128 B/op	     329 allocs/op
+BenchmarkComparison_ParseResponse_OurClient/large_1000posts-24  	      10	  15066533 ns/op	 2939723 B/op	    3032 allocs/op
+BenchmarkComparison_ParseResponse_RawJSON/small_10posts-24      	      10	     99433 ns/op	   69456 B/op	     943 allocs/op
+BenchmarkComparison_ParseResponse_RawJSON/medium_100posts-24    	      10	    804955 ns/op	  624288 B/op	    8922 allocs/op
+BenchmarkComparison_ParseResponse_RawJSON/large_1000posts-24    	      10	   9711120 ns/op	 6195489 B/op	   88171 allocs/op
+BenchmarkComparison_EndToEnd_OurClient-24                       	      10	   5718595 ns/op	  24.13 MB/s	 1119220 B/op	    3458 allocs/op
+BenchmarkComparison_EndToEnd_RawHTTP-24                         	      10	   4007580 ns/op	  34.43 MB/s	 1329777 B/op	    9058 allocs/op
+BenchmarkComparison_ResponseParsing_WithPool/small_10posts-24   	      10	    544956 ns/op	  31.20 MB/s	   53024 B/op	      94 allocs/op
+BenchmarkComparison_ResponseParsing_WithPool/medium_100posts-24 	      10	    971110 ns/op	 142.11 MB/s	  368022 B/op	      96 allocs/op
+BenchmarkComparison_ResponseParsing_WithPool/large_1000posts-24 	      10	   2382303 ns/op	 587.67 MB/s	 5615964 B/op	     115 allocs/op
+BenchmarkComparison_ResponseParsing_NoPool/small_10posts-24     	      10	     77740 ns/op	 218.68 MB/s	   75976 B/op	      97 allocs/op
+BenchmarkComparison_ResponseParsing_NoPool/medium_100posts-24   	      10	    183502 ns/op	 752.04 MB/s	  537644 B/op	     104 allocs/op
+BenchmarkComparison_ResponseParsing_NoPool/large_1000posts-24   	      10	    682646 ns/op	2050.84 MB/s	 4218088 B/op	     118 allocs/op
+BenchmarkComparison_BurstRequests_WithRateLimit/10_requests_30rps-24         	      10	 300137329 ns/op	  199605 B/op	    1464 allocs/op
+BenchmarkComparison_BurstRequests_WithRateLimit/50_requests_30rps-24         	      10	1633500045 ns/op	  982820 B/op	    7280 allocs/op
+BenchmarkComparison_BurstRequests_WithRateLimit/100_requests_30rps-24        	      10	3300047704 ns/op	 1963485 B/op	   14545 allocs/op
+BenchmarkComparison_BurstRequests_NoRateLimit/10_requests-24                 	      10	   1289198 ns/op	  197665 B/op	    1423 allocs/op
+BenchmarkComparison_BurstRequests_NoRateLimit/50_requests-24                 	      10	   5987119 ns/op	  971933 B/op	    7087 allocs/op
+BenchmarkComparison_BurstRequests_NoRateLimit/100_requests-24                	      10	  11881014 ns/op	 1944419 B/op	   14171 allocs/op
+BenchmarkComparison_ErrorHandling_TypedErrors/auth_error-24                  	      10	       899.5 ns/op	     668 B/op	      12 allocs/op
+BenchmarkComparison_ErrorHandling_TypedErrors/network_error-24               	      10	       761.3 ns/op	     214 B/op	       6 allocs/op
+BenchmarkComparison_ErrorHandling_TypedErrors/parse_error-24                 	      10	       284.4 ns/op	     128 B/op	       4 allocs/op
+BenchmarkComparison_ErrorHandling_GenericErrors/auth_error-24                	      10	       983.9 ns/op	     488 B/op	       6 allocs/op
+BenchmarkComparison_ErrorHandling_GenericErrors/network_error-24             	      10	       757.6 ns/op	     488 B/op	       6 allocs/op
+BenchmarkComparison_ErrorHandling_GenericErrors/parse_error-24               	      10	      1189 ns/op	     498 B/op	       6 allocs/op
+PASS
+ok  	github.com/jamesprial/go-reddit-api-wrapper/benchmarks/comparative	57.989s

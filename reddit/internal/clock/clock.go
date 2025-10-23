@@ -92,12 +92,14 @@ func (c *MockClock) Sleep(d time.Duration) {
 	c.Advance(d)
 }
 
-// After returns a channel that immediately receives the time after advancing by d.
-// Note: This is a simplified implementation for testing. The channel receives immediately.
+// After returns a channel that receives the time after advancing by d.
+// The send happens asynchronously to mimic the behavior of time.After and prevent deadlocks.
 func (c *MockClock) After(d time.Duration) <-chan time.Time {
 	ch := make(chan time.Time, 1)
-	c.Advance(d)
-	ch <- c.Now()
+	go func() {
+		c.Advance(d)
+		ch <- c.Now()
+	}()
 	return ch
 }
 

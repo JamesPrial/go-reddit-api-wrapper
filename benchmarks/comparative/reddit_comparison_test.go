@@ -1,0 +1,1673 @@
+package comparative
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
+	graw "github.com/jamesprial/go-reddit-api-wrapper/reddit"
+	"golang.org/x/time/rate"
+)
+
+// Fixture cache to avoid repeated file I/O during benchmarks.
+// Using sync.Once per fixture ensures thread-safe initialization.
+var (
+	fixtureCache     = make(map[string][]byte)
+	fixtureCacheLock sync.RWMutex
+	fixtureLoadOnce  = make(map[string]*sync.Once)
+	fixtureLockMutex sync.Mutex
+)
+
+// Comparative Benchmarks for Reddit Client
+//
+// This file provides objective performance comparisons between our Reddit client
+// and baseline implementations, measuring the overhead/benefit of our abstractions.
+//
+// Comparisons:
+// 1. Our client vs raw stdlib (overall overhead/benefit)
+// 2. With vs without buffer pooling (memory optimization)
+// 3. With vs without rate limiting (throughput protection)
+// 4. Typed vs generic errors (error handling overhead)
+// 5. Placeholder for future library comparisons
+//
+// All benchmarks use identical fixtures and mock servers to ensure fair comparison.
+// Measurements include time per operation, memory allocated, and throughput.
+
+// =============================================================================
+// BASELINE IMPLEMENTATIONS
+// =============================================================================
+
+// rawHTTPClient simulates minimal stdlib-only implementation with no abstractions.
+// This represents the bare minimum code needed to fetch Reddit data using only
+// the standard library: http.Client + json.Unmarshal.
+type rawHTTPClient struct {
+	client  *http.Client
+	baseURL string
+}
+
+// GetPosts fetches posts using raw HTTP with minimal abstractions.
+// No rate limiting, no auth caching, no error wrapping, no buffer pooling.
+func (r *rawHTTPClient) GetPosts(subreddit string) (interface{}, error) {
+	url := fmt.Sprintf("%s/r/%s/hot.json", r.baseURL, subreddit)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("User-Agent", "test/1.0")
+	req.Header.Set("Authorization", "Bearer test-token")
+
+	resp, err := r.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	// Read entire body into memory (no buffer pooling)
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	// Parse JSON directly into generic interface (no custom unmarshaling)
+	var result interface{}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+
+// ParseResponse parses raw JSON using stdlib only (no custom unmarshaling).
+func (r *rawHTTPClient) ParseResponse(data []byte) (interface{}, error) {
+	var result interface{}
+	if err := json.Unmarshal(data, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// noPoolHTTPClient is a client that doesn't use buffer pooling.
+// This shows the benefit of sync.Pool for response body buffering.
+type noPoolHTTPClient struct {
+	client    *http.Client
+	baseURL   string
+	userAgent string
+}
+
+// Do executes a request without buffer pooling.
+func (n *noPoolHTTPClient) Do(req *http.Request) ([]byte, error) {
+	resp, err := n.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	// Allocate a new buffer every time (no pooling)
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, resp.Body); err != nil {
+		return nil, err
+	}
+
+	return buf.Bytes(), nil
+}
+
+// withPoolHTTPClient is a client that uses buffer pooling.
+// This demonstrates the memory efficiency gains from sync.Pool.
+type withPoolHTTPClient struct {
+	client    *http.Client
+	baseURL   string
+	userAgent string
+	pool      *sync.Pool
+}
+
+func newWithPoolHTTPClient(client *http.Client, baseURL, userAgent string) *withPoolHTTPClient {
+	return &withPoolHTTPClient{
+		client:    client,
+		baseURL:   baseURL,
+		userAgent: userAgent,
+		pool: &sync.Pool{
+			New: func() interface{} {
+				buf := new(bytes.Buffer)
+				buf.Grow(8 * 1024) // 8KB initial size
+				return buf
+			},
+		},
+	}
+}
+
+// Do executes a request with buffer pooling.
+func (w *withPoolHTTPClient) Do(req *http.Request) ([]byte, error) {
+	resp, err := w.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	// Get buffer from pool
+	buf := w.pool.Get().(*bytes.Buffer)
+	buf.Reset()
+	defer func() {
+		// Only return reasonably-sized buffers to pool
+		if buf.Cap() <= 256*1024 {
+			w.pool.Put(buf)
+		}
+	}()
+
+	if _, err := io.Copy(buf, resp.Body); err != nil {
+		return nil, err
+	}
+
+	// Must copy data before returning buffer to pool
+	result := make([]byte, buf.Len())
+	copy(result, buf.Bytes())
+
+	return result, nil
+}
+
+// noRateLimitClient executes requests without any rate limiting.
+type noRateLimitClient struct {
+	client *http.Client
+}
+
+// Do executes a request with no rate limiting.
+func (n *noRateLimitClient) Do(ctx context.Context, req *http.Request) (*http.Response, error) {
+	return n.client.Do(req)
+}
+
+// withRateLimitClient executes requests with rate limiting.
+type withRateLimitClient struct {
+	client  *http.Client
+	limiter *rate.Limiter
+}
+
+// Do executes a request with rate limiting.
+func (w *withRateLimitClient) Do(ctx context.Context, req *http.Request) (*http.Response, error) {
+	// Wait for rate limiter
+	if err := w.limiter.Wait(ctx); err != nil {
+		return nil, err
+	}
+
+	return w.client.Do(req)
+}
+
+// genericErrorHandler uses simple error strings.
+type genericErrorHandler struct{}
+
+// HandleError creates a generic error.
+func (g *genericErrorHandler) HandleError(operation, message string, err error) error {
+	if err != nil {
+		return fmt.Errorf("%s failed during %s: %w", operation, message, err)
+	}
+	return fmt.Errorf("%s failed during %s", operation, message)
+}
+
+// typedErrorHandler uses our structured error types.
+type typedErrorHandler struct{}
+
+// HandleAuthError creates a typed auth error.
+func (t *typedErrorHandler) HandleAuthError(statusCode int, message, body string, err error) error {
+	return &graw.AuthError{
+		StatusCode: statusCode,
+		Message:    message,
+		Body:       body,
+		Err:        err,
+	}
+}
+
+// HandleNetworkError creates a typed network error.
+func (t *typedErrorHandler) HandleNetworkError(method, url string, duration time.Duration, err error) error {
+	return &graw.NetworkError{
+		Method:   method,
+		URL:      url,
+		Duration: duration,
+		Err:      err,
+	}
+}
+
+// HandleParseError creates a typed parse error.
+func (t *typedErrorHandler) HandleParseError(operation, message string, err error) error {
+	return &graw.ParseError{
+		Operation: operation,
+		Message:   message,
+		Err:       err,
+	}
+}
+
+// =============================================================================
+// COMPARISON 1: Our Client vs Raw HTTP + Manual JSON Parsing
+// =============================================================================
+
+// BenchmarkComparison_GetPosts_OurClient measures end-to-end performance
+// of fetching posts using our Reddit client, including:
+// - OAuth2 token caching
+// - Rate limit checking (effectively disabled for benchmark)
+// - Request construction with headers
+// - Response parsing with custom unmarshalers
+// - Structured error handling
+// - Buffer pooling
+//
+// Compare with BenchmarkComparison_GetPosts_RawHTTP to see the overhead
+// of our abstractions vs minimal stdlib usage.
+//
+// Performance characteristics:
+// - Time overhead varies by response size and feature set (auth, validation, parsing)
+// - Buffer pooling reduces allocations compared to raw implementations
+// - Type-safe parsing adds overhead but provides compile-time safety
+// - Token caching amortizes auth cost across requests
+func BenchmarkComparison_GetPosts_OurClient(b *testing.B) {
+	tests := []struct {
+		name    string
+		fixture string
+	}{
+		{"small_10posts", "small_posts.json"},
+		{"medium_100posts", "medium_posts.json"},
+		{"large_1000posts", "large_posts.json"},
+	}
+
+	for _, tt := range tests {
+		b.Run(tt.name, func(b *testing.B) {
+			b.ReportAllocs()
+
+			fixture := loadFixture(b, tt.fixture)
+			// Use actual fixture size for accurate throughput calculation
+			b.SetBytes(int64(len(fixture)))
+
+			server := setupMockServer(fixture)
+			defer server.Close()
+
+			redditClient := createTestRedditClient(b, server.URL)
+			ctx := context.Background()
+
+			// Warmup iteration to cache auth token before timing starts.
+			// Without this, the first GetHot call includes token acquisition overhead,
+			// which skews benchmark results as it's a one-time cost.
+			_, err := redditClient.GetHot(ctx, &types.PostsRequest{
+				Subreddit: "golang",
+				Pagination: types.Pagination{
+					Limit: 100,
+				},
+			})
+			if err != nil {
+				b.Fatalf("warmup GetHot failed: %v", err)
+			}
+
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				resp, err := redditClient.GetHot(ctx, &types.PostsRequest{
+					Subreddit: "golang",
+					Pagination: types.Pagination{
+						Limit: 100,
+					},
+				})
+				if err != nil {
+					b.Fatalf("GetHot failed: %v", err)
+				}
+
+				// Access parsed data to prevent compiler optimization
+				_ = len(resp.Posts)
+				_ = resp.AfterFullname
+				_ = resp.BeforeFullname
+			}
+		})
+	}
+}
+
+// BenchmarkComparison_GetPosts_RawHTTP measures baseline performance using
+// only stdlib: http.Client + json.Unmarshal into generic map[string]interface{}.
+// No rate limiting, no auth caching, no error wrapping, no buffer pooling.
+//
+// This represents the absolute minimum code needed to fetch Reddit data.
+//
+// Expected: Fastest time per operation, but highest allocations due to:
+// - No buffer pooling (new allocation per request)
+// - Generic JSON parsing (map[string]interface{} creates many small objects)
+func BenchmarkComparison_GetPosts_RawHTTP(b *testing.B) {
+	tests := []struct {
+		name    string
+		fixture string
+	}{
+		{"small_10posts", "small_posts.json"},
+		{"medium_100posts", "medium_posts.json"},
+		{"large_1000posts", "large_posts.json"},
+	}
+
+	for _, tt := range tests {
+		b.Run(tt.name, func(b *testing.B) {
+			b.ReportAllocs()
+
+			fixture := loadFixture(b, tt.fixture)
+			// Use actual fixture size for accurate throughput calculation
+			b.SetBytes(int64(len(fixture)))
+
+			server := setupMockServer(fixture)
+			defer server.Close()
+
+			rawClient := &rawHTTPClient{
+				client:  &http.Client{Timeout: 30 * time.Second},
+				baseURL: server.URL,
+			}
+
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				result, err := rawClient.GetPosts("golang")
+				if err != nil {
+					b.Fatalf("GetPosts failed: %v", err)
+				}
+
+				// Access parsed data to prevent compiler optimization
+				if m, ok := result.(map[string]interface{}); ok {
+					_ = m["kind"]
+					if data, ok := m["data"].(map[string]interface{}); ok {
+						_ = data["children"]
+					}
+				}
+			}
+		})
+	}
+}
+
+// BenchmarkComparison_ParseResponse_OurClient measures parsing performance
+// using our custom unmarshalers and type-safe structs.
+//
+// Our types include:
+// - Custom UnmarshalJSON for Edited field (handles bool or float64)
+// - Type-safe Post and Comment structs
+// - Validation of parsed data
+// - Efficient struct packing
+func BenchmarkComparison_ParseResponse_OurClient(b *testing.B) {
+	tests := []struct {
+		name    string
+		fixture string
+	}{
+		{"small_10posts", "small_posts.json"},
+		{"medium_100posts", "medium_posts.json"},
+		{"large_1000posts", "large_posts.json"},
+	}
+
+	for _, tt := range tests {
+		b.Run(tt.name, func(b *testing.B) {
+			b.ReportAllocs()
+
+			fixture := loadFixture(b, tt.fixture)
+
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				var thing types.Thing
+				if err := json.Unmarshal(fixture, &thing); err != nil {
+					b.Fatalf("Unmarshal failed: %v", err)
+				}
+
+				// Parse the listing data
+				var listing types.ListingData
+				if err := json.Unmarshal(thing.Data, &listing); err != nil {
+					b.Fatalf("Parse listing failed: %v", err)
+				}
+
+				// Access parsed data to prevent compiler optimization
+				_ = len(listing.Children)
+				_ = listing.AfterFullname
+				_ = listing.BeforeFullname
+			}
+		})
+	}
+}
+
+// BenchmarkComparison_ParseResponse_RawJSON measures baseline JSON parsing
+// using stdlib json.Unmarshal into generic interface{}.
+//
+// This is the fastest parsing approach but provides:
+// - No type safety
+// - No validation
+// - No custom field handling (Edited field)
+// - Requires type assertions at every access
+func BenchmarkComparison_ParseResponse_RawJSON(b *testing.B) {
+	tests := []struct {
+		name    string
+		fixture string
+	}{
+		{"small_10posts", "small_posts.json"},
+		{"medium_100posts", "medium_posts.json"},
+		{"large_1000posts", "large_posts.json"},
+	}
+
+	for _, tt := range tests {
+		b.Run(tt.name, func(b *testing.B) {
+			b.ReportAllocs()
+
+			fixture := loadFixture(b, tt.fixture)
+			rawClient := &rawHTTPClient{
+				client:  &http.Client{},
+				baseURL: "http://example.com",
+			}
+
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				result, err := rawClient.ParseResponse(fixture)
+				if err != nil {
+					b.Fatalf("ParseResponse failed: %v", err)
+				}
+
+				// Access parsed data to prevent compiler optimization
+				if m, ok := result.(map[string]interface{}); ok {
+					_ = m["kind"]
+					if data, ok := m["data"].(map[string]interface{}); ok {
+						_ = data["children"]
+						_ = data["after"]
+					}
+				}
+			}
+		})
+	}
+}
+
+// BenchmarkComparison_EndToEnd_OurClient measures complete workflow:
+// auth -> rate limiting -> HTTP request -> parsing -> validation.
+//
+// This represents a realistic usage scenario with all features enabled.
+func BenchmarkComparison_EndToEnd_OurClient(b *testing.B) {
+	b.ReportAllocs()
+
+	fixture := loadFixture(b, "medium_posts.json")
+	// Use actual fixture size for accurate throughput calculation
+	b.SetBytes(int64(len(fixture)))
+
+	server := setupMockServer(fixture)
+	defer server.Close()
+
+	redditClient := createTestRedditClient(b, server.URL)
+	ctx := context.Background()
+
+	// Warmup iteration to cache auth token before timing starts.
+	// Without this, the first GetHot call includes token acquisition overhead,
+	// which skews benchmark results as it's a one-time cost.
+	_, err := redditClient.GetHot(ctx, &types.PostsRequest{
+		Subreddit: "golang",
+		Pagination: types.Pagination{
+			Limit: 100,
+		},
+	})
+	if err != nil {
+		b.Fatalf("warmup GetHot failed: %v", err)
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		resp, err := redditClient.GetHot(ctx, &types.PostsRequest{
+			Subreddit: "golang",
+			Pagination: types.Pagination{
+				Limit: 100,
+			},
+		})
+		if err != nil {
+			b.Fatalf("GetHot failed: %v", err)
+		}
+		// Access data to ensure full parsing
+		for _, post := range resp.Posts {
+			_ = post.Title
+			_ = post.Author
+			_ = post.Score
+		}
+	}
+}
+
+// BenchmarkComparison_EndToEnd_RawHTTP measures complete workflow with
+// raw stdlib implementation (no abstractions).
+//
+// This is the baseline for comparison - fastest possible time but:
+// - No token caching (would need to add auth logic)
+// - No rate limiting (could hit Reddit's limits)
+// - No error context (just error strings)
+// - No type safety (all type assertions required)
+func BenchmarkComparison_EndToEnd_RawHTTP(b *testing.B) {
+	b.ReportAllocs()
+
+	fixture := loadFixture(b, "medium_posts.json")
+	// Use actual fixture size for accurate throughput calculation
+	b.SetBytes(int64(len(fixture)))
+
+	server := setupMockServer(fixture)
+	defer server.Close()
+
+	rawClient := &rawHTTPClient{
+		client:  &http.Client{Timeout: 30 * time.Second},
+		baseURL: server.URL,
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		result, err := rawClient.GetPosts("golang")
+		if err != nil {
+			b.Fatalf("GetPosts failed: %v", err)
+		}
+		// Access data to ensure it's parsed
+		if m, ok := result.(map[string]interface{}); ok {
+			_ = m["kind"]
+			_ = m["data"]
+		}
+	}
+}
+
+// =============================================================================
+// COMPARISON 2: With vs Without Buffer Pooling
+// =============================================================================
+
+// BenchmarkComparison_ResponseParsing_WithPool measures response body handling
+// using sync.Pool for buffer reuse.
+//
+// Benefits of buffer pooling:
+// - Amortized allocation cost across many requests
+// - Reduced GC pressure
+// - Consistent memory footprint
+//
+// Allocation reduction varies by response size and request pattern.
+// Compare with BenchmarkComparison_ResponseParsing_NoPool to measure actual benefit.
+func BenchmarkComparison_ResponseParsing_WithPool(b *testing.B) {
+	tests := []struct {
+		name    string
+		fixture string
+	}{
+		{"small_10posts", "small_posts.json"},
+		{"medium_100posts", "medium_posts.json"},
+		{"large_1000posts", "large_posts.json"},
+	}
+
+	for _, tt := range tests {
+		b.Run(tt.name, func(b *testing.B) {
+			b.ReportAllocs()
+
+			fixture := loadFixture(b, tt.fixture)
+			// Use actual fixture size for accurate throughput calculation
+			b.SetBytes(int64(len(fixture)))
+
+			server := setupMockServer(fixture)
+			defer server.Close()
+
+			poolClient := newWithPoolHTTPClient(&http.Client{}, server.URL, "test/1.0")
+
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				req, _ := http.NewRequest("GET", server.URL, nil)
+				data, err := poolClient.Do(req)
+				if err != nil {
+					b.Fatalf("Do failed: %v", err)
+				}
+
+				// Access parsed data to prevent compiler optimization
+				_ = len(data)
+				if len(data) > 0 {
+					_ = data[0]
+				}
+			}
+		})
+	}
+}
+
+// BenchmarkComparison_ResponseParsing_NoPool measures response body handling
+// without buffer pooling (allocates new buffer every request).
+//
+// Drawbacks of no pooling:
+// - New allocation per request
+// - Higher GC pressure
+// - Memory usage spikes under load
+//
+// Compare with BenchmarkComparison_ResponseParsing_WithPool to measure pooling overhead.
+func BenchmarkComparison_ResponseParsing_NoPool(b *testing.B) {
+	tests := []struct {
+		name    string
+		fixture string
+	}{
+		{"small_10posts", "small_posts.json"},
+		{"medium_100posts", "medium_posts.json"},
+		{"large_1000posts", "large_posts.json"},
+	}
+
+	for _, tt := range tests {
+		b.Run(tt.name, func(b *testing.B) {
+			b.ReportAllocs()
+
+			fixture := loadFixture(b, tt.fixture)
+			// Use actual fixture size for accurate throughput calculation
+			b.SetBytes(int64(len(fixture)))
+
+			server := setupMockServer(fixture)
+			defer server.Close()
+
+			noPoolClient := &noPoolHTTPClient{
+				client:    &http.Client{},
+				baseURL:   server.URL,
+				userAgent: "test/1.0",
+			}
+
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				req, _ := http.NewRequest("GET", server.URL, nil)
+				data, err := noPoolClient.Do(req)
+				if err != nil {
+					b.Fatalf("Do failed: %v", err)
+				}
+
+				// Access parsed data to prevent compiler optimization
+				_ = len(data)
+				if len(data) > 0 {
+					_ = data[0]
+				}
+			}
+		})
+	}
+}
+
+// =============================================================================
+// COMPARISON 3: With vs Without Rate Limiting
+// =============================================================================
+
+// BenchmarkComparison_BurstRequests_WithRateLimit measures throughput when
+// rate limiting is enforced.
+//
+// Rate limiting provides:
+// - Protection against hitting Reddit's API limits
+// - Smooth request distribution
+// - Proactive throttling when limits are low
+//
+// Expected: Slower throughput but prevents 429 errors in production.
+func BenchmarkComparison_BurstRequests_WithRateLimit(b *testing.B) {
+	tests := []struct {
+		name         string
+		requestCount int
+		ratePerSec   float64
+	}{
+		{"10_requests_30rps", 10, 30.0},
+		{"50_requests_30rps", 50, 30.0},
+		{"100_requests_30rps", 100, 30.0},
+	}
+
+	for _, tt := range tests {
+		b.Run(tt.name, func(b *testing.B) {
+			b.ReportAllocs()
+
+			fixture := []byte(`{"kind":"Listing","data":{"children":[]}}`)
+			server := setupMockServer(fixture)
+			defer server.Close()
+
+			limiter := rate.NewLimiter(rate.Limit(tt.ratePerSec), 10)
+			rateLimitClient := &withRateLimitClient{
+				client:  &http.Client{Timeout: 30 * time.Second},
+				limiter: limiter,
+			}
+			ctx := context.Background()
+
+			// Set bytes for throughput calculation: fixture size * request count
+			totalBytes := int64(len(fixture) * tt.requestCount)
+			b.SetBytes(totalBytes)
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				for j := 0; j < tt.requestCount; j++ {
+					req, _ := http.NewRequest("GET", server.URL, nil)
+					resp, err := rateLimitClient.Do(ctx, req)
+					if err != nil {
+						b.Fatalf("Do failed: %v", err)
+					}
+					resp.Body.Close()
+				}
+			}
+		})
+	}
+}
+
+// BenchmarkComparison_BurstRequests_NoRateLimit measures throughput without
+// any rate limiting (fire requests as fast as possible).
+//
+// No rate limiting means:
+// - Maximum throughput
+// - Risk of hitting API rate limits
+// - Potential for 429 Too Many Requests errors
+//
+// Expected: Fastest throughput but unsustainable in production.
+func BenchmarkComparison_BurstRequests_NoRateLimit(b *testing.B) {
+	tests := []struct {
+		name         string
+		requestCount int
+	}{
+		{"10_requests", 10},
+		{"50_requests", 50},
+		{"100_requests", 100},
+	}
+
+	for _, tt := range tests {
+		b.Run(tt.name, func(b *testing.B) {
+			b.ReportAllocs()
+
+			fixture := []byte(`{"kind":"Listing","data":{"children":[]}}`)
+			server := setupMockServer(fixture)
+			defer server.Close()
+
+			noRateLimitClient := &noRateLimitClient{
+				client: &http.Client{Timeout: 30 * time.Second},
+			}
+			ctx := context.Background()
+
+			// Set bytes for throughput calculation: fixture size * request count
+			totalBytes := int64(len(fixture) * tt.requestCount)
+			b.SetBytes(totalBytes)
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				for j := 0; j < tt.requestCount; j++ {
+					req, _ := http.NewRequest("GET", server.URL, nil)
+					resp, err := noRateLimitClient.Do(ctx, req)
+					if err != nil {
+						b.Fatalf("Do failed: %v", err)
+					}
+					resp.Body.Close()
+				}
+			}
+		})
+	}
+}
+
+// =============================================================================
+// COMPARISON 4: Typed Errors vs Generic Errors
+// =============================================================================
+
+// BenchmarkComparison_ErrorHandling_TypedErrors measures error creation and
+// handling using our structured error types (AuthError, NetworkError, etc.).
+//
+// Typed errors provide:
+// - Structured error information (status codes, URLs, durations)
+// - Error chain support (Unwrap)
+// - Type-safe error inspection with errors.As()
+//
+// Performance varies by error type and usage pattern:
+// - Simple struct initialization can be faster than fmt.Errorf with formatting
+// - Complex error chains or string formatting may add overhead
+// - Type safety and structured data enable better error handling at runtime
+// Compare with BenchmarkComparison_ErrorHandling_GenericErrors for actual overhead.
+func BenchmarkComparison_ErrorHandling_TypedErrors(b *testing.B) {
+	tests := []struct {
+		name      string
+		errorType string
+	}{
+		{"auth_error", "auth"},
+		{"network_error", "network"},
+		{"parse_error", "parse"},
+	}
+
+	for _, tt := range tests {
+		b.Run(tt.name, func(b *testing.B) {
+			b.ReportAllocs()
+
+			handler := &typedErrorHandler{}
+			baseErr := fmt.Errorf("underlying error")
+
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				var err error
+				switch tt.errorType {
+				case "auth":
+					err = handler.HandleAuthError(401, "unauthorized", "invalid credentials", baseErr)
+				case "network":
+					err = handler.HandleNetworkError("GET", "https://oauth.reddit.com/hot", 100*time.Millisecond, baseErr)
+				case "parse":
+					err = handler.HandleParseError("parse_post", "invalid JSON", baseErr)
+				}
+
+				// Simulate realistic error usage patterns
+				// 1. Check error type with errors.As
+				switch tt.errorType {
+				case "auth":
+					var authErr *graw.AuthError
+					if errors.As(err, &authErr) {
+						_ = authErr.StatusCode
+						_ = authErr.Message
+					}
+				case "network":
+					var netErr *graw.NetworkError
+					if errors.As(err, &netErr) {
+						_ = netErr.URL
+						_ = netErr.Duration
+					}
+				case "parse":
+					var parseErr *graw.ParseError
+					if errors.As(err, &parseErr) {
+						_ = parseErr.Operation
+						_ = parseErr.Message
+					}
+				}
+
+				// 2. Check error identity with errors.Is
+				_ = errors.Is(err, baseErr)
+
+				// 3. Unwrap to access underlying error
+				unwrapped := errors.Unwrap(err)
+				if unwrapped != nil {
+					_ = unwrapped.Error()
+				}
+
+				// 4. Get error string for logging
+				_ = err.Error()
+			}
+		})
+	}
+}
+
+// BenchmarkComparison_ErrorHandling_GenericErrors measures error creation
+// using simple fmt.Errorf with string formatting.
+//
+// Generic errors are:
+// - Simple string formatting
+// - No type information (requires string parsing to extract details)
+// - Performance depends on formatting complexity
+//
+// Compare with BenchmarkComparison_ErrorHandling_TypedErrors to see trade-offs
+// between performance and structured error information.
+func BenchmarkComparison_ErrorHandling_GenericErrors(b *testing.B) {
+	tests := []struct {
+		name      string
+		errorType string
+	}{
+		{"auth_error", "auth"},
+		{"network_error", "network"},
+		{"parse_error", "parse"},
+	}
+
+	for _, tt := range tests {
+		b.Run(tt.name, func(b *testing.B) {
+			b.ReportAllocs()
+
+			handler := &genericErrorHandler{}
+
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				var err error
+				baseErr := fmt.Errorf("underlying error")
+				switch tt.errorType {
+				case "auth":
+					err = handler.HandleError("auth", "unauthorized", baseErr)
+				case "network":
+					err = handler.HandleError("network", "request failed", baseErr)
+				case "parse":
+					err = handler.HandleError("parse", "invalid JSON", baseErr)
+				}
+
+				// Simulate realistic error usage patterns
+				// 1. Try to check error type with errors.As (won't work with generic errors)
+				// Generic errors don't have specific types, so this always fails
+				var authErr *graw.AuthError
+				_ = errors.As(err, &authErr) // Always false
+
+				// 2. Check error identity with errors.Is
+				_ = errors.Is(err, baseErr)
+
+				// 3. Unwrap to access underlying error
+				unwrapped := errors.Unwrap(err)
+				if unwrapped != nil {
+					_ = unwrapped.Error()
+				}
+
+				// 4. Get error string for logging
+				_ = err.Error()
+			}
+		})
+	}
+}
+
+// BenchmarkComparison_ErrorHandling_Usage measures complete error handling
+// workflow comparing typed errors vs generic errors.
+//
+// This benchmark tests the full lifecycle of error handling:
+// 1. Create error
+// 2. Check error type with errors.As()
+// 3. Check error identity with errors.Is()
+// 4. Access typed fields (only possible with typed errors)
+// 5. Call .Error() for logging
+//
+// This represents realistic production usage where errors are:
+// - Created during request/response handling
+// - Checked for specific types to determine retry logic
+// - Logged with structured context
+//
+// Expected: Typed errors show overhead for errors.As() but provide type-safe
+// field access. Generic errors are faster but require string parsing to extract details.
+func BenchmarkComparison_ErrorHandling_Usage(b *testing.B) {
+	b.Run("typed_complete_workflow", func(b *testing.B) {
+		b.ReportAllocs()
+
+		handler := &typedErrorHandler{}
+		baseErr := fmt.Errorf("connection refused")
+
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			// Create network error (simulates request failure)
+			err := handler.HandleNetworkError("GET", "https://oauth.reddit.com/hot", 100*time.Millisecond, baseErr)
+
+			// Check if it's a network error to determine retry logic
+			var netErr *graw.NetworkError
+			if errors.As(err, &netErr) {
+				// Access structured fields for logging/metrics
+				_ = netErr.Method
+				_ = netErr.URL
+				_ = netErr.Duration
+
+				// Check if underlying error is specific type
+				if errors.Is(netErr.Err, baseErr) {
+					// Retry logic would go here
+					_ = netErr.Duration
+				}
+			}
+
+			// Log error with full context
+			_ = err.Error()
+		}
+	})
+
+	b.Run("generic_complete_workflow", func(b *testing.B) {
+		b.ReportAllocs()
+
+		handler := &genericErrorHandler{}
+		baseErr := fmt.Errorf("connection refused")
+
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			// Create generic error (simulates request failure)
+			err := handler.HandleError("network", "request failed", baseErr)
+
+			// Try to check if it's a network error (not possible with generic errors)
+			var netErr *graw.NetworkError
+			isNetworkErr := errors.As(err, &netErr) // Always false
+
+			// Can only check underlying error identity
+			if errors.Is(err, baseErr) {
+				// Retry logic would go here, but no structured fields available
+				// Would need to parse error string to extract URL, duration, etc.
+				_ = isNetworkErr
+			}
+
+			// Log error (only string message available, no structured fields)
+			_ = err.Error()
+		}
+	})
+
+	b.Run("typed_auth_error_workflow", func(b *testing.B) {
+		b.ReportAllocs()
+
+		handler := &typedErrorHandler{}
+		baseErr := fmt.Errorf("invalid grant")
+
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			// Create auth error (simulates OAuth failure)
+			err := handler.HandleAuthError(401, "unauthorized", "invalid credentials", baseErr)
+
+			// Check if it's an auth error to determine if we need to re-authenticate
+			var authErr *graw.AuthError
+			if errors.As(err, &authErr) {
+				// Access structured fields for conditional logic
+				if authErr.StatusCode == 401 {
+					// Re-authenticate would go here
+					_ = authErr.Message
+					_ = authErr.Body
+				}
+
+				// Check if we should retry
+				if errors.Is(authErr.Err, baseErr) {
+					_ = authErr.StatusCode
+				}
+			}
+
+			// Log error with full context
+			_ = err.Error()
+		}
+	})
+
+	b.Run("generic_auth_error_workflow", func(b *testing.B) {
+		b.ReportAllocs()
+
+		handler := &genericErrorHandler{}
+		baseErr := fmt.Errorf("invalid grant")
+
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			// Create generic error (simulates OAuth failure)
+			err := handler.HandleError("auth", "unauthorized", baseErr)
+
+			// Try to check if it's an auth error (not possible with generic errors)
+			var authErr *graw.AuthError
+			_ = errors.As(err, &authErr) // Always false
+
+			// Can only check underlying error identity
+			if errors.Is(err, baseErr) {
+				// Re-authenticate logic would go here, but no status code available
+				// Would need to parse error string to extract status code, body, etc.
+			}
+
+			// Log error (only string message available, no structured fields)
+			_ = err.Error()
+		}
+	})
+
+	b.Run("typed_error_chain_traversal", func(b *testing.B) {
+		b.ReportAllocs()
+
+		handler := &typedErrorHandler{}
+		rootErr := fmt.Errorf("root cause")
+		wrappedErr := fmt.Errorf("wrapped: %w", rootErr)
+
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			// Create parse error with wrapped underlying error
+			err := handler.HandleParseError("parse_post", "invalid JSON", wrappedErr)
+
+			// Extract parse error
+			var parseErr *graw.ParseError
+			if errors.As(err, &parseErr) {
+				_ = parseErr.Operation
+				_ = parseErr.Message
+
+				// Traverse error chain
+				if parseErr.Err != nil {
+					// First unwrap
+					mid := errors.Unwrap(parseErr.Err)
+					if mid != nil {
+						_ = mid.Error()
+
+						// Check identity at any level
+						_ = errors.Is(parseErr.Err, rootErr)
+					}
+				}
+			}
+
+			_ = err.Error()
+		}
+	})
+
+	b.Run("generic_error_chain_traversal", func(b *testing.B) {
+		b.ReportAllocs()
+
+		handler := &genericErrorHandler{}
+		rootErr := fmt.Errorf("root cause")
+		wrappedErr := fmt.Errorf("wrapped: %w", rootErr)
+
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			// Create generic error with wrapped underlying error
+			err := handler.HandleError("parse", "invalid JSON", wrappedErr)
+
+			// Try to extract parse error (not possible)
+			var parseErr *graw.ParseError
+			_ = errors.As(err, &parseErr) // Always false
+
+			// Traverse error chain
+			unwrapped := errors.Unwrap(err)
+			if unwrapped != nil {
+				_ = unwrapped.Error()
+
+				// Second unwrap
+				unwrapped2 := errors.Unwrap(unwrapped)
+				if unwrapped2 != nil {
+					_ = unwrapped2.Error()
+				}
+
+				// Check identity
+				_ = errors.Is(err, rootErr)
+			}
+
+			_ = err.Error()
+		}
+	})
+}
+
+// =============================================================================
+
+// =============================================================================
+// COMPARISON 5: Concurrent Request Benchmarks
+// =============================================================================
+
+// BenchmarkComparison_ConcurrentRequests_WithPool measures concurrent GetHot
+// requests with buffer pooling enabled.
+//
+// This benchmark demonstrates how buffer pooling performs under concurrent load:
+// - Multiple goroutines sharing the same sync.Pool
+// - Pool contention vs allocation reduction
+// - Memory efficiency with concurrent requests
+//
+// Expected: Lower allocations than NoPool variant due to buffer reuse across goroutines.
+// Pool effectiveness increases with higher concurrency as buffers are returned and reused.
+func BenchmarkComparison_ConcurrentRequests_WithPool(b *testing.B) {
+	tests := []struct {
+		name        string
+		concurrency int
+	}{
+		{"5_concurrent", 5},
+		{"10_concurrent", 10},
+		{"20_concurrent", 20},
+	}
+
+	for _, tt := range tests {
+		b.Run(tt.name, func(b *testing.B) {
+			b.ReportAllocs()
+
+			fixture := loadFixture(b, "medium_posts.json")
+			server := setupMockServer(fixture)
+			defer server.Close()
+
+			redditClient := createTestRedditClient(b, server.URL)
+			ctx := context.Background()
+
+			// Warmup to cache auth token
+			_, err := redditClient.GetHot(ctx, &types.PostsRequest{
+				Subreddit: "golang",
+				Pagination: types.Pagination{
+					Limit: 100,
+				},
+			})
+			if err != nil {
+				b.Fatalf("warmup GetHot failed: %v", err)
+			}
+
+			// Set bytes for throughput calculation: fixture size * concurrency
+			totalBytes := int64(len(fixture) * tt.concurrency)
+			b.SetBytes(totalBytes)
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				var (
+					wg       sync.WaitGroup
+					mu       sync.Mutex
+					firstErr error
+				)
+				wg.Add(tt.concurrency)
+
+				for j := 0; j < tt.concurrency; j++ {
+					go func() {
+						defer func() {
+							if r := recover(); r != nil {
+								mu.Lock()
+								if firstErr == nil {
+									firstErr = fmt.Errorf("panic: %v", r)
+								}
+								mu.Unlock()
+							}
+							wg.Done()
+						}()
+
+						_, err := redditClient.GetHot(ctx, &types.PostsRequest{
+							Subreddit: "golang",
+							Pagination: types.Pagination{
+								Limit: 100,
+							},
+						})
+						if err != nil {
+							mu.Lock()
+							if firstErr == nil {
+								firstErr = err
+							}
+							mu.Unlock()
+							return
+						}
+					}()
+				}
+
+				wg.Wait()
+				if firstErr != nil {
+					b.Fatalf("benchmark failed: %v", firstErr)
+				}
+			}
+		})
+	}
+}
+
+// BenchmarkComparison_ConcurrentRequests_NoPool measures concurrent requests
+// without buffer pooling (allocates new buffer per request).
+//
+// This benchmark demonstrates the cost of not pooling buffers under concurrent load:
+// - Every goroutine allocates its own buffer
+// - No buffer reuse between requests
+// - Higher GC pressure with concurrent allocations
+//
+// Expected: Higher allocations than WithPool variant. The difference becomes
+// more pronounced at higher concurrency levels.
+func BenchmarkComparison_ConcurrentRequests_NoPool(b *testing.B) {
+	tests := []struct {
+		name        string
+		concurrency int
+	}{
+		{"5_concurrent", 5},
+		{"10_concurrent", 10},
+		{"20_concurrent", 20},
+	}
+
+	for _, tt := range tests {
+		b.Run(tt.name, func(b *testing.B) {
+			b.ReportAllocs()
+
+			fixture := loadFixture(b, "medium_posts.json")
+			server := setupMockServer(fixture)
+			defer server.Close()
+
+			noPoolClient := &noPoolHTTPClient{
+				client:    &http.Client{},
+				baseURL:   server.URL,
+				userAgent: "test/1.0",
+			}
+
+			// Set bytes for throughput calculation: fixture size * concurrency
+			totalBytes := int64(len(fixture) * tt.concurrency)
+			b.SetBytes(totalBytes)
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				var (
+					wg       sync.WaitGroup
+					mu       sync.Mutex
+					firstErr error
+				)
+				wg.Add(tt.concurrency)
+
+				for j := 0; j < tt.concurrency; j++ {
+					go func() {
+						defer func() {
+							if r := recover(); r != nil {
+								mu.Lock()
+								if firstErr == nil {
+									firstErr = fmt.Errorf("panic: %v", r)
+								}
+								mu.Unlock()
+							}
+							wg.Done()
+						}()
+
+						req, _ := http.NewRequest("GET", server.URL, nil)
+						data, err := noPoolClient.Do(req)
+						if err != nil {
+							mu.Lock()
+							if firstErr == nil {
+								firstErr = err
+							}
+							mu.Unlock()
+							return
+						}
+						_ = data
+					}()
+				}
+
+				wg.Wait()
+				if firstErr != nil {
+					b.Fatalf("benchmark failed: %v", firstErr)
+				}
+			}
+		})
+	}
+}
+
+// BenchmarkComparison_ConcurrentRequests_RateLimit measures rate limiting
+// behavior with concurrent requests competing for rate limit tokens.
+//
+// This benchmark demonstrates:
+// - Rate limiter fairness across goroutines
+// - Wait time distribution under concurrent load
+// - Total throughput with shared rate limiter
+//
+// Expected: Slower than NoRateLimit variant. Wait times should be fairly
+// distributed across goroutines. Total throughput approaches the configured
+// rate limit (30 req/sec in this test).
+func BenchmarkComparison_ConcurrentRequests_RateLimit(b *testing.B) {
+	tests := []struct {
+		name        string
+		concurrency int
+		ratePerSec  float64
+	}{
+		{"5_concurrent_30rps", 5, 30.0},
+		{"10_concurrent_30rps", 10, 30.0},
+		{"20_concurrent_30rps", 20, 30.0},
+	}
+
+	for _, tt := range tests {
+		b.Run(tt.name, func(b *testing.B) {
+			b.ReportAllocs()
+
+			fixture := []byte(`{"kind":"Listing","data":{"children":[]}}`)
+			server := setupMockServer(fixture)
+			defer server.Close()
+
+			limiter := rate.NewLimiter(rate.Limit(tt.ratePerSec), 10)
+			rateLimitClient := &withRateLimitClient{
+				client:  &http.Client{Timeout: 30 * time.Second},
+				limiter: limiter,
+			}
+			ctx := context.Background()
+
+			// Set bytes for throughput calculation: fixture size * concurrency
+			totalBytes := int64(len(fixture) * tt.concurrency)
+			b.SetBytes(totalBytes)
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				var (
+					wg       sync.WaitGroup
+					mu       sync.Mutex
+					firstErr error
+				)
+				wg.Add(tt.concurrency)
+
+				for j := 0; j < tt.concurrency; j++ {
+					go func() {
+						defer func() {
+							if r := recover(); r != nil {
+								mu.Lock()
+								if firstErr == nil {
+									firstErr = fmt.Errorf("panic: %v", r)
+								}
+								mu.Unlock()
+							}
+							wg.Done()
+						}()
+
+						req, _ := http.NewRequest("GET", server.URL, nil)
+						resp, err := rateLimitClient.Do(ctx, req)
+						if err != nil {
+							mu.Lock()
+							if firstErr == nil {
+								firstErr = err
+							}
+							mu.Unlock()
+							return
+						}
+						resp.Body.Close()
+					}()
+				}
+
+				wg.Wait()
+				if firstErr != nil {
+					b.Fatalf("benchmark failed: %v", firstErr)
+				}
+			}
+		})
+	}
+}
+
+// BenchmarkComparison_GetCommentsMultiple measures the worker pool pattern
+// used by GetCommentsMultiple to fetch comments from multiple posts concurrently.
+//
+// This benchmark demonstrates:
+// - Worker pool overhead vs sequential requests
+// - Concurrency efficiency (speedup from parallelism)
+// - Resource management with limited workers (max 10 concurrent)
+//
+// Expected: Significant speedup over sequential requests. Worker pool limits
+// concurrency to prevent resource exhaustion while maximizing throughput.
+// Overhead of goroutine management and synchronization should be minimal
+// compared to network I/O savings.
+func BenchmarkComparison_GetCommentsMultiple(b *testing.B) {
+	tests := []struct {
+		name      string
+		postCount int
+	}{
+		{"5_posts", 5},
+		{"10_posts", 10},
+		{"20_posts", 20},
+	}
+
+	for _, tt := range tests {
+		b.Run(tt.name, func(b *testing.B) {
+			b.ReportAllocs()
+
+			// Load comment fixture
+			commentsFixture := loadFixture(b, "deep_comments.json")
+
+			// We need two servers: one for warmup with posts, one for actual comments requests
+			postsFixture := loadFixture(b, "medium_posts.json")
+			postsServer := setupMockServer(postsFixture)
+			defer postsServer.Close()
+
+			commentsServer := setupMockServer(commentsFixture)
+			defer commentsServer.Close()
+
+			// Create client pointing to posts server for warmup
+			redditClient := createTestRedditClient(b, postsServer.URL)
+			ctx := context.Background()
+
+			// Warmup to cache auth token using posts endpoint
+			_, err := redditClient.GetHot(ctx, &types.PostsRequest{
+				Subreddit: "golang",
+				Pagination: types.Pagination{
+					Limit: 100,
+				},
+			})
+			if err != nil {
+				b.Fatalf("warmup GetHot failed: %v", err)
+			}
+
+			// Now switch client to use comments server for actual benchmark
+			// We need to update the base URL for the actual benchmark
+			redditClient = createTestRedditClient(b, commentsServer.URL)
+
+			// Create requests for multiple posts
+			requests := make([]*types.CommentsRequest, tt.postCount)
+			for i := 0; i < tt.postCount; i++ {
+				requests[i] = &types.CommentsRequest{
+					Subreddit: "golang",
+					PostID:    fmt.Sprintf("post%d", i),
+				}
+			}
+
+			// Set bytes for throughput calculation: fixture size * number of posts
+			totalBytes := int64(len(commentsFixture) * tt.postCount)
+			b.SetBytes(totalBytes)
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				results, err := redditClient.GetCommentsMultiple(ctx, requests)
+				if err != nil {
+					b.Fatalf("GetCommentsMultiple failed: %v", err)
+				}
+				// Access results to ensure full processing
+				for _, result := range results {
+					_ = result.Post
+					_ = result.Comments
+				}
+			}
+		})
+	}
+}
+
+// =============================================================================
+// COMPARISON 6: Placeholder for Future Library Comparisons
+// =============================================================================
+
+// COMPARISON 5: Placeholder for Future Library Comparisons
+// =============================================================================
+
+// TODO: Add comparison with github.com/vartanbeno/go-reddit when available
+//
+// Benchmark structure for comparing against other Go Reddit libraries:
+//
+// func BenchmarkComparison_GetPosts_GoReddit(b *testing.B) {
+//     // Setup go-reddit client
+//     client, err := reddit.NewClient(reddit.Credentials{
+//         ID:     "client-id",
+//         Secret: "client-secret",
+//     })
+//     if err != nil {
+//         b.Fatal(err)
+//     }
+//
+//     b.ReportAllocs()
+//     b.ResetTimer()
+//
+//     for i := 0; i < b.N; i++ {
+//         posts, _, err := client.Subreddit.Hot(context.Background(), "golang")
+//         if err != nil {
+//             b.Fatal(err)
+//         }
+//         _ = posts
+//     }
+// }
+//
+// Comparison metrics to track:
+// - Time per operation (ns/op)
+// - Memory allocations (B/op, allocs/op)
+// - API design ergonomics
+// - Feature completeness
+// - Error handling approach
+
+// TODO: Add comparison with github.com/turnage/graw when available
+//
+// func BenchmarkComparison_GetPosts_TurnageGraw(b *testing.B) {
+//     // Setup turnage/graw client
+//     // Compare performance characteristics
+// }
+
+// =============================================================================
+// HELPER FUNCTIONS
+// =============================================================================
+
+// loadFixture loads a JSON fixture file from benchmarks/testdata/.
+// Uses caching with sync.Once to avoid repeated file I/O across benchmark iterations.
+func loadFixture(b *testing.B, filename string) []byte {
+	b.Helper()
+
+	// Check cache first (fast path with read lock)
+	fixtureCacheLock.RLock()
+	if data, ok := fixtureCache[filename]; ok {
+		fixtureCacheLock.RUnlock()
+		return data
+	}
+	fixtureCacheLock.RUnlock()
+
+	// Get or create sync.Once for this fixture
+	fixtureLockMutex.Lock()
+	once, ok := fixtureLoadOnce[filename]
+	if !ok {
+		once = &sync.Once{}
+		fixtureLoadOnce[filename] = once
+	}
+	fixtureLockMutex.Unlock()
+
+	// Load fixture exactly once per filename
+	var loadErr error
+	once.Do(func() {
+		data := loadFixtureFromDisk(b, filename)
+		if data != nil {
+			fixtureCacheLock.Lock()
+			fixtureCache[filename] = data
+			fixtureCacheLock.Unlock()
+		}
+	})
+
+	if loadErr != nil {
+		b.Fatalf("failed to load fixture %s: %v", filename, loadErr)
+	}
+
+	// Return cached data
+	fixtureCacheLock.RLock()
+	data := fixtureCache[filename]
+	fixtureCacheLock.RUnlock()
+
+	return data
+}
+
+// loadFixtureFromDisk performs the actual file I/O to load a fixture.
+// Uses efficient path resolution with a single fallback.
+func loadFixtureFromDisk(b *testing.B, filename string) []byte {
+	b.Helper()
+
+	// Get working directory once
+	wd, err := os.Getwd()
+	if err != nil {
+		b.Fatalf("failed to get working directory: %v", err)
+	}
+
+	// Define candidate paths in order of likelihood
+	candidatePaths := []string{
+		filepath.Join(wd, "..", "testdata", filename),                     // From benchmarks/comparative/
+		filepath.Join(wd, "..", "..", "benchmarks", "testdata", filename), // From deeper nesting
+		filepath.Join(wd, "benchmarks", "testdata", filename),             // From project root
+		filepath.Join(wd, "testdata", filename),                           // From benchmarks/
+	}
+
+	// Try each path without accumulating errors
+	var lastErr error
+	for _, path := range candidatePaths {
+		data, err := os.ReadFile(path)
+		if err == nil {
+			return data
+		}
+		lastErr = err
+		// Continue to next candidate if file not found
+		if !errors.Is(err, os.ErrNotExist) {
+			// If error is not "file not found", fail immediately
+			b.Fatalf("failed to read fixture %s at %s: %v", filename, path, err)
+		}
+	}
+
+	// All paths failed
+	b.Fatalf("failed to load fixture %s from any candidate path: %v", filename, lastErr)
+	return nil
+}
+
+// setupMockServer creates an httptest server that serves fixture data with
+// realistic Reddit API headers for fair comparison.
+func setupMockServer(fixture []byte) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Ratelimit-Remaining", "60")
+		w.Header().Set("X-Ratelimit-Reset", "60")
+		w.WriteHeader(http.StatusOK)
+		w.Write(fixture)
+	}))
+}
+
+// createTestRedditClient creates a fully-configured Reddit client for benchmarking.
+// Uses discard logger to minimize overhead and high rate limits to effectively
+// disable rate limiting, allowing us to focus on measuring other performance
+// characteristics.
+func createTestRedditClient(b *testing.B, serverURL string) *graw.Reddit {
+	b.Helper()
+
+	// Create discard logger to minimize logging overhead
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	// Create HTTP client
+	httpClient := &http.Client{
+		Timeout: 30 * time.Second,
+	}
+
+	// We need to set up an auth server for the client to authenticate against
+	// This is required even though we're using a mock Reddit server
+	authServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"access_token": "test-token-12345", "token_type": "bearer", "expires_in": 3600}`))
+	}))
+	b.Cleanup(func() { authServer.Close() })
+
+	// Create Reddit client config
+	config := &graw.Config{
+		ClientID:     "test-client-id",
+		ClientSecret: "test-client-secret",
+		UserAgent:    "test-agent/1.0",
+		BaseURL:      serverURL,
+		AuthURL:      authServer.URL,
+		HTTPClient:   httpClient,
+		Logger:       logger,
+		RateLimitConfig: &graw.RateLimitConfig{
+			RequestsPerMinute:  100000, // Very high to effectively disable rate limiting
+			Burst:              10,
+			ProactiveThreshold: 10,
+		},
+	}
+
+	client, err := graw.NewClient(config)
+	if err != nil {
+		b.Fatalf("failed to create Reddit client: %v", err)
+	}
+
+	return client
+}
