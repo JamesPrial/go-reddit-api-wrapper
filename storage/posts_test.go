@@ -2,7 +2,6 @@ package storage
 
 import (
 	"context"
-	"database/sql"
 	"testing"
 	"time"
 
@@ -101,7 +100,10 @@ func TestGetPost(t *testing.T) {
 	// Try to get a non-existent post
 	notFound, err := store.GetPost(ctx, "nonexistent")
 	require.Error(t, err, "expected error for non-existent post")
-	require.ErrorIs(t, err, sql.ErrNoRows, "error should be sql.ErrNoRows")
+	var notFoundErr *NotFoundError
+	require.ErrorAs(t, err, &notFoundErr, "error should be NotFoundError")
+	require.Equal(t, "post", notFoundErr.ResourceType)
+	require.Equal(t, "nonexistent", notFoundErr.ResourceID)
 	require.Nil(t, notFound, "post should be nil for non-existent ID")
 }
 
@@ -272,7 +274,8 @@ func TestDeletePost(t *testing.T) {
 	// Verify the post is gone
 	notFound, err := store.GetPost(ctx, "del123")
 	require.Error(t, err)
-	require.ErrorIs(t, err, sql.ErrNoRows)
+	var notFoundErr *NotFoundError
+	require.ErrorAs(t, err, &notFoundErr, "second post should not exist due to rollback")
 	require.Nil(t, notFound)
 
 	// Delete again (should be idempotent)

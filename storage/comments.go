@@ -26,26 +26,26 @@ func isValidCommentSortField(field string) bool {
 func (s *SQLiteStore) UpsertComment(ctx context.Context, comment *types.Comment) error {
 	// Validate input
 	if comment == nil {
-		return fmt.Errorf("UpsertComment: comment cannot be nil")
+		return &ValidationError{Operation: "UpsertComment", Field: "comment", Reason: "comment cannot be nil"}
 	}
 
 	// Begin transaction for atomicity (comment + closure entries)
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("UpsertComment: failed to begin transaction for %s: %w", comment.ID, err)
+		return &TransactionError{Operation: "begin", Message: "UpsertComment", Err: err}
 	}
 	defer tx.Rollback() // Rollback if we don't reach Commit
 
 	// Calculate depth from parent
 	depth, err := calculateDepth(ctx, tx, comment.ParentID)
 	if err != nil {
-		return fmt.Errorf("UpsertComment: failed to calculate depth for %s: %w", comment.ID, err)
+		return &DatabaseError{Operation: "UpsertComment", Message: fmt.Sprintf("failed to calculate depth for %s", comment.ID), Err: err}
 	}
 
 	// Extract post_id from link_id
 	postID := extractPostID(comment.LinkID)
 	if postID == "" {
-		return fmt.Errorf("UpsertComment: invalid link_id %s for comment %s", comment.LinkID, comment.ID)
+		return &ValidationError{Operation: "UpsertComment", Field: "comment.LinkID", Value: comment.LinkID, Reason: fmt.Sprintf("invalid link_id for comment %s", comment.ID)}
 	}
 
 	s.logger.Debug("upserting comment",
@@ -112,24 +112,24 @@ func (s *SQLiteStore) UpsertComment(ctx context.Context, comment *types.Comment)
 
 	// Execute upsert
 	if _, err := tx.ExecContext(ctx, query, args...); err != nil {
-		return fmt.Errorf("UpsertComment: failed to upsert comment %s: %w", comment.ID, err)
+		return &DatabaseError{Operation: "UpsertComment", Message: fmt.Sprintf("failed to insert comment %s", comment.ID), Err: err}
 	}
 
 	// Delete existing closure entries for this comment (in case of reparenting)
 	// This ensures we rebuild the closure table correctly
 	deleteClosureQuery := `DELETE FROM comment_closures WHERE descendant = ?`
 	if _, err := tx.ExecContext(ctx, deleteClosureQuery, comment.ID); err != nil {
-		return fmt.Errorf("UpsertComment: failed to delete old closure entries for %s: %w", comment.ID, err)
+		return &DatabaseError{Operation: "UpsertComment", Message: fmt.Sprintf("failed to delete old closure entries for %s", comment.ID), Err: err}
 	}
 
 	// Insert closure entries
 	if err := insertClosureEntries(ctx, tx, comment.ID, comment.ParentID); err != nil {
-		return fmt.Errorf("UpsertComment: failed to insert closure entries for %s: %w", comment.ID, err)
+		return &DatabaseError{Operation: "UpsertComment", Message: fmt.Sprintf("failed to insert closure entries for %s", comment.ID), Err: err}
 	}
 
 	// Commit transaction
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("UpsertComment: failed to commit transaction for %s: %w", comment.ID, err)
+		return &TransactionError{Operation: "commit", Message: "UpsertComment", Err: err}
 	}
 
 	s.logger.Debug("comment upserted successfully", "comment_id", comment.ID)
@@ -137,9 +137,14 @@ func (s *SQLiteStore) UpsertComment(ctx context.Context, comment *types.Comment)
 }
 
 // GetComment retrieves a comment by its ID (without prefix, e.g., "xyz789").
-// Returns the comment if found, or nil with sql.ErrNoRows if not found.
+// Returns the comment if found, or NotFoundError if not found.
 // Does NOT populate the Replies field - use GetCommentTree for hierarchical data.
 func (s *SQLiteStore) GetComment(ctx context.Context, id string) (*types.Comment, error) {
+	// Validate input
+	if id == "" {
+		return nil, &ValidationError{Operation: "GetComment", Field: "id", Reason: "comment ID cannot be empty"}
+	}
+
 	query := `
 		SELECT
 			id, name, score, ups, downs, likes, created, created_utc,
@@ -154,11 +159,11 @@ func (s *SQLiteStore) GetComment(ctx context.Context, id string) (*types.Comment
 	dest := newCommentScanDest()
 	err := s.db.QueryRowContext(ctx, query, id).Scan(dest.dest()...)
 	if err != nil {
-		// Return sql.ErrNoRows without wrapping (caller handles "not found")
+		// Return NotFoundError if comment doesn't exist
 		if err == sql.ErrNoRows {
-			return nil, err
+			return nil, &NotFoundError{ResourceType: "comment", ResourceID: id}
 		}
-		return nil, fmt.Errorf("GetComment: failed to query comment %s: %w", id, err)
+		return nil, &DatabaseError{Operation: "GetComment", Message: fmt.Sprintf("failed to query comment %s", id), Err: err}
 	}
 
 	comment := dest.toComment()
@@ -180,7 +185,7 @@ func (s *SQLiteStore) UpsertComments(ctx context.Context, comments []*types.Comm
 	// Begin transaction
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("UpsertComments: failed to begin transaction: %w", err)
+		return &TransactionError{Operation: "begin", Message: "UpsertComments", Err: err}
 	}
 	defer tx.Rollback()
 
@@ -195,10 +200,10 @@ func (s *SQLiteStore) UpsertComments(ctx context.Context, comments []*types.Comm
 	nodeMap := make(map[string]*commentNode, len(comments))
 	for i, c := range comments {
 		if c == nil {
-			return fmt.Errorf("UpsertComments: comment at index %d is nil", i)
+			return &ValidationError{Operation: "UpsertComments", Field: fmt.Sprintf("comments[%d]", i), Reason: "comment cannot be nil"}
 		}
 		if _, exists := nodeMap[c.ID]; exists {
-			return fmt.Errorf("UpsertComments: duplicate comment ID %s in batch", c.ID)
+			return &ValidationError{Operation: "UpsertComments", Field: "comment ID", Value: c.ID, Reason: "duplicate comment ID in batch"}
 		}
 		nodeMap[c.ID] = &commentNode{comment: c, depth: -1} // depth -1 means not calculated yet
 	}
@@ -211,13 +216,13 @@ func (s *SQLiteStore) UpsertComments(ctx context.Context, comments []*types.Comm
 		// Check for self-reference before any other processing
 		actualID := node.comment.ID
 		if parentID != "" && (parentID == actualID || parentID == "t1_"+actualID) {
-			return fmt.Errorf("UpsertComments: comment %s references itself as parent", actualID)
+			return &IntegrityError{Operation: "UpsertComments", ResourceType: "comment", ResourceID: actualID, Reason: "comment references itself as parent"}
 		}
 
 		// Top-level comment must have post parent (t3_*)
 		// Empty ParentID is invalid data (including whitespace-only)
 		if strings.TrimSpace(parentID) == "" {
-			return fmt.Errorf("UpsertComments: comment %s has empty parent_id", node.comment.ID)
+			return &IntegrityError{Operation: "UpsertComments", ResourceType: "comment", ResourceID: node.comment.ID, Reason: "comment has empty parent_id"}
 		}
 		if strings.HasPrefix(parentID, "t3_") {
 			roots = append(roots, node)
@@ -230,7 +235,7 @@ func (s *SQLiteStore) UpsertComments(ctx context.Context, comments []*types.Comm
 		if strings.HasPrefix(parentID, "t1_") {
 			actualParentID = strings.TrimPrefix(parentID, "t1_")
 			if actualParentID == "" {
-				return fmt.Errorf("UpsertComments: malformed parent_id %s for comment %s (empty after prefix)", parentID, node.comment.ID)
+				return &IntegrityError{Operation: "UpsertComments", ResourceType: "comment", ResourceID: node.comment.ID, Reason: fmt.Sprintf("malformed parent_id %s (empty after prefix)", parentID)}
 			}
 		}
 
@@ -242,7 +247,7 @@ func (s *SQLiteStore) UpsertComments(ctx context.Context, comments []*types.Comm
 			// Calculate its depth from DB to determine this comment's depth
 			parentDepth, err := calculateDepth(ctx, tx, parentID)
 			if err != nil {
-				return fmt.Errorf("UpsertComments: parent %s not in batch and not in database: %w", parentID, err)
+				return &IntegrityError{Operation: "UpsertComments", ResourceType: "comment", ResourceID: parentID, Reason: "parent not in batch and not in database"}
 			}
 			node.depth = parentDepth + 1
 			roots = append(roots, node) // Treat as root since parent already inserted
@@ -268,7 +273,7 @@ func (s *SQLiteStore) UpsertComments(ctx context.Context, comments []*types.Comm
 	// Verify ALL comments have depths calculated (check entire nodeMap, not just orderedNodes)
 	for id, node := range nodeMap {
 		if node.depth < 0 {
-			return fmt.Errorf("UpsertComments: comment %s unreachable - possible cycle, orphaned comment, or self-reference", id)
+			return &IntegrityError{Operation: "UpsertComments", ResourceType: "comment", ResourceID: id, Reason: "unreachable - possible cycle, orphaned comment, or self-reference"}
 		}
 	}
 
@@ -323,7 +328,7 @@ func (s *SQLiteStore) UpsertComments(ctx context.Context, comments []*types.Comm
 
 	stmt, err := tx.PrepareContext(ctx, upsertCommentQuery)
 	if err != nil {
-		return fmt.Errorf("UpsertComments: failed to prepare statement: %w", err)
+		return &DatabaseError{Operation: "UpsertComments", Message: "failed to prepare statement", Err: err}
 	}
 	defer stmt.Close()
 
@@ -337,7 +342,7 @@ func (s *SQLiteStore) UpsertComments(ctx context.Context, comments []*types.Comm
 		// Extract post_id
 		postID := extractPostID(comment.LinkID)
 		if postID == "" {
-			return fmt.Errorf("UpsertComments: invalid link_id %s for comment %s", comment.LinkID, comment.ID)
+			return &ValidationError{Operation: "UpsertComments", Field: "comment.LinkID", Value: comment.LinkID, Reason: fmt.Sprintf("invalid link_id for comment %s", comment.ID)}
 		}
 
 		// Build arguments for insert
@@ -347,24 +352,24 @@ func (s *SQLiteStore) UpsertComments(ctx context.Context, comments []*types.Comm
 		// Execute insert
 		_, err := stmt.ExecContext(ctx, args...)
 		if err != nil {
-			return fmt.Errorf("UpsertComments: failed to upsert comment %s: %w", comment.ID, err)
+			return &DatabaseError{Operation: "UpsertComments", Message: fmt.Sprintf("failed to insert comment %s", comment.ID), Err: err}
 		}
 
 		// Clear old closure entries for this comment
 		_, err = tx.ExecContext(ctx, deleteClosureQuery, comment.ID)
 		if err != nil {
-			return fmt.Errorf("UpsertComments: failed to delete old closure entries for %s: %w", comment.ID, err)
+			return &DatabaseError{Operation: "UpsertComments", Message: fmt.Sprintf("failed to delete old closure entries for %s", comment.ID), Err: err}
 		}
 
 		// Insert closure entries
 		if err := insertClosureEntries(ctx, tx, comment.ID, comment.ParentID); err != nil {
-			return fmt.Errorf("UpsertComments: failed to insert closure entries for %s: %w", comment.ID, err)
+			return &DatabaseError{Operation: "UpsertComments", Message: fmt.Sprintf("failed to insert closure entries for %s", comment.ID), Err: err}
 		}
 	}
 
 	// Commit transaction
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("UpsertComments: failed to commit transaction: %w", err)
+		return &TransactionError{Operation: "commit", Message: "UpsertComments", Err: err}
 	}
 
 	s.logger.Debug("comments batch upserted successfully", "count", len(comments))
@@ -436,7 +441,7 @@ func (s *SQLiteStore) GetCommentTree(ctx context.Context, postID string, opts *C
 	// Execute query
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("GetCommentTree: failed to query comments for post %s: %w", postID, err)
+		return nil, &DatabaseError{Operation: "GetCommentTree", Message: fmt.Sprintf("failed to query comments for post %s", postID), Err: err}
 	}
 	defer rows.Close()
 
@@ -447,7 +452,7 @@ func (s *SQLiteStore) GetCommentTree(ctx context.Context, postID string, opts *C
 	for rows.Next() {
 		dest := newCommentScanDest()
 		if err := rows.Scan(dest.dest()...); err != nil {
-			return nil, fmt.Errorf("GetCommentTree: failed to scan comment: %w", err)
+			return nil, &DatabaseError{Operation: "GetCommentTree", Message: "failed to scan comment", Err: err}
 		}
 
 		comment := dest.toComment()
@@ -456,7 +461,7 @@ func (s *SQLiteStore) GetCommentTree(ctx context.Context, postID string, opts *C
 	}
 
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("GetCommentTree: error iterating comments: %w", err)
+		return nil, &DatabaseError{Operation: "GetCommentTree", Message: "error iterating comments", Err: err}
 	}
 
 	if len(allComments) == 0 {
@@ -527,12 +532,12 @@ func (s *SQLiteStore) DeleteComment(ctx context.Context, id string) error {
 
 	result, err := s.db.ExecContext(ctx, query, id)
 	if err != nil {
-		return fmt.Errorf("DeleteComment: failed to delete comment %s: %w", id, err)
+		return &DatabaseError{Operation: "DeleteComment", Message: fmt.Sprintf("failed to delete comment %s", id), Err: err}
 	}
 
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("DeleteComment: failed to get rows affected for %s: %w", id, err)
+		return &DatabaseError{Operation: "DeleteComment", Message: fmt.Sprintf("failed to get rows affected for %s", id), Err: err}
 	}
 
 	s.logger.Debug("comment deleted",
@@ -565,9 +570,9 @@ func calculateDepth(ctx context.Context, tx *sql.Tx, parentID string) (int, erro
 	err := tx.QueryRowContext(ctx, query, actualParentID).Scan(&parentDepth)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return 0, fmt.Errorf("parent comment not found: %s", actualParentID)
+			return 0, &NotFoundError{ResourceType: "comment", ResourceID: actualParentID}
 		}
-		return 0, fmt.Errorf("failed to query parent depth for %s: %w", actualParentID, err)
+		return 0, &DatabaseError{Operation: "calculateDepth", Message: fmt.Sprintf("failed to query parent depth for %s", actualParentID), Err: err}
 	}
 
 	return parentDepth + 1, nil
@@ -603,7 +608,7 @@ func insertClosureEntries(ctx context.Context, tx *sql.Tx, commentID, parentID s
 	// Always insert self-reference
 	selfRefQuery := `INSERT INTO comment_closures (ancestor, descendant, depth) VALUES (?, ?, 0)`
 	if _, err := tx.ExecContext(ctx, selfRefQuery, commentID, commentID); err != nil {
-		return fmt.Errorf("failed to insert self-reference: %w", err)
+		return &DatabaseError{Operation: "insertClosureEntries", Message: "failed to insert self-reference", Err: err}
 	}
 
 	// If parent is empty or a post (t3_), we're done (top-level comment)
@@ -627,13 +632,13 @@ func insertClosureEntries(ctx context.Context, tx *sql.Tx, commentID, parentID s
 
 	result, err := tx.ExecContext(ctx, copyAncestryQuery, commentID, actualParentID)
 	if err != nil {
-		return fmt.Errorf("failed to copy parent ancestry: %w", err)
+		return &DatabaseError{Operation: "insertClosureEntries", Message: "failed to copy parent ancestry", Err: err}
 	}
 
 	// Check if we copied any rows - if not, parent might not exist yet
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("failed to get rows affected: %w", err)
+		return &DatabaseError{Operation: "insertClosureEntries", Message: "failed to get rows affected", Err: err}
 	}
 
 	if rowsAffected == 0 {
@@ -641,13 +646,13 @@ func insertClosureEntries(ctx context.Context, tx *sql.Tx, commentID, parentID s
 		var parentExists bool
 		err := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM comments WHERE id = ?)", actualParentID).Scan(&parentExists)
 		if err != nil {
-			return fmt.Errorf("failed to check parent existence: %w", err)
+			return &DatabaseError{Operation: "insertClosureEntries", Message: "failed to check parent existence", Err: err}
 		}
 		if !parentExists {
-			return fmt.Errorf("parent comment %s does not exist", actualParentID)
+			return &IntegrityError{Operation: "insertClosureEntries", ResourceType: "comment", ResourceID: actualParentID, Reason: "parent comment does not exist"}
 		}
 		// Parent exists but has no closure entries - this indicates corruption
-		return fmt.Errorf("parent comment %s exists but has no closure entries (closure table corrupted)", actualParentID)
+		return &IntegrityError{Operation: "insertClosureEntries", ResourceType: "comment", ResourceID: actualParentID, Reason: "parent comment exists but has no closure entries (closure table corrupted)"}
 	}
 
 	return nil

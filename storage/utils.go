@@ -3,7 +3,6 @@ package storage
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"time"
 )
 
@@ -18,7 +17,7 @@ func (s *SQLiteStore) GetStats(ctx context.Context) (*CacheStats, error) {
 	var postCount sql.NullInt64
 	err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM posts").Scan(&postCount)
 	if err != nil {
-		return nil, fmt.Errorf("GetStats: failed to query post count: %w", err)
+		return nil, &DatabaseError{Operation: "GetStats", Message: "failed to query post count", Err: err}
 	}
 	if postCount.Valid {
 		stats.PostCount = postCount.Int64
@@ -28,7 +27,7 @@ func (s *SQLiteStore) GetStats(ctx context.Context) (*CacheStats, error) {
 	var commentCount sql.NullInt64
 	err = s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM comments").Scan(&commentCount)
 	if err != nil {
-		return nil, fmt.Errorf("GetStats: failed to query comment count: %w", err)
+		return nil, &DatabaseError{Operation: "GetStats", Message: "failed to query comment count", Err: err}
 	}
 	if commentCount.Valid {
 		stats.CommentCount = commentCount.Int64
@@ -46,7 +45,11 @@ func (s *SQLiteStore) GetStats(ctx context.Context) (*CacheStats, error) {
 	`
 	err = s.db.QueryRowContext(ctx, oldestQuery).Scan(&oldestTS)
 	if err != nil {
-		return nil, fmt.Errorf("GetStats: failed to query oldest entry: %w", err)
+		return nil, &DatabaseError{
+			Operation: "GetStats",
+			Message:   "failed to query oldest entry",
+			Err:       err,
+		}
 	}
 	if oldestTS.Valid && oldestTS.Int64 > 0 {
 		stats.OldestEntry = time.Unix(oldestTS.Int64, 0)
@@ -63,7 +66,11 @@ func (s *SQLiteStore) GetStats(ctx context.Context) (*CacheStats, error) {
 	`
 	err = s.db.QueryRowContext(ctx, newestQuery).Scan(&newestTS)
 	if err != nil {
-		return nil, fmt.Errorf("GetStats: failed to query newest entry: %w", err)
+		return nil, &DatabaseError{
+			Operation: "GetStats",
+			Message:   "failed to query newest entry",
+			Err:       err,
+		}
 	}
 	if newestTS.Valid && newestTS.Int64 > 0 {
 		stats.NewestEntry = time.Unix(newestTS.Int64, 0)
@@ -78,7 +85,7 @@ func (s *SQLiteStore) GetStats(ctx context.Context) (*CacheStats, error) {
 	`
 	err = s.db.QueryRowContext(ctx, sizeQuery).Scan(&sizeBytes)
 	if err != nil {
-		return nil, fmt.Errorf("GetStats: failed to query database size: %w", err)
+		return nil, &DatabaseError{Operation: "GetStats", Message: "failed to get database size", Err: err}
 	}
 	if sizeBytes.Valid {
 		stats.TotalSizeBytes = sizeBytes.Int64
@@ -109,7 +116,7 @@ func (s *SQLiteStore) EvictStale(ctx context.Context, maxAge time.Duration) (int
 	// Begin transaction for atomicity
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return 0, fmt.Errorf("EvictStale: failed to begin transaction: %w", err)
+		return 0, &TransactionError{Operation: "begin", Message: "EvictStale", Err: err}
 	}
 	defer tx.Rollback() // Safe to call even after commit
 
@@ -118,11 +125,15 @@ func (s *SQLiteStore) EvictStale(ctx context.Context, maxAge time.Duration) (int
 	deletePostsQuery := "DELETE FROM posts WHERE fetched_at <= ?"
 	resultPosts, err := tx.ExecContext(ctx, deletePostsQuery, cutoffUnix)
 	if err != nil {
-		return 0, fmt.Errorf("EvictStale: failed to delete stale posts: %w", err)
+		return 0, &DatabaseError{Operation: "EvictStale", Message: "failed to delete stale posts", Err: err}
 	}
 	postsDeleted, err := resultPosts.RowsAffected()
 	if err != nil {
-		return 0, fmt.Errorf("EvictStale: failed to get posts rows affected: %w", err)
+		return 0, &DatabaseError{
+			Operation: "EvictStale",
+			Message:   "failed to get posts rows affected",
+			Err:       err,
+		}
 	}
 
 	// Delete stale comments
@@ -131,16 +142,20 @@ func (s *SQLiteStore) EvictStale(ctx context.Context, maxAge time.Duration) (int
 	deleteCommentsQuery := "DELETE FROM comments WHERE fetched_at <= ?"
 	resultComments, err := tx.ExecContext(ctx, deleteCommentsQuery, cutoffUnix)
 	if err != nil {
-		return 0, fmt.Errorf("EvictStale: failed to delete stale comments: %w", err)
+		return 0, &DatabaseError{Operation: "EvictStale", Message: "failed to delete stale comments", Err: err}
 	}
 	commentsDeleted, err := resultComments.RowsAffected()
 	if err != nil {
-		return 0, fmt.Errorf("EvictStale: failed to get comments rows affected: %w", err)
+		return 0, &DatabaseError{
+			Operation: "EvictStale",
+			Message:   "failed to get comments rows affected",
+			Err:       err,
+		}
 	}
 
 	// Commit transaction
 	if err := tx.Commit(); err != nil {
-		return 0, fmt.Errorf("EvictStale: failed to commit transaction: %w", err)
+		return 0, &TransactionError{Operation: "commit", Message: "EvictStale", Err: err}
 	}
 
 	totalDeleted := postsDeleted + commentsDeleted

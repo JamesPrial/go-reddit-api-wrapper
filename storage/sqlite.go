@@ -134,7 +134,7 @@ func NewSQLiteStore(cfg *Config) (*SQLiteStore, error) {
 	// Open database connection
 	db, err := sql.Open("sqlite3", dsn)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open database: %w", err)
+		return nil, &DatabaseError{Operation: "NewSQLiteStore", Message: "failed to open database", Err: err}
 	}
 
 	// Configure connection pool
@@ -158,7 +158,7 @@ func NewSQLiteStore(cfg *Config) (*SQLiteStore, error) {
 	// Run database migrations
 	if err := store.runMigrations(cfg.MigrationsPath); err != nil {
 		db.Close() // Clean up on migration failure
-		return nil, fmt.Errorf("failed to run migrations: %w", err)
+		return nil, &DatabaseError{Operation: "NewSQLiteStore", Message: "failed to run migrations", Err: err}
 	}
 
 	logger.Info("database migrations completed")
@@ -174,7 +174,7 @@ func (s *SQLiteStore) runMigrations(migrationsPath string) error {
 	// Create a database driver instance for golang-migrate
 	driver, err := sqlite3.WithInstance(s.db, &sqlite3.Config{})
 	if err != nil {
-		return fmt.Errorf("failed to create migration driver: %w", err)
+		return &DatabaseError{Operation: "runMigrations", Message: "failed to create migration driver", Err: err}
 	}
 
 	// Use default migrations path if not specified
@@ -186,7 +186,7 @@ func (s *SQLiteStore) runMigrations(migrationsPath string) error {
 	if !filepath.IsAbs(migrationsPath) {
 		absPath, err := filepath.Abs(migrationsPath)
 		if err != nil {
-			return fmt.Errorf("failed to resolve migrations path: %w", err)
+			return &DatabaseError{Operation: "runMigrations", Message: "failed to resolve migrations path", Err: err}
 		}
 		migrationsPath = absPath
 	}
@@ -200,7 +200,7 @@ func (s *SQLiteStore) runMigrations(migrationsPath string) error {
 		driver,
 	)
 	if err != nil {
-		return fmt.Errorf("failed to create migration instance: %w", err)
+		return &DatabaseError{Operation: "runMigrations", Message: "failed to create migrate instance", Err: err}
 	}
 
 	// Apply all pending UP migrations
@@ -210,7 +210,7 @@ func (s *SQLiteStore) runMigrations(migrationsPath string) error {
 			s.logger.Debug("database migrations already up-to-date")
 			return nil
 		}
-		return fmt.Errorf("failed to apply migrations: %w", err)
+		return &DatabaseError{Operation: "runMigrations", Message: "migration failed", Err: err}
 	}
 
 	return nil
@@ -223,7 +223,7 @@ func (s *SQLiteStore) runMigrations(migrationsPath string) error {
 func (s *SQLiteStore) Close() error {
 	s.logger.Info("closing database connection")
 	if err := s.db.Close(); err != nil {
-		return fmt.Errorf("failed to close database: %w", err)
+		return &DatabaseError{Operation: "Close", Message: "failed to close database", Err: err}
 	}
 	return nil
 }
@@ -233,7 +233,7 @@ func (s *SQLiteStore) Close() error {
 // Returns an error if the database cannot be reached or is not responding.
 func (s *SQLiteStore) Ping(ctx context.Context) error {
 	if err := s.db.PingContext(ctx); err != nil {
-		return fmt.Errorf("database ping failed: %w", err)
+		return &DatabaseError{Operation: "Ping", Message: "database ping failed", Err: err}
 	}
 	return nil
 }

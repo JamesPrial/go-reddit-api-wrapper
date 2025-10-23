@@ -2,8 +2,6 @@ package storage
 
 import (
 	"context"
-	"database/sql"
-	"strings"
 	"testing"
 
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
@@ -112,7 +110,10 @@ func TestGetComment(t *testing.T) {
 	// Try to get a non-existent comment
 	notFound, err := store.GetComment(ctx, "nonexistent")
 	require.Error(t, err)
-	require.ErrorIs(t, err, sql.ErrNoRows)
+	var notFoundErr *NotFoundError
+	require.ErrorAs(t, err, &notFoundErr)
+	require.Equal(t, "comment", notFoundErr.ResourceType)
+	require.Equal(t, "nonexistent", notFoundErr.ResourceID)
 	require.Nil(t, notFound)
 }
 
@@ -278,7 +279,10 @@ func TestDeleteComment(t *testing.T) {
 	// Verify the comment is gone
 	notFound, err := store.GetComment(ctx, "c1")
 	require.Error(t, err)
-	require.ErrorIs(t, err, sql.ErrNoRows)
+	var notFoundErr *NotFoundError
+	require.ErrorAs(t, err, &notFoundErr)
+	require.Equal(t, "comment", notFoundErr.ResourceType)
+	require.Equal(t, "c1", notFoundErr.ResourceID)
 	require.Nil(t, notFound)
 
 	// Verify closure entry is removed (CASCADE)
@@ -419,12 +423,16 @@ func TestUpsertComments_NilElementInBatch(t *testing.T) {
 
 		err := store.UpsertComments(ctx, comments)
 		require.Error(t, err, "should reject batch with nil element")
-		require.Contains(t, err.Error(), "comment at index 0 is nil", "error should identify nil element at index 0")
+		var valErr *ValidationError
+		require.ErrorAs(t, err, &valErr)
+		require.Equal(t, "comments[0]", valErr.Field)
+		require.Equal(t, "comment cannot be nil", valErr.Reason)
 
 		// Verify no comments were inserted (transaction rollback)
 		retrieved, err := store.GetComment(ctx, "c1")
 		require.Error(t, err)
-		require.ErrorIs(t, err, sql.ErrNoRows, "no comments should be inserted on nil element error")
+		var notFoundErr *NotFoundError
+		require.ErrorAs(t, err, &notFoundErr)
 		require.Nil(t, retrieved)
 	})
 
@@ -437,12 +445,16 @@ func TestUpsertComments_NilElementInBatch(t *testing.T) {
 
 		err := store.UpsertComments(ctx, comments)
 		require.Error(t, err, "should reject batch with nil element in middle")
-		require.Contains(t, err.Error(), "comment at index 1 is nil", "error should identify nil element at index 1")
+		var valErr *ValidationError
+		require.ErrorAs(t, err, &valErr)
+		require.Equal(t, "comments[1]", valErr.Field)
+		require.Equal(t, "comment cannot be nil", valErr.Reason)
 
 		// Verify no comments were inserted (transaction rollback)
 		retrieved, err := store.GetComment(ctx, "c2")
 		require.Error(t, err)
-		require.ErrorIs(t, err, sql.ErrNoRows, "no comments should be inserted on nil element error")
+		var notFoundErr *NotFoundError
+		require.ErrorAs(t, err, &notFoundErr)
 		require.Nil(t, retrieved)
 	})
 
@@ -455,12 +467,16 @@ func TestUpsertComments_NilElementInBatch(t *testing.T) {
 
 		err := store.UpsertComments(ctx, comments)
 		require.Error(t, err, "should reject batch with nil element at end")
-		require.Contains(t, err.Error(), "comment at index 2 is nil", "error should identify nil element at index 2")
+		var valErr *ValidationError
+		require.ErrorAs(t, err, &valErr)
+		require.Equal(t, "comments[2]", valErr.Field)
+		require.Equal(t, "comment cannot be nil", valErr.Reason)
 
 		// Verify no comments were inserted (transaction rollback)
 		retrieved, err := store.GetComment(ctx, "c4")
 		require.Error(t, err)
-		require.ErrorIs(t, err, sql.ErrNoRows, "no comments should be inserted on nil element error")
+		var notFoundErr *NotFoundError
+		require.ErrorAs(t, err, &notFoundErr)
 		require.Nil(t, retrieved)
 	})
 
@@ -474,7 +490,10 @@ func TestUpsertComments_NilElementInBatch(t *testing.T) {
 		err := store.UpsertComments(ctx, comments)
 		require.Error(t, err, "should reject batch with multiple nil elements")
 		// Should fail on first nil element
-		require.Contains(t, err.Error(), "comment at index 0 is nil", "error should identify first nil element")
+		var valErr *ValidationError
+		require.ErrorAs(t, err, &valErr)
+		require.Equal(t, "comments[0]", valErr.Field)
+		require.Equal(t, "comment cannot be nil", valErr.Reason)
 	})
 }
 
@@ -498,13 +517,17 @@ func TestUpsertComments_DuplicateIDInBatch(t *testing.T) {
 	// Attempt batch insert - should fail
 	err = store.UpsertComments(ctx, comments)
 	require.Error(t, err, "should reject duplicate comment IDs in batch")
-	require.Contains(t, err.Error(), "duplicate comment ID", "error should mention duplicate ID")
-	require.Contains(t, err.Error(), "c1", "error should identify the duplicate ID")
+	var valErr *ValidationError
+	require.ErrorAs(t, err, &valErr)
+	require.Equal(t, "comment ID", valErr.Field)
+	require.Equal(t, "c1", valErr.Value)
+	require.Equal(t, "duplicate comment ID in batch", valErr.Reason)
 
 	// Verify no comments were inserted (transaction rollback)
 	retrieved, err := store.GetComment(ctx, "c1")
 	require.Error(t, err)
-	require.ErrorIs(t, err, sql.ErrNoRows, "no comments should be inserted on duplicate error")
+	var notFoundErr *NotFoundError
+	require.ErrorAs(t, err, &notFoundErr)
 	require.Nil(t, retrieved)
 
 	t.Run("duplicate ID with different parents", func(t *testing.T) {
@@ -522,8 +545,10 @@ func TestUpsertComments_DuplicateIDInBatch(t *testing.T) {
 
 		err = store.UpsertComments(ctx, []*types.Comment{duplicateComment1, duplicateComment2})
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "duplicate comment ID")
-		require.Contains(t, err.Error(), "c_duplicate")
+		var valErr *ValidationError
+		require.ErrorAs(t, err, &valErr)
+		require.Equal(t, "duplicate comment ID in batch", valErr.Reason)
+		require.Equal(t, "c_duplicate", valErr.Value)
 	})
 }
 
@@ -545,8 +570,10 @@ func TestUpsertComments_SelfReference(t *testing.T) {
 
 		err := store.UpsertComments(ctx, []*types.Comment{comment})
 		require.Error(t, err, "should reject self-referencing comment")
-		require.Contains(t, err.Error(), "references itself as parent", "error should mention self-reference")
-		require.Contains(t, err.Error(), "c1", "error should identify the comment")
+		var intErr *IntegrityError
+		require.ErrorAs(t, err, &intErr)
+		require.Equal(t, "c1", intErr.ResourceID)
+		require.Equal(t, "comment references itself as parent", intErr.Reason)
 	})
 
 	t.Run("self-reference with t1 prefix", func(t *testing.T) {
@@ -556,8 +583,10 @@ func TestUpsertComments_SelfReference(t *testing.T) {
 
 		err := store.UpsertComments(ctx, []*types.Comment{comment})
 		require.Error(t, err, "should reject self-referencing comment with prefix")
-		require.Contains(t, err.Error(), "references itself as parent", "error should mention self-reference")
-		require.Contains(t, err.Error(), "c2", "error should identify the comment")
+		var intErr *IntegrityError
+		require.ErrorAs(t, err, &intErr)
+		require.Equal(t, "c2", intErr.ResourceID)
+		require.Equal(t, "comment references itself as parent", intErr.Reason)
 	})
 
 	t.Run("valid parent reference for comparison", func(t *testing.T) {
@@ -590,13 +619,16 @@ func TestUpsertComments_EmptyParentID(t *testing.T) {
 
 		err := store.UpsertComments(ctx, []*types.Comment{comment})
 		require.Error(t, err, "should reject comment with empty ParentID")
-		require.Contains(t, err.Error(), "empty parent_id", "error should mention empty parent_id")
-		require.Contains(t, err.Error(), "c1", "error should identify the comment")
+		var intErr *IntegrityError
+		require.ErrorAs(t, err, &intErr)
+		require.Equal(t, "c1", intErr.ResourceID)
+		require.Equal(t, "comment has empty parent_id", intErr.Reason)
 
 		// Verify comment was not inserted (transaction rollback)
 		retrieved, err := store.GetComment(ctx, "c1")
 		require.Error(t, err)
-		require.ErrorIs(t, err, sql.ErrNoRows, "comment should not be inserted on validation error")
+		var notFoundErr *NotFoundError
+		require.ErrorAs(t, err, &notFoundErr)
 		require.Nil(t, retrieved)
 	})
 
@@ -607,13 +639,16 @@ func TestUpsertComments_EmptyParentID(t *testing.T) {
 
 		err := store.UpsertComments(ctx, []*types.Comment{comment})
 		require.Error(t, err, "should reject comment with whitespace-only ParentID")
-		require.Contains(t, err.Error(), "empty parent_id", "error should mention empty parent_id")
-		require.Contains(t, err.Error(), "c2", "error should identify the comment")
+		var intErr *IntegrityError
+		require.ErrorAs(t, err, &intErr)
+		require.Equal(t, "c2", intErr.ResourceID)
+		require.Equal(t, "comment has empty parent_id", intErr.Reason)
 
 		// Verify comment was not inserted (transaction rollback)
 		retrieved, err := store.GetComment(ctx, "c2")
 		require.Error(t, err)
-		require.ErrorIs(t, err, sql.ErrNoRows, "comment should not be inserted on validation error")
+		var notFoundErr *NotFoundError
+		require.ErrorAs(t, err, &notFoundErr)
 		require.Nil(t, retrieved)
 	})
 }
@@ -635,15 +670,17 @@ func TestUpsertComments_MalformedParentID(t *testing.T) {
 
 	err = store.UpsertComments(ctx, []*types.Comment{comment})
 	require.Error(t, err, "should reject comment with malformed ParentID")
-	require.Contains(t, err.Error(), "malformed parent_id", "error should mention malformed parent_id")
-	require.Contains(t, err.Error(), "t1_", "error should show the malformed ID")
-	require.Contains(t, err.Error(), "c1", "error should identify the comment")
-	require.Contains(t, err.Error(), "empty after prefix", "error should explain the issue")
+	var intErr *IntegrityError
+	require.ErrorAs(t, err, &intErr)
+	require.Equal(t, "c1", intErr.ResourceID)
+	require.Contains(t, intErr.Reason, "malformed parent_id")
+	require.Contains(t, intErr.Reason, "empty after prefix")
 
 	// Verify comment was not inserted (transaction rollback)
 	retrieved, err := store.GetComment(ctx, "c1")
 	require.Error(t, err)
-	require.ErrorIs(t, err, sql.ErrNoRows, "comment should not be inserted on validation error")
+	var notFoundErr *NotFoundError
+	require.ErrorAs(t, err, &notFoundErr)
 	require.Nil(t, retrieved)
 }
 
@@ -675,24 +712,17 @@ func TestUpsertComments_CyclicGraph(t *testing.T) {
 	// Attempt batch insert - should fail due to cycle detection
 	err = store.UpsertComments(ctx, comments)
 	require.Error(t, err, "should reject cyclic comment dependencies")
-	require.Contains(t, err.Error(), "unreachable", "error should mention unreachable node")
-	require.Contains(t, err.Error(), "cycle", "error should mention cycle as possible cause")
-
-	// Verify at least one comment ID is mentioned in the error
-	commentIDMentioned := false
-	for _, c := range comments {
-		if strings.Contains(err.Error(), c.ID) {
-			commentIDMentioned = true
-			break
-		}
-	}
-	require.True(t, commentIDMentioned, "error should identify at least one unreachable comment")
+	var intErr *IntegrityError
+	require.ErrorAs(t, err, &intErr)
+	require.Contains(t, intErr.Reason, "unreachable")
+	require.Contains(t, intErr.Reason, "cycle")
 
 	// Verify no comments were inserted (transaction rollback)
 	for _, c := range comments {
 		retrieved, err := store.GetComment(ctx, c.ID)
 		require.Error(t, err)
-		require.ErrorIs(t, err, sql.ErrNoRows, "no comments should be inserted on cycle error")
+		var notFoundErr *NotFoundError
+		require.ErrorAs(t, err, &notFoundErr)
 		require.Nil(t, retrieved)
 	}
 }
@@ -714,13 +744,16 @@ func TestUpsertComments_OrphanedCommentInBatch(t *testing.T) {
 
 		err := store.UpsertComments(ctx, []*types.Comment{orphanComment})
 		require.Error(t, err, "should reject orphaned comment")
-		require.Contains(t, err.Error(), "not in batch and not in database", "error should explain parent is missing")
-		require.Contains(t, err.Error(), "nonexistent", "error should identify the missing parent")
+		var intErr *IntegrityError
+		require.ErrorAs(t, err, &intErr)
+		require.Equal(t, "t1_nonexistent", intErr.ResourceID)
+		require.Equal(t, "parent not in batch and not in database", intErr.Reason)
 
 		// Verify comment was not inserted (transaction rollback)
 		retrieved, err := store.GetComment(ctx, "c1")
 		require.Error(t, err)
-		require.ErrorIs(t, err, sql.ErrNoRows, "orphaned comment should not be inserted")
+		var notFoundErr *NotFoundError
+		require.ErrorAs(t, err, &notFoundErr)
 		require.Nil(t, retrieved)
 	})
 
@@ -754,13 +787,16 @@ func TestUpsertComments_OrphanedCommentInBatch(t *testing.T) {
 
 		err := store.UpsertComments(ctx, comments)
 		require.Error(t, err, "should reject batch with orphaned comment")
-		require.Contains(t, err.Error(), "not in batch and not in database", "error should explain parent is missing")
+		var intErr *IntegrityError
+		require.ErrorAs(t, err, &intErr)
+		require.Equal(t, "parent not in batch and not in database", intErr.Reason)
 
 		// Verify no comments were inserted (transaction rollback)
 		for _, c := range comments {
 			retrieved, err := store.GetComment(ctx, c.ID)
 			require.Error(t, err)
-			require.ErrorIs(t, err, sql.ErrNoRows, "no comments should be inserted when batch contains orphan")
+			var notFoundErr *NotFoundError
+			require.ErrorAs(t, err, &notFoundErr)
 			require.Nil(t, retrieved)
 		}
 	})
@@ -771,7 +807,9 @@ func TestUpsertComments_OrphanedCommentInBatch(t *testing.T) {
 
 		err := store.UpsertComments(ctx, []*types.Comment{orphanComment})
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "not in batch and not in database")
+		var intErr *IntegrityError
+		require.ErrorAs(t, err, &intErr)
+		require.Equal(t, "parent not in batch and not in database", intErr.Reason)
 	})
 }
 
@@ -838,14 +876,17 @@ func TestUpsertComments_ParentMissingClosureEntries(t *testing.T) {
 
 	err = store.UpsertComments(ctx, []*types.Comment{childComment})
 	require.Error(t, err, "should reject child when parent has no closure entries")
-	require.Contains(t, err.Error(), "exists but has no closure entries", "error should mention missing closure entries")
-	require.Contains(t, err.Error(), "corrupted", "error should identify the corrupted parent")
-	require.Contains(t, err.Error(), "closure table corrupted", "error should mention table corruption")
+	var intErr *IntegrityError
+	require.ErrorAs(t, err, &intErr)
+	require.Equal(t, "corrupted", intErr.ResourceID)
+	require.Contains(t, intErr.Reason, "exists but has no closure entries")
+	require.Contains(t, intErr.Reason, "closure table corrupted")
 
 	// Verify child comment was not inserted (transaction rollback)
 	retrieved, err := store.GetComment(ctx, "c1")
 	require.Error(t, err)
-	require.ErrorIs(t, err, sql.ErrNoRows, "child comment should not be inserted when parent is corrupted")
+	var notFoundErr *NotFoundError
+	require.ErrorAs(t, err, &notFoundErr)
 	require.Nil(t, retrieved)
 
 	// Verify the corrupted parent still exists (we didn't delete it)

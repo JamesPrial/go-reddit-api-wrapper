@@ -31,16 +31,16 @@ func isValidSortDirection(dir string) bool {
 // Returns an error if the operation fails.
 func (s *SQLiteStore) UpsertPost(ctx context.Context, post *types.Post) error {
 	if post == nil {
-		return fmt.Errorf("UpsertPost: post cannot be nil")
+		return &ValidationError{Operation: "UpsertPost", Field: "post", Reason: "post cannot be nil"}
 	}
 	if post.ID == "" {
-		return fmt.Errorf("UpsertPost: post.ID cannot be empty")
+		return &ValidationError{Operation: "UpsertPost", Field: "post.ID", Value: post.ID, Reason: "post ID cannot be empty"}
 	}
 	if post.Name == "" {
-		return fmt.Errorf("UpsertPost: post.Name cannot be empty")
+		return &ValidationError{Operation: "UpsertPost", Field: "post.Name", Reason: "post name cannot be empty"}
 	}
 	if post.Subreddit == "" {
-		return fmt.Errorf("UpsertPost: post.Subreddit cannot be empty")
+		return &ValidationError{Operation: "UpsertPost", Field: "post.Subreddit", Reason: "post subreddit cannot be empty"}
 	}
 
 	s.logger.Debug("upserting post", "post_id", post.ID, "subreddit", post.Subreddit)
@@ -109,7 +109,7 @@ func (s *SQLiteStore) UpsertPost(ctx context.Context, post *types.Post) error {
 	// Execute the upsert
 	_, err := s.db.ExecContext(ctx, query, args...)
 	if err != nil {
-		return fmt.Errorf("UpsertPost: failed to insert post %s: %w", post.ID, err)
+		return &DatabaseError{Operation: "UpsertPost", Message: fmt.Sprintf("failed to insert post %s", post.ID), Err: err}
 	}
 
 	s.logger.Debug("successfully upserted post", "post_id", post.ID)
@@ -118,9 +118,13 @@ func (s *SQLiteStore) UpsertPost(ctx context.Context, post *types.Post) error {
 
 // GetPost retrieves a post by its ID (without prefix, e.g., "abc123").
 // Returns the post if found.
-// Returns sql.ErrNoRows if the post is not found (caller should check this).
+// Returns NotFoundError if the post is not found.
 // Returns an error for other database failures.
 func (s *SQLiteStore) GetPost(ctx context.Context, id string) (*types.Post, error) {
+	if id == "" {
+		return nil, &ValidationError{Operation: "GetPost", Field: "id", Reason: "post ID cannot be empty"}
+	}
+
 	s.logger.Debug("getting post", "post_id", id)
 
 	query := `
@@ -144,10 +148,10 @@ func (s *SQLiteStore) GetPost(ctx context.Context, id string) (*types.Post, erro
 	err := row.Scan(dest.dest()...)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			// Return sql.ErrNoRows as-is for caller to handle
-			return nil, sql.ErrNoRows
+			// Return NotFoundError for caller to handle
+			return nil, &NotFoundError{ResourceType: "post", ResourceID: id}
 		}
-		return nil, fmt.Errorf("GetPost: failed to scan post %s: %w", id, err)
+		return nil, &DatabaseError{Operation: "GetPost", Message: fmt.Sprintf("failed to scan post %s", id), Err: err}
 	}
 
 	post := dest.toPost()
@@ -236,7 +240,11 @@ func (s *SQLiteStore) ListPosts(ctx context.Context, opts *ListPostsOptions) ([]
 	// They CANNOT be parameterized as they are SQL identifiers (column names).
 	// Never remove the whitelist validation without replacing with equivalent protection.
 	if !isValidPostSortField(orderBy) || !isValidSortDirection(sortDir) {
-		return nil, fmt.Errorf("ListPosts: invalid sort parameters")
+		return nil, &ValidationError{
+			Operation: "ListPosts",
+			Field:     "sort parameters",
+			Reason:    fmt.Sprintf("invalid sort field %q or direction %q", orderBy, sortDir),
+		}
 	}
 	query.WriteString(fmt.Sprintf(" ORDER BY %s %s", orderBy, sortDir))
 
@@ -254,7 +262,7 @@ func (s *SQLiteStore) ListPosts(ctx context.Context, opts *ListPostsOptions) ([]
 	// Execute query
 	rows, err := s.db.QueryContext(ctx, query.String(), args...)
 	if err != nil {
-		return nil, fmt.Errorf("ListPosts: failed to execute query: %w", err)
+		return nil, &DatabaseError{Operation: "ListPosts", Message: "failed to execute query", Err: err}
 	}
 	defer rows.Close()
 
@@ -264,7 +272,7 @@ func (s *SQLiteStore) ListPosts(ctx context.Context, opts *ListPostsOptions) ([]
 		dest := newPostScanDest()
 
 		if err := rows.Scan(dest.dest()...); err != nil {
-			return nil, fmt.Errorf("ListPosts: failed to scan post: %w", err)
+			return nil, &DatabaseError{Operation: "ListPosts", Message: "failed to scan post", Err: err}
 		}
 
 		post := dest.toPost()
@@ -273,7 +281,11 @@ func (s *SQLiteStore) ListPosts(ctx context.Context, opts *ListPostsOptions) ([]
 
 	// Check for errors during iteration
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("ListPosts: error iterating rows: %w", err)
+		return nil, &DatabaseError{
+			Operation: "ListPosts",
+			Message:   "error iterating rows",
+			Err:       err,
+		}
 	}
 
 	s.logger.Debug("successfully listed posts", "count", len(posts))
@@ -297,7 +309,7 @@ func (s *SQLiteStore) DeletePost(ctx context.Context, id string) error {
 
 	_, err := s.db.ExecContext(ctx, query, id)
 	if err != nil {
-		return fmt.Errorf("DeletePost: failed to delete post %s: %w", id, err)
+		return &DatabaseError{Operation: "DeletePost", Message: fmt.Sprintf("failed to delete post %s", id), Err: err}
 	}
 
 	s.logger.Debug("successfully deleted post", "post_id", id)
@@ -321,7 +333,7 @@ func (s *SQLiteStore) UpsertPosts(ctx context.Context, posts []*types.Post) erro
 	// Begin transaction
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("UpsertPosts: failed to begin transaction: %w", err)
+		return &TransactionError{Operation: "begin", Message: "UpsertPosts", Err: err}
 	}
 
 	// Ensure rollback on error or panic (safe to call after Commit)
@@ -387,25 +399,33 @@ func (s *SQLiteStore) UpsertPosts(ctx context.Context, posts []*types.Post) erro
 
 	stmt, err := tx.PrepareContext(ctx, query)
 	if err != nil {
-		return fmt.Errorf("UpsertPosts: failed to prepare statement: %w", err)
+		return &DatabaseError{
+			Operation: "UpsertPosts",
+			Message:   "failed to prepare statement",
+			Err:       err,
+		}
 	}
 	defer stmt.Close()
 
 	// Execute statement for each post
 	for i, post := range posts {
 		if post == nil {
-			return fmt.Errorf("UpsertPosts: post at index %d is nil", i)
+			return &ValidationError{Operation: "UpsertPosts", Field: fmt.Sprintf("posts[%d]", i), Reason: "post cannot be nil"}
 		}
 		args := postToInsertArgs(post)
 		_, err := stmt.ExecContext(ctx, args...)
 		if err != nil {
-			return fmt.Errorf("UpsertPosts: failed to insert post %s: %w", post.ID, err)
+			return &DatabaseError{
+				Operation: "UpsertPosts",
+				Message:   fmt.Sprintf("failed to insert post %s", post.ID),
+				Err:       err,
+			}
 		}
 	}
 
 	// Commit transaction
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("UpsertPosts: failed to commit transaction: %w", err)
+		return &TransactionError{Operation: "commit", Message: "UpsertPosts", Err: err}
 	}
 
 	s.logger.Debug("successfully upserted posts batch", "count", len(posts))
