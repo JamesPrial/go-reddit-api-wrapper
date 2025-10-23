@@ -99,17 +99,18 @@ Use errors.As() to check for specific error types:
 
 # Conversion Utilities
 
-The package provides database-agnostic conversion utilities for working with nullable SQL types:
+The storage/internal package provides database-agnostic conversion utilities for working with nullable SQL types:
 
-  - stringToNullString / nullStringToString
-  - int64ToNullInt64 / nullInt64ToInt64
-  - intToNullInt64 / nullInt64ToInt
-  - boolToNullBool / nullBoolToBool
-  - float64ToNullFloat64 / nullFloat64ToFloat64
-  - timeToNullTime / nullTimeToTime
+  - StringToNullString / NullStringToString
+  - Int64ToNullInt64 / NullInt64ToInt64
+  - IntToNullInt64 / NullInt64ToInt
+  - BoolToNullBool / NullBoolToBool
+  - Float64ToNullFloat64 / NullFloat64ToFloat64
+  - TimeToNullTime / NullTimeToTime
 
 These utilities handle the conversion between Go types and SQL nullable types,
-treating zero values as NULL in the database.
+treating zero values as NULL in the database. Backend implementations can import
+these converters from storage/internal to maintain consistency across backends.
 
 # Backend Implementation Notes
 

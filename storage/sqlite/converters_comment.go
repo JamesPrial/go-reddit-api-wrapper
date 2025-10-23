@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
+	"github.com/jamesprial/go-reddit-api-wrapper/storage/internal"
 )
 
 // commentScanDest holds the destination pointers for scanning a Comment from SQL.
@@ -393,10 +394,10 @@ func commentToInsertArgs(c *types.Comment, depth int) []interface{} {
 		c.Edited.IsEdited,
 		c.Edited.Timestamp,
 		c.Gilded,
-		stringToNullString(c.LinkAuthor),
+		internal.StringToNullString(c.LinkAuthor),
 		c.LinkID,
-		stringToNullString(c.LinkTitle),
-		stringToNullString(c.LinkURL),
+		internal.StringToNullString(c.LinkTitle),
+		internal.StringToNullString(c.LinkURL),
 		intPtrToNullInt64(c.NumReports),
 		c.ParentID,
 		c.Saved,
@@ -408,7 +409,8 @@ func commentToInsertArgs(c *types.Comment, depth int) []interface{} {
 	}
 }
 
-// Helper functions for type conversions
+// Helper functions for type conversions specific to Comment conversion.
+// For general SQL type conversions, see storage/internal/converters.go.
 
 // boolPtrToNullInt64 converts a *bool to sql.NullInt64.
 // True becomes 1, false becomes 0, nil becomes NULL.
@@ -430,15 +432,6 @@ func stringPtrToNullString(s *string) sql.NullString {
 		return sql.NullString{Valid: false}
 	}
 	return sql.NullString{String: *s, Valid: true}
-}
-
-// stringToNullString converts a string to sql.NullString.
-// Empty strings become NULL, non-empty strings become valid NullStrings.
-func stringToNullString(s string) sql.NullString {
-	if s == "" {
-		return sql.NullString{Valid: false}
-	}
-	return sql.NullString{String: s, Valid: true}
 }
 
 // intPtrToNullInt64 converts a *int to sql.NullInt64.
