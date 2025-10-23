@@ -77,9 +77,9 @@ go run ./cmd/examples/monitor
 go run ./cmd/examples/analyzer
 ```
 
-## Architecture
+## Context Management
 
-**UTILIZE @agent-codebase-navigator WHEN CONTEXT FROM MULTIPLE FILES IS NEEDED**
+ALWAYS PROACTIVELY use the Task tool and available subagents to break down complex problems and delegate subtasks. This prevents context bloat and ensures focused execution.
 
 ### Package Structure
 - **`reddit/` Package** (`reddit.go`): Core Reddit client implementation
