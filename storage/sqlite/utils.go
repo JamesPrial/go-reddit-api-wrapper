@@ -1,23 +1,25 @@
-package storage
+package sqlite
 
 import (
 	"context"
 	"database/sql"
 	"time"
+
+	"github.com/jamesprial/go-reddit-api-wrapper/storage"
 )
 
 // GetStats returns statistics about the stored data.
 // It queries the database for post counts, comment counts, oldest/newest entry timestamps,
 // and total database size. Returns an error if any query fails.
 // For an empty database, count fields are 0 and timestamp fields are zero time.Time values.
-func (s *SQLiteStore) GetStats(ctx context.Context) (*CacheStats, error) {
-	stats := &CacheStats{}
+func (s *SQLiteStore) GetStats(ctx context.Context) (*storage.CacheStats, error) {
+	stats := &storage.CacheStats{}
 
 	// Query post count
 	var postCount sql.NullInt64
-	err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM posts").Scan(&postCount)
+	err := s.db.QueryRowContext(ctx, queryGetPostCount).Scan(&postCount)
 	if err != nil {
-		return nil, &DatabaseError{Operation: "GetStats", Message: "failed to query post count", Err: err}
+		return nil, &storage.DatabaseError{Operation: "GetStats", Message: "failed to query post count", Err: err}
 	}
 	if postCount.Valid {
 		stats.PostCount = postCount.Int64
@@ -25,9 +27,9 @@ func (s *SQLiteStore) GetStats(ctx context.Context) (*CacheStats, error) {
 
 	// Query comment count
 	var commentCount sql.NullInt64
-	err = s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM comments").Scan(&commentCount)
+	err = s.db.QueryRowContext(ctx, queryGetCommentCount).Scan(&commentCount)
 	if err != nil {
-		return nil, &DatabaseError{Operation: "GetStats", Message: "failed to query comment count", Err: err}
+		return nil, &storage.DatabaseError{Operation: "GetStats", Message: "failed to query comment count", Err: err}
 	}
 	if commentCount.Valid {
 		stats.CommentCount = commentCount.Int64
@@ -36,16 +38,9 @@ func (s *SQLiteStore) GetStats(ctx context.Context) (*CacheStats, error) {
 	// Query oldest entry timestamp
 	// Use UNION ALL to combine posts and comments, then find minimum timestamp
 	var oldestTS sql.NullInt64
-	oldestQuery := `
-		SELECT MIN(fetched_at) FROM (
-			SELECT fetched_at FROM posts
-			UNION ALL
-			SELECT fetched_at FROM comments
-		)
-	`
-	err = s.db.QueryRowContext(ctx, oldestQuery).Scan(&oldestTS)
+	err = s.db.QueryRowContext(ctx, queryGetOldestEntry).Scan(&oldestTS)
 	if err != nil {
-		return nil, &DatabaseError{
+		return nil, &storage.DatabaseError{
 			Operation: "GetStats",
 			Message:   "failed to query oldest entry",
 			Err:       err,
@@ -57,16 +52,9 @@ func (s *SQLiteStore) GetStats(ctx context.Context) (*CacheStats, error) {
 
 	// Query newest entry timestamp
 	var newestTS sql.NullInt64
-	newestQuery := `
-		SELECT MAX(fetched_at) FROM (
-			SELECT fetched_at FROM posts
-			UNION ALL
-			SELECT fetched_at FROM comments
-		)
-	`
-	err = s.db.QueryRowContext(ctx, newestQuery).Scan(&newestTS)
+	err = s.db.QueryRowContext(ctx, queryGetNewestEntry).Scan(&newestTS)
 	if err != nil {
-		return nil, &DatabaseError{
+		return nil, &storage.DatabaseError{
 			Operation: "GetStats",
 			Message:   "failed to query newest entry",
 			Err:       err,
@@ -79,13 +67,9 @@ func (s *SQLiteStore) GetStats(ctx context.Context) (*CacheStats, error) {
 	// Query database size
 	// SQLite stores this as page_count * page_size
 	var sizeBytes sql.NullInt64
-	sizeQuery := `
-		SELECT page_count * page_size as size
-		FROM pragma_page_count(), pragma_page_size()
-	`
-	err = s.db.QueryRowContext(ctx, sizeQuery).Scan(&sizeBytes)
+	err = s.db.QueryRowContext(ctx, queryGetDatabaseSize).Scan(&sizeBytes)
 	if err != nil {
-		return nil, &DatabaseError{Operation: "GetStats", Message: "failed to get database size", Err: err}
+		return nil, &storage.DatabaseError{Operation: "GetStats", Message: "failed to get database size", Err: err}
 	}
 	if sizeBytes.Valid {
 		stats.TotalSizeBytes = sizeBytes.Int64
@@ -116,20 +100,19 @@ func (s *SQLiteStore) EvictStale(ctx context.Context, maxAge time.Duration) (int
 	// Begin transaction for atomicity
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return 0, &TransactionError{Operation: "begin", Message: "EvictStale", Err: err}
+		return 0, &storage.TransactionError{Operation: "begin", Message: "EvictStale", Err: err}
 	}
 	defer tx.Rollback() // Safe to call even after commit
 
 	// Delete stale posts
 	// Use <= to handle edge case where maxAge=0 (delete everything)
-	deletePostsQuery := "DELETE FROM posts WHERE fetched_at <= ?"
-	resultPosts, err := tx.ExecContext(ctx, deletePostsQuery, cutoffUnix)
+	resultPosts, err := tx.ExecContext(ctx, queryDeleteStalePosts, cutoffUnix)
 	if err != nil {
-		return 0, &DatabaseError{Operation: "EvictStale", Message: "failed to delete stale posts", Err: err}
+		return 0, &storage.DatabaseError{Operation: "EvictStale", Message: "failed to delete stale posts", Err: err}
 	}
 	postsDeleted, err := resultPosts.RowsAffected()
 	if err != nil {
-		return 0, &DatabaseError{
+		return 0, &storage.DatabaseError{
 			Operation: "EvictStale",
 			Message:   "failed to get posts rows affected",
 			Err:       err,
@@ -139,14 +122,13 @@ func (s *SQLiteStore) EvictStale(ctx context.Context, maxAge time.Duration) (int
 	// Delete stale comments
 	// Closure table entries will be automatically deleted via CASCADE
 	// Use <= to handle edge case where maxAge=0 (delete everything)
-	deleteCommentsQuery := "DELETE FROM comments WHERE fetched_at <= ?"
-	resultComments, err := tx.ExecContext(ctx, deleteCommentsQuery, cutoffUnix)
+	resultComments, err := tx.ExecContext(ctx, queryDeleteStaleComments, cutoffUnix)
 	if err != nil {
-		return 0, &DatabaseError{Operation: "EvictStale", Message: "failed to delete stale comments", Err: err}
+		return 0, &storage.DatabaseError{Operation: "EvictStale", Message: "failed to delete stale comments", Err: err}
 	}
 	commentsDeleted, err := resultComments.RowsAffected()
 	if err != nil {
-		return 0, &DatabaseError{
+		return 0, &storage.DatabaseError{
 			Operation: "EvictStale",
 			Message:   "failed to get comments rows affected",
 			Err:       err,
@@ -155,7 +137,7 @@ func (s *SQLiteStore) EvictStale(ctx context.Context, maxAge time.Duration) (int
 
 	// Commit transaction
 	if err := tx.Commit(); err != nil {
-		return 0, &TransactionError{Operation: "commit", Message: "EvictStale", Err: err}
+		return 0, &storage.TransactionError{Operation: "commit", Message: "EvictStale", Err: err}
 	}
 
 	totalDeleted := postsDeleted + commentsDeleted

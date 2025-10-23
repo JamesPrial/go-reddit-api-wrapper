@@ -1,4 +1,4 @@
-package storage
+package sqlite_test
 
 import (
 	"context"
@@ -6,23 +6,31 @@ import (
 	"time"
 
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
-	"github.com/jamesprial/go-reddit-api-wrapper/storage/testutil"
+	"github.com/jamesprial/go-reddit-api-wrapper/storage"
+	_ "github.com/jamesprial/go-reddit-api-wrapper/storage/sqlite" // Register SQLite backend
+	"github.com/jamesprial/go-reddit-api-wrapper/storage/internal/testutil"
 	"github.com/stretchr/testify/require"
 )
 
 // NewTestDB creates an in-memory SQLite database for testing.
 // It runs migrations and returns a configured store.
 // Uses t.Cleanup() to ensure the database is closed after the test.
-func NewTestDB(t *testing.T) *SQLiteStore {
+func NewTestDB(t *testing.T) storage.Store {
 	t.Helper()
 
-	cfg := &Config{
-		DBPath: ":memory:",
-		// MaxOpenConns and MaxIdleConns are auto-configured to 1 for :memory: databases
-		MigrationsPath: "migrations",
+	// When running tests from the sqlite package, the CWD is storage/sqlite/,
+	// so we need to use just "migrations" as the path to find storage/sqlite/migrations
+	migrationsPath := "migrations"
+
+	cfg := storage.Config{
+		DSN:            ":memory:",
+		MaxOpenConns:   1,
+		MaxIdleConns:   1,
+		MigrationsPath: migrationsPath,
 	}
 
-	store, err := NewSQLiteStore(cfg)
+	// Use the factory pattern with blank import of sqlite
+	store, err := storage.New(context.Background(), cfg)
 	require.NoError(t, err, "failed to create test database")
 	require.NotNil(t, store, "store should not be nil")
 
@@ -100,7 +108,7 @@ func TestGetPost(t *testing.T) {
 	// Try to get a non-existent post
 	notFound, err := store.GetPost(ctx, "nonexistent")
 	require.Error(t, err, "expected error for non-existent post")
-	var notFoundErr *NotFoundError
+	var notFoundErr *storage.NotFoundError
 	require.ErrorAs(t, err, &notFoundErr, "error should be NotFoundError")
 	require.Equal(t, "post", notFoundErr.ResourceType)
 	require.Equal(t, "nonexistent", notFoundErr.ResourceID)
@@ -136,7 +144,7 @@ func TestListPosts(t *testing.T) {
 	})
 
 	t.Run("filter by subreddit", func(t *testing.T) {
-		opts := &ListPostsOptions{Subreddit: "golang"}
+		opts := &storage.ListPostsOptions{Subreddit: "golang"}
 		results, err := store.ListPosts(ctx, opts)
 		require.NoError(t, err)
 		require.Len(t, results, 3, "should return 3 golang posts")
@@ -146,7 +154,7 @@ func TestListPosts(t *testing.T) {
 	})
 
 	t.Run("filter by author", func(t *testing.T) {
-		opts := &ListPostsOptions{Author: "user1"}
+		opts := &storage.ListPostsOptions{Author: "user1"}
 		results, err := store.ListPosts(ctx, opts)
 		require.NoError(t, err)
 		require.Len(t, results, 2, "should return 2 posts by user1")
@@ -156,7 +164,7 @@ func TestListPosts(t *testing.T) {
 	})
 
 	t.Run("filter by minimum score", func(t *testing.T) {
-		opts := &ListPostsOptions{MinScore: 75}
+		opts := &storage.ListPostsOptions{MinScore: 75}
 		results, err := store.ListPosts(ctx, opts)
 		require.NoError(t, err)
 		require.Len(t, results, 3, "should return 3 posts with score >= 75")
@@ -167,7 +175,7 @@ func TestListPosts(t *testing.T) {
 
 	t.Run("filter by max age", func(t *testing.T) {
 		// All posts were just inserted, so they should all match a 1-minute age filter
-		opts := &ListPostsOptions{MaxAge: 1 * time.Minute}
+		opts := &storage.ListPostsOptions{MaxAge: 1 * time.Minute}
 		results, err := store.ListPosts(ctx, opts)
 		require.NoError(t, err)
 		require.Len(t, results, 5, "all recent posts should match")
@@ -175,7 +183,7 @@ func TestListPosts(t *testing.T) {
 		// Posts older than 0 seconds should return none (very short window)
 		// But since we just inserted, they should still be within the window
 		// Let's test with a very old cutoff instead
-		oldCutoff := &ListPostsOptions{MaxAge: 1 * time.Nanosecond}
+		oldCutoff := &storage.ListPostsOptions{MaxAge: 1 * time.Nanosecond}
 		oldResults, err := store.ListPosts(ctx, oldCutoff)
 		require.NoError(t, err)
 		// Depending on timing, this might return 0 or some posts
@@ -184,7 +192,7 @@ func TestListPosts(t *testing.T) {
 	})
 
 	t.Run("sort by score descending", func(t *testing.T) {
-		opts := &ListPostsOptions{SortBy: "score", SortDir: "DESC"}
+		opts := &storage.ListPostsOptions{SortBy: "score", SortDir: "DESC"}
 		results, err := store.ListPosts(ctx, opts)
 		require.NoError(t, err)
 		require.Len(t, results, 5)
@@ -197,7 +205,7 @@ func TestListPosts(t *testing.T) {
 	})
 
 	t.Run("sort by score ascending", func(t *testing.T) {
-		opts := &ListPostsOptions{SortBy: "score", SortDir: "ASC"}
+		opts := &storage.ListPostsOptions{SortBy: "score", SortDir: "ASC"}
 		results, err := store.ListPosts(ctx, opts)
 		require.NoError(t, err)
 		require.Len(t, results, 5)
@@ -210,7 +218,7 @@ func TestListPosts(t *testing.T) {
 	})
 
 	t.Run("pagination with limit", func(t *testing.T) {
-		opts := &ListPostsOptions{
+		opts := &storage.ListPostsOptions{
 			SortBy:  "score",
 			SortDir: "DESC",
 			Limit:   3,
@@ -224,7 +232,7 @@ func TestListPosts(t *testing.T) {
 	})
 
 	t.Run("pagination with offset", func(t *testing.T) {
-		opts := &ListPostsOptions{
+		opts := &storage.ListPostsOptions{
 			SortBy:  "score",
 			SortDir: "DESC",
 			Limit:   2,
@@ -238,7 +246,7 @@ func TestListPosts(t *testing.T) {
 	})
 
 	t.Run("combine multiple filters", func(t *testing.T) {
-		opts := &ListPostsOptions{
+		opts := &storage.ListPostsOptions{
 			Subreddit: "golang",
 			MinScore:  50,
 			SortBy:    "score",
@@ -274,7 +282,7 @@ func TestDeletePost(t *testing.T) {
 	// Verify the post is gone
 	notFound, err := store.GetPost(ctx, "del123")
 	require.Error(t, err)
-	var notFoundErr *NotFoundError
+	var notFoundErr *storage.NotFoundError
 	require.ErrorAs(t, err, &notFoundErr, "second post should not exist due to rollback")
 	require.Nil(t, notFound)
 

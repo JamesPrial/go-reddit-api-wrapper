@@ -1,4 +1,4 @@
-package storage
+package sqlite
 
 import (
 	"context"
@@ -12,6 +12,7 @@ import (
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/database/sqlite3"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
+	"github.com/jamesprial/go-reddit-api-wrapper/storage"
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -59,6 +60,25 @@ type Config struct {
 type SQLiteStore struct {
 	db     *sql.DB
 	logger *slog.Logger
+}
+
+// NewStore creates and initializes a new SQLiteStore from storage.Config.
+// It accepts the generic storage.Config type and adapts it to SQLite-specific configuration.
+// This function is used by the storage factory pattern and should be preferred for generic code.
+// It opens the database, configures the connection pool, runs migrations, and returns the store.
+// Returns an error if database initialization or migration fails.
+func NewStore(ctx context.Context, cfg storage.Config) (storage.Store, error) {
+	// Convert storage.Config to sqlite-specific Config
+	sqliteConfig := &Config{
+		DBPath:         cfg.DSN,
+		MaxOpenConns:   cfg.MaxOpenConns,
+		MaxIdleConns:   cfg.MaxIdleConns,
+		ConnMaxLife:    cfg.ConnMaxLifetime,
+		MigrationsPath: cfg.MigrationsPath,
+		Logger:         cfg.Logger,
+	}
+
+	return NewSQLiteStore(sqliteConfig)
 }
 
 // NewSQLiteStore creates and initializes a new SQLiteStore.
@@ -134,7 +154,7 @@ func NewSQLiteStore(cfg *Config) (*SQLiteStore, error) {
 	// Open database connection
 	db, err := sql.Open("sqlite3", dsn)
 	if err != nil {
-		return nil, &DatabaseError{Operation: "NewSQLiteStore", Message: "failed to open database", Err: err}
+		return nil, &storage.DatabaseError{Operation: "NewSQLiteStore", Message: "failed to open database", Err: err}
 	}
 
 	// Configure connection pool
@@ -158,7 +178,7 @@ func NewSQLiteStore(cfg *Config) (*SQLiteStore, error) {
 	// Run database migrations
 	if err := store.runMigrations(cfg.MigrationsPath); err != nil {
 		db.Close() // Clean up on migration failure
-		return nil, &DatabaseError{Operation: "NewSQLiteStore", Message: "failed to run migrations", Err: err}
+		return nil, &storage.DatabaseError{Operation: "NewSQLiteStore", Message: "failed to run migrations", Err: err}
 	}
 
 	logger.Info("database migrations completed")
@@ -174,19 +194,19 @@ func (s *SQLiteStore) runMigrations(migrationsPath string) error {
 	// Create a database driver instance for golang-migrate
 	driver, err := sqlite3.WithInstance(s.db, &sqlite3.Config{})
 	if err != nil {
-		return &DatabaseError{Operation: "runMigrations", Message: "failed to create migration driver", Err: err}
+		return &storage.DatabaseError{Operation: "runMigrations", Message: "failed to create migration driver", Err: err}
 	}
 
 	// Use default migrations path if not specified
 	if migrationsPath == "" {
-		migrationsPath = "storage/migrations"
+		migrationsPath = "storage/sqlite/migrations"
 	}
 
 	// Convert to absolute path if it's not already absolute
 	if !filepath.IsAbs(migrationsPath) {
 		absPath, err := filepath.Abs(migrationsPath)
 		if err != nil {
-			return &DatabaseError{Operation: "runMigrations", Message: "failed to resolve migrations path", Err: err}
+			return &storage.DatabaseError{Operation: "runMigrations", Message: "failed to resolve migrations path", Err: err}
 		}
 		migrationsPath = absPath
 	}
@@ -200,7 +220,7 @@ func (s *SQLiteStore) runMigrations(migrationsPath string) error {
 		driver,
 	)
 	if err != nil {
-		return &DatabaseError{Operation: "runMigrations", Message: "failed to create migrate instance", Err: err}
+		return &storage.DatabaseError{Operation: "runMigrations", Message: "failed to create migrate instance", Err: err}
 	}
 
 	// Apply all pending UP migrations
@@ -210,7 +230,7 @@ func (s *SQLiteStore) runMigrations(migrationsPath string) error {
 			s.logger.Debug("database migrations already up-to-date")
 			return nil
 		}
-		return &DatabaseError{Operation: "runMigrations", Message: "migration failed", Err: err}
+		return &storage.DatabaseError{Operation: "runMigrations", Message: "migration failed", Err: err}
 	}
 
 	return nil
@@ -223,7 +243,7 @@ func (s *SQLiteStore) runMigrations(migrationsPath string) error {
 func (s *SQLiteStore) Close() error {
 	s.logger.Info("closing database connection")
 	if err := s.db.Close(); err != nil {
-		return &DatabaseError{Operation: "Close", Message: "failed to close database", Err: err}
+		return &storage.DatabaseError{Operation: "Close", Message: "failed to close database", Err: err}
 	}
 	return nil
 }
@@ -233,7 +253,14 @@ func (s *SQLiteStore) Close() error {
 // Returns an error if the database cannot be reached or is not responding.
 func (s *SQLiteStore) Ping(ctx context.Context) error {
 	if err := s.db.PingContext(ctx); err != nil {
-		return &DatabaseError{Operation: "Ping", Message: "database ping failed", Err: err}
+		return &storage.DatabaseError{Operation: "Ping", Message: "database ping failed", Err: err}
 	}
 	return nil
+}
+
+// init registers the SQLite factory with the storage package.
+// This allows storage.New() to automatically use SQLite when the driver is set to "sqlite" or "sqlite3".
+func init() {
+	storage.RegisterFactory("sqlite", NewStore)
+	storage.RegisterFactory("sqlite3", NewStore)
 }

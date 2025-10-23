@@ -1,7 +1,7 @@
 //go:build integration
 // +build integration
 
-package storage
+package storage_test
 
 import (
 	"context"
@@ -12,7 +12,9 @@ import (
 
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 	graw "github.com/jamesprial/go-reddit-api-wrapper/reddit"
-	"github.com/jamesprial/go-reddit-api-wrapper/storage/testutil"
+	"github.com/jamesprial/go-reddit-api-wrapper/storage"
+	_ "github.com/jamesprial/go-reddit-api-wrapper/storage/sqlite" // Register SQLite backend
+	"github.com/jamesprial/go-reddit-api-wrapper/storage/internal/testutil"
 )
 
 // Integration tests for storage layer with real Reddit API data.
@@ -48,15 +50,15 @@ func getTestRedditClient(t *testing.T) *graw.Reddit {
 }
 
 // getTestStore initializes an in-memory SQLite store for testing.
-func getTestStore(t *testing.T) Store {
+func getTestStore(t *testing.T) storage.Store {
 	t.Helper()
 
-	cfg := &Config{
-		DBPath:         ":memory:",
+	cfg := storage.Config{
+		DSN:            ":memory:",
 		MigrationsPath: "migrations",
 	}
 
-	store, err := NewSQLiteStore(cfg)
+	store, err := storage.New(context.Background(), cfg)
 	testutil.AssertNoError(t, err)
 
 	t.Cleanup(func() {
@@ -67,15 +69,15 @@ func getTestStore(t *testing.T) Store {
 }
 
 // getTestFileStore initializes a file-based SQLite store for testing.
-func getTestFileStore(t *testing.T, dbPath string) Store {
+func getTestFileStore(t *testing.T, dbPath string) storage.Store {
 	t.Helper()
 
-	cfg := &Config{
-		DBPath:         dbPath,
+	cfg := storage.Config{
+		DSN:            dbPath,
 		MigrationsPath: "migrations",
 	}
 
-	store, err := NewSQLiteStore(cfg)
+	store, err := storage.New(context.Background(), cfg)
 	testutil.AssertNoError(t, err)
 
 	t.Cleanup(func() {
@@ -261,7 +263,7 @@ func TestIntegration_BatchPostsRoundTrip(t *testing.T) {
 	testutil.AssertNoError(t, err)
 
 	// Retrieve all posts
-	opts := &ListPostsOptions{
+	opts := &storage.ListPostsOptions{
 		Limit: 100,
 	}
 	retrievedPosts, err := store.ListPosts(ctx, opts)
@@ -430,7 +432,7 @@ func TestIntegration_DeepCommentTree(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			opts := &CommentTreeOptions{
+			opts := &storage.CommentTreeOptions{
 				MaxDepth: tc.maxDepth,
 			}
 
@@ -498,7 +500,7 @@ func TestIntegration_PostFiltering(t *testing.T) {
 
 	// Test subreddit filter (case-insensitive)
 	t.Run("filter by subreddit", func(t *testing.T) {
-		opts := &ListPostsOptions{
+		opts := &storage.ListPostsOptions{
 			Subreddit: "GoLang", // Test case-insensitivity
 			Limit:     100,
 		}
@@ -520,7 +522,7 @@ func TestIntegration_PostFiltering(t *testing.T) {
 		}
 		testAuthor := allPosts[0].Author
 
-		opts := &ListPostsOptions{
+		opts := &storage.ListPostsOptions{
 			Author: testAuthor,
 			Limit:  100,
 		}
@@ -537,7 +539,7 @@ func TestIntegration_PostFiltering(t *testing.T) {
 
 	// Test MinScore filter
 	t.Run("filter by min score", func(t *testing.T) {
-		opts := &ListPostsOptions{
+		opts := &storage.ListPostsOptions{
 			MinScore: 100,
 			Limit:    100,
 		}
@@ -555,7 +557,7 @@ func TestIntegration_PostFiltering(t *testing.T) {
 	// Test MaxAge filter
 	// Note: MaxAge filters by fetched_at (when stored), not created_utc (Reddit creation time)
 	t.Run("filter by max age", func(t *testing.T) {
-		opts := &ListPostsOptions{
+		opts := &storage.ListPostsOptions{
 			MaxAge: 24 * time.Hour,
 			Limit:  100,
 		}
@@ -610,7 +612,7 @@ func TestIntegration_PostSorting(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.sortBy+"_"+tc.sortDir, func(t *testing.T) {
-			opts := &ListPostsOptions{
+			opts := &storage.ListPostsOptions{
 				SortBy:  tc.sortBy,
 				SortDir: tc.sortDir,
 				Limit:   100,
@@ -675,7 +677,7 @@ func TestIntegration_Pagination(t *testing.T) {
 	seenIDs := make(map[string]bool)
 
 	for page := 0; page < 3; page++ {
-		opts := &ListPostsOptions{
+		opts := &storage.ListPostsOptions{
 			Limit:  pageSize,
 			Offset: page * pageSize,
 		}
@@ -733,7 +735,7 @@ func TestIntegration_UpsertSemantics(t *testing.T) {
 	testutil.AssertNoError(t, err)
 
 	// Verify count is still 1 (updated, not duplicated)
-	opts := &ListPostsOptions{Limit: 100}
+	opts := &storage.ListPostsOptions{Limit: 100}
 	allPosts, err := store.ListPosts(ctx, opts)
 	testutil.AssertNoError(t, err)
 
@@ -849,7 +851,7 @@ func TestIntegration_StaleDataEviction(t *testing.T) {
 	}
 
 	// Verify data still present
-	opts := &ListPostsOptions{Limit: 100}
+	opts := &storage.ListPostsOptions{Limit: 100}
 	remaining, err := store.ListPosts(ctx, opts)
 	testutil.AssertNoError(t, err)
 
@@ -992,7 +994,7 @@ func TestIntegration_MultipleSubreddits(t *testing.T) {
 
 	// Verify filtering works for each subreddit
 	for _, sub := range subreddits {
-		opts := &ListPostsOptions{
+		opts := &storage.ListPostsOptions{
 			Subreddit: sub,
 			Limit:     100,
 		}
@@ -1038,7 +1040,7 @@ func TestIntegration_FileBasedStorage(t *testing.T) {
 	testutil.AssertNoError(t, err)
 
 	// Verify retrieval
-	opts := &ListPostsOptions{Limit: 100}
+	opts := &storage.ListPostsOptions{Limit: 100}
 	retrieved, err := store.ListPosts(ctx, opts)
 	testutil.AssertNoError(t, err)
 

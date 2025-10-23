@@ -1,7 +1,7 @@
 //go:build integration
 // +build integration
 
-package storage
+package storage_test
 
 import (
 	"context"
@@ -13,20 +13,22 @@ import (
 	"time"
 
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
-	"github.com/jamesprial/go-reddit-api-wrapper/storage/testutil"
+	"github.com/jamesprial/go-reddit-api-wrapper/storage"
+	_ "github.com/jamesprial/go-reddit-api-wrapper/storage/sqlite" // Register SQLite backend
+	"github.com/jamesprial/go-reddit-api-wrapper/storage/internal/testutil"
 )
 
 // reopenFileStore creates a new Store instance connected to an existing database file.
 // For file-based databases, it verifies the file was created on disk after opening.
-func reopenFileStore(t *testing.T, dbPath string) Store {
+func reopenFileStore(t *testing.T, dbPath string) storage.Store {
 	t.Helper()
 
-	cfg := &Config{
-		DBPath:         dbPath,
+	cfg := storage.Config{
+		DSN:            dbPath,
 		MigrationsPath: "migrations",
 	}
 
-	store, err := NewSQLiteStore(cfg)
+	store, err := storage.New(context.Background(), cfg)
 	testutil.AssertNoError(t, err)
 
 	// Verify file exists on disk AFTER creation (for file-based databases only)
@@ -77,7 +79,7 @@ func TestIntegration_FileBasedPersistence_Posts(t *testing.T) {
 	t.Logf("Stored %d posts", len(resp.Posts))
 
 	// Verify posts are stored
-	opts := &ListPostsOptions{Limit: 100}
+	opts := &storage.ListPostsOptions{Limit: 100}
 	retrievedBefore, err := store1.ListPosts(ctx, opts)
 	testutil.AssertNoError(t, err)
 
@@ -316,7 +318,7 @@ func TestIntegration_FileBasedPersistence_UpsertSemantics(t *testing.T) {
 	}
 
 	// Verify only 1 post exists (not duplicated)
-	opts := &ListPostsOptions{Limit: 100}
+	opts := &storage.ListPostsOptions{Limit: 100}
 	allPosts, err := store3.ListPosts(ctx, opts)
 	testutil.AssertNoError(t, err)
 
@@ -460,7 +462,7 @@ func TestIntegration_FileBasedPersistence_Eviction(t *testing.T) {
 	testutil.AssertNoError(t, err)
 
 	// Verify posts stored
-	opts := &ListPostsOptions{Limit: 100}
+	opts := &storage.ListPostsOptions{Limit: 100}
 	initialList, err := store1.ListPosts(ctx, opts)
 	testutil.AssertNoError(t, err)
 
@@ -597,7 +599,7 @@ func TestIntegration_FileBasedPersistence_LargeDataset(t *testing.T) {
 	t.Logf("Reopened store, verifying large dataset...")
 
 	// Verify post count
-	opts := &ListPostsOptions{Limit: 100}
+	opts := &storage.ListPostsOptions{Limit: 100}
 	retrievedPosts, err := store2.ListPosts(ctx, opts)
 	testutil.AssertNoError(t, err)
 
@@ -691,7 +693,7 @@ func TestIntegration_FileBasedPersistence_MultipleConnections(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		time.Sleep(10 * time.Millisecond)
-		opts := &ListPostsOptions{Limit: 100}
+		opts := &storage.ListPostsOptions{Limit: 100}
 		if _, err := store2.ListPosts(ctx, opts); err != nil {
 			errCh <- fmt.Errorf("store2 ListPosts during write: %w", err)
 		}

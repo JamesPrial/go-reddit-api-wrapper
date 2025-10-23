@@ -1,4 +1,4 @@
-package storage
+package sqlite
 
 import (
 	"context"
@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
+	"github.com/jamesprial/go-reddit-api-wrapper/storage"
 )
 
 // isValidPostSortField returns true if the field is allowed for sorting posts
@@ -31,85 +32,27 @@ func isValidSortDirection(dir string) bool {
 // Returns an error if the operation fails.
 func (s *SQLiteStore) UpsertPost(ctx context.Context, post *types.Post) error {
 	if post == nil {
-		return &ValidationError{Operation: "UpsertPost", Field: "post", Reason: "post cannot be nil"}
+		return &storage.ValidationError{Operation: "UpsertPost", Field: "post", Reason: "post cannot be nil"}
 	}
 	if post.ID == "" {
-		return &ValidationError{Operation: "UpsertPost", Field: "post.ID", Value: post.ID, Reason: "post ID cannot be empty"}
+		return &storage.ValidationError{Operation: "UpsertPost", Field: "post.ID", Value: post.ID, Reason: "post ID cannot be empty"}
 	}
 	if post.Name == "" {
-		return &ValidationError{Operation: "UpsertPost", Field: "post.Name", Reason: "post name cannot be empty"}
+		return &storage.ValidationError{Operation: "UpsertPost", Field: "post.Name", Reason: "post name cannot be empty"}
 	}
 	if post.Subreddit == "" {
-		return &ValidationError{Operation: "UpsertPost", Field: "post.Subreddit", Reason: "post subreddit cannot be empty"}
+		return &storage.ValidationError{Operation: "UpsertPost", Field: "post.Subreddit", Reason: "post subreddit cannot be empty"}
 	}
 
 	s.logger.Debug("upserting post", "post_id", post.ID, "subreddit", post.Subreddit)
-
-	// Build the upsert query with all 36 columns
-	query := `
-		INSERT INTO posts (
-			id, name, score, ups, downs, likes, created, created_utc,
-			author, author_flair_css_class, author_flair_text, clicked, domain,
-			hidden, is_self, link_flair_css_class, link_flair_text, locked,
-			media, media_embed, num_comments, over_18, permalink, saved,
-			selftext, selftext_html, subreddit, subreddit_id, thumbnail,
-			title, url, edited_is_edited, edited_timestamp, distinguished,
-			stickied, upvote_ratio, fetched_at
-		) VALUES (
-			?, ?, ?, ?, ?, ?, ?, ?,
-			?, ?, ?, ?, ?,
-			?, ?, ?, ?, ?,
-			?, ?, ?, ?, ?, ?,
-			?, ?, ?, ?, ?,
-			?, ?, ?, ?, ?,
-			?, ?, strftime('%s', 'now')
-		)
-		ON CONFLICT(id) DO UPDATE SET
-			name = excluded.name,
-			score = excluded.score,
-			ups = excluded.ups,
-			downs = excluded.downs,
-			likes = excluded.likes,
-			created = excluded.created,
-			created_utc = excluded.created_utc,
-			author = excluded.author,
-			author_flair_css_class = excluded.author_flair_css_class,
-			author_flair_text = excluded.author_flair_text,
-			clicked = excluded.clicked,
-			domain = excluded.domain,
-			hidden = excluded.hidden,
-			is_self = excluded.is_self,
-			link_flair_css_class = excluded.link_flair_css_class,
-			link_flair_text = excluded.link_flair_text,
-			locked = excluded.locked,
-			media = excluded.media,
-			media_embed = excluded.media_embed,
-			num_comments = excluded.num_comments,
-			over_18 = excluded.over_18,
-			permalink = excluded.permalink,
-			saved = excluded.saved,
-			selftext = excluded.selftext,
-			selftext_html = excluded.selftext_html,
-			subreddit = excluded.subreddit,
-			subreddit_id = excluded.subreddit_id,
-			thumbnail = excluded.thumbnail,
-			title = excluded.title,
-			url = excluded.url,
-			edited_is_edited = excluded.edited_is_edited,
-			edited_timestamp = excluded.edited_timestamp,
-			distinguished = excluded.distinguished,
-			stickied = excluded.stickied,
-			upvote_ratio = excluded.upvote_ratio,
-			fetched_at = strftime('%s', 'now')
-	`
 
 	// Convert post to insert arguments
 	args := postToInsertArgs(post)
 
 	// Execute the upsert
-	_, err := s.db.ExecContext(ctx, query, args...)
+	_, err := s.db.ExecContext(ctx, queryUpsertPost, args...)
 	if err != nil {
-		return &DatabaseError{Operation: "UpsertPost", Message: fmt.Sprintf("failed to insert post %s", post.ID), Err: err}
+		return &storage.DatabaseError{Operation: "UpsertPost", Message: fmt.Sprintf("failed to insert post %s", post.ID), Err: err}
 	}
 
 	s.logger.Debug("successfully upserted post", "post_id", post.ID)
@@ -122,25 +65,12 @@ func (s *SQLiteStore) UpsertPost(ctx context.Context, post *types.Post) error {
 // Returns an error for other database failures.
 func (s *SQLiteStore) GetPost(ctx context.Context, id string) (*types.Post, error) {
 	if id == "" {
-		return nil, &ValidationError{Operation: "GetPost", Field: "id", Reason: "post ID cannot be empty"}
+		return nil, &storage.ValidationError{Operation: "GetPost", Field: "id", Reason: "post ID cannot be empty"}
 	}
 
 	s.logger.Debug("getting post", "post_id", id)
 
-	query := `
-		SELECT
-			id, name, score, ups, downs, likes, created, created_utc,
-			author, author_flair_css_class, author_flair_text, clicked, domain,
-			hidden, is_self, link_flair_css_class, link_flair_text, locked,
-			media, media_embed, num_comments, over_18, permalink, saved,
-			selftext, selftext_html, subreddit, subreddit_id, thumbnail,
-			title, url, edited_is_edited, edited_timestamp, distinguished,
-			stickied, upvote_ratio
-		FROM posts
-		WHERE id = ?
-	`
-
-	row := s.db.QueryRowContext(ctx, query, id)
+	row := s.db.QueryRowContext(ctx, queryGetPost, id)
 
 	// Create a scan destination and scan into it
 	dest := newPostScanDest()
@@ -149,9 +79,9 @@ func (s *SQLiteStore) GetPost(ctx context.Context, id string) (*types.Post, erro
 	if err != nil {
 		if err == sql.ErrNoRows {
 			// Return NotFoundError for caller to handle
-			return nil, &NotFoundError{ResourceType: "post", ResourceID: id}
+			return nil, &storage.NotFoundError{ResourceType: "post", ResourceID: id}
 		}
-		return nil, &DatabaseError{Operation: "GetPost", Message: fmt.Sprintf("failed to scan post %s", id), Err: err}
+		return nil, &storage.DatabaseError{Operation: "GetPost", Message: fmt.Sprintf("failed to scan post %s", id), Err: err}
 	}
 
 	post := dest.toPost()
@@ -163,22 +93,12 @@ func (s *SQLiteStore) GetPost(ctx context.Context, id string) (*types.Post, erro
 // Returns an empty slice if no posts match the criteria.
 // The opts parameter allows filtering by subreddit, author, score, age, and sorting.
 // Returns an error if the operation fails.
-func (s *SQLiteStore) ListPosts(ctx context.Context, opts *ListPostsOptions) ([]*types.Post, error) {
+func (s *SQLiteStore) ListPosts(ctx context.Context, opts *storage.ListPostsOptions) ([]*types.Post, error) {
 	s.logger.Debug("listing posts", "opts", opts)
 
 	// Build base query
 	var query strings.Builder
-	query.WriteString(`
-		SELECT
-			id, name, score, ups, downs, likes, created, created_utc,
-			author, author_flair_css_class, author_flair_text, clicked, domain,
-			hidden, is_self, link_flair_css_class, link_flair_text, locked,
-			media, media_embed, num_comments, over_18, permalink, saved,
-			selftext, selftext_html, subreddit, subreddit_id, thumbnail,
-			title, url, edited_is_edited, edited_timestamp, distinguished,
-			stickied, upvote_ratio
-		FROM posts
-	`)
+	query.WriteString(queryListPostsBase)
 
 	// Build WHERE clauses and args
 	var whereClauses []string
@@ -240,7 +160,7 @@ func (s *SQLiteStore) ListPosts(ctx context.Context, opts *ListPostsOptions) ([]
 	// They CANNOT be parameterized as they are SQL identifiers (column names).
 	// Never remove the whitelist validation without replacing with equivalent protection.
 	if !isValidPostSortField(orderBy) || !isValidSortDirection(sortDir) {
-		return nil, &ValidationError{
+		return nil, &storage.ValidationError{
 			Operation: "ListPosts",
 			Field:     "sort parameters",
 			Reason:    fmt.Sprintf("invalid sort field %q or direction %q", orderBy, sortDir),
@@ -262,7 +182,7 @@ func (s *SQLiteStore) ListPosts(ctx context.Context, opts *ListPostsOptions) ([]
 	// Execute query
 	rows, err := s.db.QueryContext(ctx, query.String(), args...)
 	if err != nil {
-		return nil, &DatabaseError{Operation: "ListPosts", Message: "failed to execute query", Err: err}
+		return nil, &storage.DatabaseError{Operation: "ListPosts", Message: "failed to execute query", Err: err}
 	}
 	defer rows.Close()
 
@@ -272,7 +192,7 @@ func (s *SQLiteStore) ListPosts(ctx context.Context, opts *ListPostsOptions) ([]
 		dest := newPostScanDest()
 
 		if err := rows.Scan(dest.dest()...); err != nil {
-			return nil, &DatabaseError{Operation: "ListPosts", Message: "failed to scan post", Err: err}
+			return nil, &storage.DatabaseError{Operation: "ListPosts", Message: "failed to scan post", Err: err}
 		}
 
 		post := dest.toPost()
@@ -281,7 +201,7 @@ func (s *SQLiteStore) ListPosts(ctx context.Context, opts *ListPostsOptions) ([]
 
 	// Check for errors during iteration
 	if err := rows.Err(); err != nil {
-		return nil, &DatabaseError{
+		return nil, &storage.DatabaseError{
 			Operation: "ListPosts",
 			Message:   "error iterating rows",
 			Err:       err,
@@ -305,11 +225,9 @@ func (s *SQLiteStore) ListPosts(ctx context.Context, opts *ListPostsOptions) ([]
 func (s *SQLiteStore) DeletePost(ctx context.Context, id string) error {
 	s.logger.Debug("deleting post", "post_id", id)
 
-	query := `DELETE FROM posts WHERE id = ?`
-
-	_, err := s.db.ExecContext(ctx, query, id)
+	_, err := s.db.ExecContext(ctx, queryDeletePost, id)
 	if err != nil {
-		return &DatabaseError{Operation: "DeletePost", Message: fmt.Sprintf("failed to delete post %s", id), Err: err}
+		return &storage.DatabaseError{Operation: "DeletePost", Message: fmt.Sprintf("failed to delete post %s", id), Err: err}
 	}
 
 	s.logger.Debug("successfully deleted post", "post_id", id)
@@ -333,73 +251,16 @@ func (s *SQLiteStore) UpsertPosts(ctx context.Context, posts []*types.Post) erro
 	// Begin transaction
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return &TransactionError{Operation: "begin", Message: "UpsertPosts", Err: err}
+		return &storage.TransactionError{Operation: "begin", Message: "UpsertPosts", Err: err}
 	}
 
 	// Ensure rollback on error or panic (safe to call after Commit)
 	defer tx.Rollback()
 
 	// Prepare the upsert statement
-	query := `
-		INSERT INTO posts (
-			id, name, score, ups, downs, likes, created, created_utc,
-			author, author_flair_css_class, author_flair_text, clicked, domain,
-			hidden, is_self, link_flair_css_class, link_flair_text, locked,
-			media, media_embed, num_comments, over_18, permalink, saved,
-			selftext, selftext_html, subreddit, subreddit_id, thumbnail,
-			title, url, edited_is_edited, edited_timestamp, distinguished,
-			stickied, upvote_ratio, fetched_at
-		) VALUES (
-			?, ?, ?, ?, ?, ?, ?, ?,
-			?, ?, ?, ?, ?,
-			?, ?, ?, ?, ?,
-			?, ?, ?, ?, ?, ?,
-			?, ?, ?, ?, ?,
-			?, ?, ?, ?, ?,
-			?, ?, strftime('%s', 'now')
-		)
-		ON CONFLICT(id) DO UPDATE SET
-			name = excluded.name,
-			score = excluded.score,
-			ups = excluded.ups,
-			downs = excluded.downs,
-			likes = excluded.likes,
-			created = excluded.created,
-			created_utc = excluded.created_utc,
-			author = excluded.author,
-			author_flair_css_class = excluded.author_flair_css_class,
-			author_flair_text = excluded.author_flair_text,
-			clicked = excluded.clicked,
-			domain = excluded.domain,
-			hidden = excluded.hidden,
-			is_self = excluded.is_self,
-			link_flair_css_class = excluded.link_flair_css_class,
-			link_flair_text = excluded.link_flair_text,
-			locked = excluded.locked,
-			media = excluded.media,
-			media_embed = excluded.media_embed,
-			num_comments = excluded.num_comments,
-			over_18 = excluded.over_18,
-			permalink = excluded.permalink,
-			saved = excluded.saved,
-			selftext = excluded.selftext,
-			selftext_html = excluded.selftext_html,
-			subreddit = excluded.subreddit,
-			subreddit_id = excluded.subreddit_id,
-			thumbnail = excluded.thumbnail,
-			title = excluded.title,
-			url = excluded.url,
-			edited_is_edited = excluded.edited_is_edited,
-			edited_timestamp = excluded.edited_timestamp,
-			distinguished = excluded.distinguished,
-			stickied = excluded.stickied,
-			upvote_ratio = excluded.upvote_ratio,
-			fetched_at = strftime('%s', 'now')
-	`
-
-	stmt, err := tx.PrepareContext(ctx, query)
+	stmt, err := tx.PrepareContext(ctx, queryUpsertPost)
 	if err != nil {
-		return &DatabaseError{
+		return &storage.DatabaseError{
 			Operation: "UpsertPosts",
 			Message:   "failed to prepare statement",
 			Err:       err,
@@ -410,12 +271,12 @@ func (s *SQLiteStore) UpsertPosts(ctx context.Context, posts []*types.Post) erro
 	// Execute statement for each post
 	for i, post := range posts {
 		if post == nil {
-			return &ValidationError{Operation: "UpsertPosts", Field: fmt.Sprintf("posts[%d]", i), Reason: "post cannot be nil"}
+			return &storage.ValidationError{Operation: "UpsertPosts", Field: fmt.Sprintf("posts[%d]", i), Reason: "post cannot be nil"}
 		}
 		args := postToInsertArgs(post)
 		_, err := stmt.ExecContext(ctx, args...)
 		if err != nil {
-			return &DatabaseError{
+			return &storage.DatabaseError{
 				Operation: "UpsertPosts",
 				Message:   fmt.Sprintf("failed to insert post %s", post.ID),
 				Err:       err,
@@ -425,7 +286,7 @@ func (s *SQLiteStore) UpsertPosts(ctx context.Context, posts []*types.Post) erro
 
 	// Commit transaction
 	if err := tx.Commit(); err != nil {
-		return &TransactionError{Operation: "commit", Message: "UpsertPosts", Err: err}
+		return &storage.TransactionError{Operation: "commit", Message: "UpsertPosts", Err: err}
 	}
 
 	s.logger.Debug("successfully upserted posts batch", "count", len(posts))
