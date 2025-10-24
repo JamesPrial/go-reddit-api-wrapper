@@ -187,6 +187,71 @@ go run ./cmd/examples/monitor
 go run ./cmd/examples/analyzer
 ```
 
+## Performance Testing & Benchmarks
+
+This project includes comprehensive benchmark suites to measure performance characteristics:
+
+### Unit Benchmarks
+
+Measure internal component performance using mock HTTP servers:
+
+```bash
+# Run all unit benchmarks
+go test -bench=. ./...
+
+# Run benchmarks for specific packages
+go test -bench=. ./reddit/internal/auth    # Authentication benchmarks
+go test -bench=. ./reddit/internal/client  # HTTP client benchmarks
+go test -bench=. ./reddit/internal/parse   # Response parsing benchmarks
+
+# Run scenario benchmarks (realistic workflows)
+go test -bench=BenchmarkScenario ./reddit
+```
+
+### End-to-End Benchmarks
+
+**NEW**: E2E benchmarks test against Reddit's real API infrastructure to measure actual performance characteristics.
+
+#### Prerequisites
+
+E2E benchmarks require Reddit API credentials:
+
+```bash
+export REDDIT_CLIENT_ID="your-client-id"
+export REDDIT_CLIENT_SECRET="your-client-secret"
+```
+
+#### Running E2E Benchmarks
+
+```bash
+# Run all E2E benchmarks
+go test -bench=. ./benchmarks/e2e -benchmem
+
+# Run specific benchmark categories
+go test -bench=BenchmarkE2E_Auth ./benchmarks/e2e          # Authentication flow
+go test -bench=BenchmarkE2E_RateLimit ./benchmarks/e2e    # Rate limiting behavior
+go test -bench=BenchmarkE2E_Pagination ./benchmarks/e2e   # Pagination patterns
+go test -bench=BenchmarkE2E_GetHot ./benchmarks/e2e       # API endpoint performance
+
+# Run with limited iterations to conserve API quota
+go test -bench=. -benchtime=5x ./benchmarks/e2e -benchmem
+```
+
+#### E2E Benchmark Categories
+
+- **API Endpoints**: Real-world performance of GetHot, GetNew, GetComments, GetSubreddit
+- **Authentication**: Token acquisition, caching, concurrent access, thundering herd protection
+- **Rate Limiting**: Header processing, throttling behavior, burst vs sustained requests
+- **Pagination**: Cursor handling, large datasets, page size efficiency
+
+**Important Notes**:
+- E2E benchmarks make real API calls and consume your Reddit API quota
+- Reddit's rate limit is 600 requests per 10 minutes for OAuth2 apps
+- Some benchmarks may take several minutes to complete
+- Results depend on network conditions and Reddit server load
+
+For detailed E2E benchmark documentation, see [`benchmarks/e2e/README.md`](benchmarks/e2e/README.md).
+
 ## Real-World Usage Examples
 
 ### 1. Monitoring a Subreddit for New Posts
