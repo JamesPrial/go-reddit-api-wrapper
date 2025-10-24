@@ -145,6 +145,9 @@ jobs:
 
     - name: Copy custom assets and landing page
       run: |
+        # Fetch main branch to access custom files
+        git fetch origin main:main
+
         # Copy custom CSS and landing page from main branch
         git checkout main -- .github/pages/
         mkdir -p assets
