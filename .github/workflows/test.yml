@@ -106,7 +106,7 @@ jobs:
       run: |
         # Run only the fastest scenario benchmark variants to keep CI time reasonable
         # Includes: fast_poll, small/medium sizes, sequential variants, short iterations
-        go test -bench="BenchmarkScenario_(MonitorSubreddit/(fast_poll|medium_poll)|AnalyzeThread/(shallow|deep_no_more)|BulkFetch/small|UserActivityTracking/recent|TrendingTopics/3subs.*sequential|ConcurrentFetch/(3subs|5subs_25posts_sequential)|ContextCancellation/(immediate|no_cancel))" \
+        go test -bench="BenchmarkScenario_(MonitorSubreddit/(fast_poll|medium_poll)|AnalyzeThread/(shallow_no_more|deep_no_more)|BulkFetch/small_.*posts|UserActivityTracking/recent|TrendingTopics/3subs.*sequential|ConcurrentFetch/(3subs.*concurrent|5subs.*sequential)|ContextCancellation/(immediate|no_cancel))" \
           -benchmem -benchtime=1s \
           ./reddit \
           -run=^$ | tee benchmark-e2e.txt
