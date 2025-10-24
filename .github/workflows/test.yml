@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [ main ]
 
+permissions:
+  contents: write  # Required for pushing to gh-pages branch
+  pages: write     # Required for GitHub Pages deployment
+  id-token: write  # Required for GitHub Pages OIDC token
+
 jobs:
   test:
     name: Test
@@ -34,3 +39,93 @@ jobs:
         go build -o reddit-example-basic ./cmd/examples/basic
         go build -o reddit-example-monitor ./cmd/examples/monitor
         go build -o reddit-example-analyzer ./cmd/examples/analyzer
+
+  benchmark-unit:
+    name: Unit Benchmarks
+    needs: test
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.25'
+
+    - name: Run unit benchmarks
+      run: |
+        # Run fast unit-level benchmarks (excluding slow HTTP integration benchmarks)
+        go test -bench=. -benchmem -benchtime=3s \
+          ./pkg/validation \
+          ./reddit/internal/auth \
+          ./reddit/internal/parse \
+          -run=^$ | tee benchmark-unit.txt
+
+        # Run fast HTTP client benchmarks (excluding BenchmarkClient_DoRequest and BenchmarkConcurrentRequests)
+        go test -bench="^Benchmark(BufferPool|RateLimit|Client_NewRequest|ResponseBody|JSON|Extract|Truncate|BuildLimiter|DeferRequests)" \
+          -benchmem -benchtime=3s \
+          ./reddit/internal/client \
+          -run=^$ | tee -a benchmark-unit.txt
+
+    - name: Upload benchmark results
+      uses: actions/upload-artifact@v4
+      with:
+        name: benchmark-unit-results
+        path: benchmark-unit.txt
+        retention-days: 30
+
+    - name: Store benchmark result
+      uses: benchmark-action/github-action-benchmark@v1
+      with:
+        tool: 'go'
+        output-file-path: benchmark-unit.txt
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        auto-push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        alert-threshold: '110%'
+        comment-on-alert: true
+        fail-on-alert: false
+        benchmark-data-dir-path: 'benchmarks/unit'
+
+  benchmark-e2e:
+    name: E2E Scenario Benchmarks
+    needs: test
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.25'
+
+    - name: Run E2E scenario benchmarks
+      run: |
+        # Run only the fastest scenario benchmark variants to keep CI time reasonable
+        # Includes: fast_poll, small/medium sizes, sequential variants, short iterations
+        go test -bench="BenchmarkScenario_(MonitorSubreddit/(fast_poll|medium_poll)|AnalyzeThread/(shallow|deep_no_more)|BulkFetch/small|UserActivityTracking/recent|TrendingTopics/3subs.*sequential|ConcurrentFetch/(3subs|5subs_25posts_sequential)|ContextCancellation/(immediate|no_cancel))" \
+          -benchmem -benchtime=1s \
+          ./reddit \
+          -run=^$ | tee benchmark-e2e.txt
+
+    - name: Upload benchmark results
+      uses: actions/upload-artifact@v4
+      with:
+        name: benchmark-e2e-results
+        path: benchmark-e2e.txt
+        retention-days: 30
+
+    - name: Store benchmark result
+      uses: benchmark-action/github-action-benchmark@v1
+      with:
+        tool: 'go'
+        output-file-path: benchmark-e2e.txt
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        auto-push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        alert-threshold: '115%'
+        comment-on-alert: true
+        fail-on-alert: false
+        benchmark-data-dir-path: 'benchmarks/e2e'

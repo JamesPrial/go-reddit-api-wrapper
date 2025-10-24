@@ -443,22 +443,88 @@ go test -bench=ContextCancellation -v ./reddit
 
 ### GitHub Actions Workflow
 
-Benchmarks run automatically on pull requests to detect performance regressions:
+Benchmarks run automatically in GitHub Actions with two separate jobs:
 
-```yaml
-- name: Run Benchmarks
-  run: |
-    go test -bench=. -benchmem -benchtime=1s ./reddit ./benchmarks/comparative
-```
+**Unit Benchmarks** (`benchmark-unit` job):
+- Runs fast unit-level benchmarks from internal packages
+- Excludes slow HTTP integration benchmarks
+- Command:
+  ```bash
+  go test -bench=. -benchmem -benchtime=3s \
+    ./pkg/validation \
+    ./reddit/internal/auth \
+    ./reddit/internal/parse \
+    -run=^$
 
-**Performance Gates**: CI fails if:
+  go test -bench="^Benchmark(BufferPool|RateLimit|Client_NewRequest|ResponseBody|JSON|Extract|Truncate|BuildLimiter|DeferRequests)" \
+    -benchmem -benchtime=3s \
+    ./reddit/internal/client \
+    -run=^$
+  ```
+
+**E2E Scenario Benchmarks** (`benchmark-e2e` job):
+- Runs comprehensive scenario benchmarks
+- Only includes fast scenario variants
+- Command:
+  ```bash
+  go test -bench="BenchmarkScenario_(MonitorSubreddit/(fast_poll|medium_poll)|AnalyzeThread/(shallow|deep_no_more)|BulkFetch/small|UserActivityTracking/recent|TrendingTopics/3subs.*sequential|ConcurrentFetch/(3subs|5subs_25posts_sequential)|ContextCancellation/(immediate|no_cancel))" \
+    -benchmem -benchtime=1s \
+    ./reddit \
+    -run=^$
+  ```
+
+### Performance Tracking with GitHub Pages
+
+Benchmark results are automatically tracked over time and published to GitHub Pages:
+
+**Setup (One-time)**:
+1. Go to repository **Settings** > **Pages**
+2. Under **Source**, select:
+   - Branch: `gh-pages`
+   - Folder: `/ (root)`
+3. Click **Save**
+
+**Viewing Results**:
+- Visit: `https://YOUR_USERNAME.github.io/go-reddit-api-wrapper/`
+- Two separate dashboards:
+  - `/benchmarks/unit/` - Unit benchmark trends
+  - `/benchmarks/e2e/` - E2E scenario benchmark trends
+
+**Features**:
+- 📊 Interactive charts showing performance over time
+- 📈 Trend visualization for ns/op, B/op, and allocs/op metrics
+- 🔔 Automated alerts when performance degrades >10% (unit) or >15% (E2E)
+- 💬 PR comments when significant regressions are detected
+- 📥 Raw benchmark results available as GitHub Actions artifacts (30-day retention)
+
+### Performance Gates
+
+**CI Fails If**:
 - Any benchmark returns an error
 - Race detector finds data races (when enabled)
 - Build fails with benchmark code
 
+**CI Warns (but doesn't fail) If**:
+- Unit benchmarks show >10% performance degradation
+- E2E benchmarks show >15% performance degradation
+- Allocation counts increase significantly
+
 **Not Enforced** (by design):
-- Absolute performance numbers (hardware varies)
-- Allocation counts (minor variations acceptable)
+- Absolute performance numbers (hardware varies between CI runs)
+- Minor allocation variations (<5%)
+
+### Downloading Benchmark Results
+
+Raw benchmark output is available as CI artifacts:
+
+1. Go to **Actions** tab in GitHub
+2. Click on the workflow run
+3. Scroll to **Artifacts** section
+4. Download:
+   - `benchmark-unit-results` - Unit benchmark output
+   - `benchmark-e2e-results` - E2E benchmark output
+
+Artifacts are retained for 30 days.
 
 ### Local Pre-Push Checks
 
@@ -468,11 +534,21 @@ Run these before pushing to ensure CI will pass:
 # Run full test suite with race detector
 go test -race ./...
 
-# Run benchmarks (catches build errors)
-go test -bench=. -benchmem ./reddit ./benchmarks/comparative
+# Run unit benchmarks (as CI does)
+go test -bench=. -benchmem -benchtime=3s \
+  ./pkg/validation \
+  ./reddit/internal/auth \
+  ./reddit/internal/parse \
+  -run=^$
+
+# Run E2E benchmarks (fast variants)
+go test -bench="BenchmarkScenario_(MonitorSubreddit/(fast_poll|medium_poll)|AnalyzeThread/shallow)" \
+  -benchmem -benchtime=1s \
+  ./reddit \
+  -run=^$
 
 # Run with timeout to catch hangs
-go test -bench=. -benchmem -timeout=10m ./reddit ./benchmarks/comparative
+go test -bench=. -benchmem -timeout=10m ./reddit
 ```
 
 ## Best Practices
