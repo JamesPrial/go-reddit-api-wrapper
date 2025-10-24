@@ -106,7 +106,7 @@ jobs:
       run: |
         # Run only the fastest scenario benchmark variants to keep CI time reasonable
         # Includes: fast_poll, medium_poll, small sizes, recent activity, sequential/concurrent patterns
-        go test -bench="BenchmarkScenario_MonitorSubreddit/fast_poll|BenchmarkScenario_MonitorSubreddit/medium_poll|BenchmarkScenario_AnalyzeThread/shallow_no_more|BenchmarkScenario_AnalyzeThread/deep_no_more|BenchmarkScenario_BulkFetch/small_5posts|BenchmarkScenario_BulkFetch/small_10posts|BenchmarkScenario_UserActivityTracking/recent_10posts|BenchmarkScenario_TrendingTopics/3subs_10posts_sequential|BenchmarkScenario_ConcurrentFetch/3subs_25posts_concurrent|BenchmarkScenario_ConcurrentFetch/5subs_25posts_sequential|BenchmarkScenario_ContextCancellation/immediate_cancel|BenchmarkScenario_ContextCancellation/no_cancel" \
+        go test -bench="BenchmarkScenario_MonitorSubreddit/fast_poll.*|BenchmarkScenario_MonitorSubreddit/medium_poll.*|BenchmarkScenario_AnalyzeThread/shallow_no_more.*|BenchmarkScenario_AnalyzeThread/deep_no_more.*|BenchmarkScenario_BulkFetch/small_.*|BenchmarkScenario_UserActivityTracking/recent.*|BenchmarkScenario_TrendingTopics/3subs_10posts_sequential.*|BenchmarkScenario_ConcurrentFetch/3subs_25posts_concurrent.*|BenchmarkScenario_ConcurrentFetch/5subs_25posts_sequential.*|BenchmarkScenario_ContextCancellation/immediate.*|BenchmarkScenario_ContextCancellation/no_cancel.*" \
           -benchmem -benchtime=1s \
           ./reddit \
           -run=^$ | tee benchmark-e2e.txt
