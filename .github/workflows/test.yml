@@ -129,3 +129,53 @@ jobs:
         comment-on-alert: true
         fail-on-alert: false
         benchmark-data-dir-path: 'benchmarks/e2e'
+
+  customize-pages:
+    name: Customize GitHub Pages
+    needs: [benchmark-unit, benchmark-e2e]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+    - name: Checkout gh-pages branch
+      uses: actions/checkout@v4
+      with:
+        ref: gh-pages
+        fetch-depth: 0
+
+    - name: Copy custom assets and landing page
+      run: |
+        # Copy custom CSS and landing page from main branch
+        git checkout main -- .github/pages/
+        mkdir -p assets
+        cp .github/pages/assets/custom-benchmark.css assets/
+        cp .github/pages/index.html index.html
+        rm -rf .github
+
+    - name: Inject custom CSS into benchmark pages
+      run: |
+        # Inject custom CSS link into unit benchmark page
+        if [ -f "benchmarks/unit/index.html" ]; then
+          sed -i '/<head>/a \    <link rel="stylesheet" href="../../assets/custom-benchmark.css">' benchmarks/unit/index.html
+          # Add header navigation
+          sed -i '/<body>/a \  <div class="benchmark-header">\n    <div class="container">\n      <h1>Unit Benchmarks</h1>\n      <nav>\n        <a href="../../">Dashboard</a>\n        <a href="./" class="active">Unit</a>\n        <a href="../e2e/">E2E</a>\n      </nav>\n    </div>\n  </div>' benchmarks/unit/index.html
+        fi
+
+        # Inject custom CSS link into E2E benchmark page
+        if [ -f "benchmarks/e2e/index.html" ]; then
+          sed -i '/<head>/a \    <link rel="stylesheet" href="../../assets/custom-benchmark.css">' benchmarks/e2e/index.html
+          # Add header navigation
+          sed -i '/<body>/a \  <div class="benchmark-header">\n    <div class="container">\n      <h1>E2E Scenario Benchmarks</h1>\n      <nav>\n        <a href="../../">Dashboard</a>\n        <a href="../unit/">Unit</a>\n        <a href="./" class="active">E2E</a>\n      </nav>\n    </div>\n  </div>' benchmarks/e2e/index.html
+        fi
+
+    - name: Commit and push customizations
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git add -A
+        if ! git diff --staged --quiet; then
+          git commit -m "style: apply custom styling to benchmark pages"
+          git push origin gh-pages
+        else
+          echo "No changes to commit"
+        fi

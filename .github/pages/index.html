@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Benchmark Performance Dashboard - Go Reddit API Wrapper</title>
+  <link rel="stylesheet" href="./assets/custom-benchmark.css">
+  <style>
+    .hero {
+      background: linear-gradient(135deg, #0969da 0%, #0860ca 100%);
+      color: white;
+      padding: 4rem 0;
+      text-align: center;
+      margin: -48px -24px 48px -24px;
+      border-radius: 0 0 16px 16px;
+    }
+
+    .hero h1 {
+      margin: 0 0 1rem 0;
+      font-size: 2.5rem;
+      font-weight: 700;
+    }
+
+    .hero p {
+      margin: 0;
+      font-size: 1.25rem;
+      opacity: 0.9;
+    }
+
+    .dashboard-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+      gap: 2rem;
+      margin: 3rem 0;
+    }
+
+    .dashboard-card {
+      background: var(--bg-primary);
+      border: 2px solid var(--border-color);
+      border-radius: 12px;
+      padding: 2rem;
+      text-align: center;
+      transition: all 0.3s ease;
+      text-decoration: none;
+      color: inherit;
+      display: block;
+    }
+
+    .dashboard-card:hover {
+      border-color: var(--primary-color);
+      box-shadow: 0 8px 24px rgba(9, 105, 218, 0.15);
+      transform: translateY(-4px);
+    }
+
+    .dashboard-card h2 {
+      margin: 0 0 1rem 0;
+      font-size: 1.5rem;
+      font-weight: 600;
+      color: var(--primary-color);
+    }
+
+    .dashboard-card p {
+      margin: 0 0 1.5rem 0;
+      color: var(--text-secondary);
+      line-height: 1.6;
+    }
+
+    .dashboard-card .icon {
+      font-size: 3rem;
+      margin-bottom: 1rem;
+    }
+
+    .features {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 1.5rem;
+      margin: 3rem 0;
+    }
+
+    .feature {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 1.5rem;
+    }
+
+    .feature h3 {
+      margin: 0 0 0.5rem 0;
+      font-size: 1.125rem;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .feature p {
+      margin: 0;
+      font-size: 0.875rem;
+      color: var(--text-secondary);
+      line-height: 1.5;
+    }
+
+    .cta-section {
+      background: var(--bg-primary);
+      border: 2px solid var(--border-color);
+      border-radius: 12px;
+      padding: 2rem;
+      text-align: center;
+      margin: 3rem 0;
+    }
+
+    .cta-section h2 {
+      margin: 0 0 1rem 0;
+      font-size: 1.5rem;
+      color: var(--text-primary);
+    }
+
+    .cta-section p {
+      margin: 0 0 1.5rem 0;
+      color: var(--text-secondary);
+    }
+
+    @media (max-width: 768px) {
+      .hero {
+        padding: 2rem 1rem;
+        margin: -24px -16px 32px -16px;
+      }
+
+      .hero h1 {
+        font-size: 1.75rem;
+      }
+
+      .hero p {
+        font-size: 1rem;
+      }
+
+      .dashboard-grid {
+        grid-template-columns: 1fr;
+        gap: 1.5rem;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="hero">
+    <div class="container">
+      <h1>Performance Benchmark Dashboard</h1>
+      <p>Continuous performance tracking for Go Reddit API Wrapper</p>
+    </div>
+  </div>
+
+  <div class="container">
+    <div class="info-box">
+      <h3>About This Dashboard</h3>
+      <p>
+        This dashboard tracks the performance of the Go Reddit API Wrapper over time.
+        Benchmarks are automatically run on every push to the main branch, allowing us to
+        catch performance regressions early and ensure the library remains fast and efficient.
+      </p>
+    </div>
+
+    <h2 style="margin: 3rem 0 1rem 0; font-size: 1.75rem; font-weight: 600;">Benchmark Dashboards</h2>
+
+    <div class="dashboard-grid">
+      <a href="./benchmarks/unit/" class="dashboard-card">
+        <div class="icon">⚡</div>
+        <h2>Unit Benchmarks</h2>
+        <p>
+          Fast, focused benchmarks for individual components including validation,
+          authentication, parsing, and HTTP client operations.
+        </p>
+        <span class="btn">View Unit Benchmarks →</span>
+      </a>
+
+      <a href="./benchmarks/e2e/" class="dashboard-card">
+        <div class="icon">🔄</div>
+        <h2>E2E Scenario Benchmarks</h2>
+        <p>
+          Real-world scenario benchmarks simulating complete workflows like monitoring
+          subreddits, analyzing threads, and concurrent fetching patterns.
+        </p>
+        <span class="btn">View E2E Benchmarks →</span>
+      </a>
+    </div>
+
+    <h2 style="margin: 3rem 0 1rem 0; font-size: 1.75rem; font-weight: 600;">Features</h2>
+
+    <div class="features">
+      <div class="feature">
+        <h3>📊 Historical Tracking</h3>
+        <p>
+          View performance trends over time with interactive charts that show how
+          each benchmark evolves across commits.
+        </p>
+      </div>
+
+      <div class="feature">
+        <h3>🎯 Performance Alerts</h3>
+        <p>
+          Automatic alerts when benchmarks regress by more than 10% (unit) or 15% (E2E),
+          helping catch issues before they reach production.
+        </p>
+      </div>
+
+      <div class="feature">
+        <h3>💾 Detailed Metrics</h3>
+        <p>
+          Track execution time, memory allocations, and bytes allocated per operation
+          to understand performance characteristics.
+        </p>
+      </div>
+
+      <div class="feature">
+        <h3>🔍 Commit-Level Detail</h3>
+        <p>
+          Click any data point to view the commit, author, and changes that affected
+          that benchmark run.
+        </p>
+      </div>
+    </div>
+
+    <div class="cta-section">
+      <h2>Want to Run Benchmarks Locally?</h2>
+      <p>
+        You can run these benchmarks on your own machine to test changes before pushing.
+      </p>
+      <code style="background: var(--bg-secondary); padding: 0.5rem 1rem; border-radius: 6px; display: inline-block; font-size: 0.875rem;">
+        go test -bench=. -benchmem ./...
+      </code>
+    </div>
+
+    <div class="benchmark-footer">
+      <p>
+        Generated by <a href="https://github.com/benchmark-action/github-action-benchmark" target="_blank">github-action-benchmark</a>
+        | View the <a href="https://github.com/jamesprial/go-reddit-api-wrapper" target="_blank">source code on GitHub</a>
+      </p>
+    </div>
+  </div>
+</body>
+</html>
