@@ -51,7 +51,7 @@ type Config struct {
 	ConnMaxLifetime time.Duration
 
 	// MigrationsPath specifies the directory containing migration files
-	// Default: "storage/postgres/migrations"
+	// Default: "storage/backends/postgres/migrations"
 	MigrationsPath string
 
 	// Logger for structured logging
@@ -106,13 +106,4 @@ func (s *PostgresStore) Close() error {
 // This is a stub implementation.
 func (s *PostgresStore) Ping(ctx context.Context) error {
 	return fmt.Errorf("PostgreSQL storage not yet implemented")
-}
-
-// init registers the PostgreSQL factory with the storage package.
-// This allows storage.New() to automatically use PostgreSQL when the driver
-// is set to "postgres", "postgresql", or "pgx".
-func init() {
-	storage.RegisterFactory("postgres", NewStore)
-	storage.RegisterFactory("postgresql", NewStore)
-	storage.RegisterFactory("pgx", NewStore)
 }

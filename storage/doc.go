@@ -15,8 +15,8 @@ The storage package defines interfaces that all storage backends must implement:
 
 Currently supported storage backends:
 
-  - SQLite (storage/sqlite): Lightweight, file-based or in-memory storage
-  - PostgreSQL (storage/postgres): Enterprise-grade relational database (stub implementation)
+  - SQLite (storage/backends/sqlite): Lightweight, file-based or in-memory storage
+  - PostgreSQL (storage/backends/postgres): Enterprise-grade relational database (stub implementation)
 
 # Usage
 
@@ -29,7 +29,7 @@ Note: You must import the desired backend subpackage (even with blank import) to
 
 	import (
 		"github.com/jamesprial/go-reddit-api-wrapper/storage"
-		_ "github.com/jamesprial/go-reddit-api-wrapper/storage/sqlite"  // Register SQLite backend
+		_ "github.com/jamesprial/go-reddit-api-wrapper/storage/backends/sqlite"  // Register SQLite backend
 	)
 
 	cfg := storage.Config{
@@ -47,21 +47,29 @@ Note: You must import the desired backend subpackage (even with blank import) to
 	// Use the store
 	post, err := store.GetPost(context.Background(), "abc123")
 
-## Direct Import (Explicit Control)
+## Auto-Detection vs Explicit Driver
 
-Import a specific backend package directly for explicit control:
+You can either specify the driver explicitly or let the factory auto-detect from the DSN pattern:
 
 	import (
 		"github.com/jamesprial/go-reddit-api-wrapper/storage"
-		"github.com/jamesprial/go-reddit-api-wrapper/storage/sqlite"
+		_ "github.com/jamesprial/go-reddit-api-wrapper/storage/backends/sqlite"
 	)
 
+	// Auto-detection (DSN pattern determines driver)
 	cfg := storage.Config{
+		DSN:    ":memory:",  // Detected as sqlite
+		Logger: slog.Default(),
+	}
+
+	// Explicit driver (recommended for clarity)
+	cfg = storage.Config{
+		Driver: "sqlite",  // Explicitly specify driver
 		DSN:    "reddit.db",
 		Logger: slog.Default(),
 	}
 
-	store, err := sqlite.NewStore(context.Background(), cfg)
+	store, err := storage.New(context.Background(), cfg)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -108,10 +116,10 @@ The factory pattern uses a generic registry (storage/internal.Registry) for type
 backend registration. Backends register themselves in their init() functions using
 storage.RegisterFactory():
 
-	// In storage/sqlite/sqlite.go
+	// In storage/backends/sqlite/register.go
 	func init() {
-		storage.RegisterFactory("sqlite", NewStore)
-		storage.RegisterFactory("sqlite3", NewStore)
+		storage.RegisterFactory("sqlite", newStoreFactory)
+		storage.RegisterFactory("sqlite3", newStoreFactory)
 	}
 
 The registry is thread-safe and uses read-write mutexes to allow concurrent reads
@@ -134,15 +142,14 @@ these converters from storage/internal to maintain consistency across backends.
 
 # Backend Implementation Notes
 
-Backend implementations in subpackages (storage/sqlite, storage/postgres) must:
+Backend implementations are internal and registered transparently:
 
- 1. Implement the Store interface
- 2. Provide a NewStore(ctx context.Context, cfg storage.Config) (storage.Store, error) constructor
-    that accepts storage.Config and adapts it to backend-specific needs
- 3. Register their factory function in init() using storage.RegisterFactory(driver, NewStore)
- 4. Translate internal errors to storage package error types
- 5. Handle migrations for schema versioning
- 6. Support graceful shutdown via Close()
+ 1. Backends implement the Store interface in storage/internal/{driver}/ packages
+ 2. Public registration packages (storage/backends/{driver}/) handle factory registration
+ 3. Users import the public registration package to enable backend support
+ 4. Backend implementations translate internal errors to storage package error types
+ 5. Backends handle migrations for schema versioning
+ 6. All backends support graceful shutdown via Close()
 
 See subpackage documentation for backend-specific details.
 */

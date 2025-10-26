@@ -2,15 +2,23 @@ package sqlite_test
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 	"github.com/jamesprial/go-reddit-api-wrapper/storage"
+	_ "github.com/jamesprial/go-reddit-api-wrapper/storage/backends/sqlite" // Register SQLite backend
 	"github.com/jamesprial/go-reddit-api-wrapper/storage/internal/testutil"
-	_ "github.com/jamesprial/go-reddit-api-wrapper/storage/sqlite" // Register SQLite backend
 	"github.com/stretchr/testify/require"
 )
+
+// fileExists checks if a file or directory exists
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
 
 // NewTestDB creates an in-memory SQLite database for testing.
 // It runs migrations and returns a configured store.
@@ -18,9 +26,19 @@ import (
 func NewTestDB(t *testing.T) storage.Store {
 	t.Helper()
 
-	// When running tests from the sqlite package, the CWD is storage/sqlite/,
-	// so we need to use just "migrations" as the path to find storage/sqlite/migrations
-	migrationsPath := "migrations"
+	// Compute absolute path to migrations directory
+	// This test is in storage/internal/sqlite, so we need to go up to find storage/backends/sqlite/migrations
+	cwd, err := os.Getwd()
+	require.NoError(t, err, "failed to get current working directory")
+
+	// Navigate from project root to migrations directory
+	// From the project root, migrations are at storage/backends/sqlite/migrations
+	projectRoot := cwd
+	// Find the project root by looking for the storage directory
+	for projectRoot != "/" && !fileExists(filepath.Join(projectRoot, "storage")) {
+		projectRoot = filepath.Dir(projectRoot)
+	}
+	migrationsPath := filepath.Join(projectRoot, "storage", "backends", "sqlite", "migrations")
 
 	cfg := storage.Config{
 		DSN:            ":memory:",

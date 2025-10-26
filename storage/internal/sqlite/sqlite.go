@@ -199,7 +199,7 @@ func (s *SQLiteStore) runMigrations(migrationsPath string) error {
 
 	// Use default migrations path if not specified
 	if migrationsPath == "" {
-		migrationsPath = "storage/sqlite/migrations"
+		migrationsPath = "storage/backends/sqlite/migrations"
 	}
 
 	// Convert to absolute path if it's not already absolute
@@ -256,11 +256,4 @@ func (s *SQLiteStore) Ping(ctx context.Context) error {
 		return &storage.DatabaseError{Operation: "Ping", Message: "database ping failed", Err: err}
 	}
 	return nil
-}
-
-// init registers the SQLite factory with the storage package.
-// This allows storage.New() to automatically use SQLite when the driver is set to "sqlite" or "sqlite3".
-func init() {
-	storage.RegisterFactory("sqlite", NewStore)
-	storage.RegisterFactory("sqlite3", NewStore)
 }
