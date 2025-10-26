@@ -187,14 +187,6 @@ func newPostScanDest() *postScanDest {
 	return &postScanDest{}
 }
 
-// postToScanDest returns a slice of pointers to all Post fields in the exact order
-// they appear in SQL SELECT statements.
-// Deprecated: Use newPostScanDest() instead, which properly handles nullable SQL types.
-func postToScanDest(p *types.Post) []interface{} {
-	dest := newPostScanDest()
-	return dest.dest()
-}
-
 // scanToPost reconstructs a Post from scanned SQL values. It handles all type conversions
 // and null values, returning an error if any value is invalid.
 //
