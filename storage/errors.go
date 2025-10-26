@@ -196,3 +196,27 @@ func (e *ConflictError) Error() string {
 	}
 	return msg
 }
+
+// DriverError indicates an issue with storage driver registration or support.
+// This includes cases where a driver is not registered (missing import of backend package)
+// or when an unsupported driver name is provided.
+type DriverError struct {
+	// Driver is the name of the driver that caused the error
+	Driver string
+	// Backend is the name of the backend that caused the error
+	Backend string
+	// Reason describes why the driver error occurred
+	Reason string
+}
+
+func (e *DriverError) Error() string {
+	msg := fmt.Sprintf("driver error for %q", e.Driver)
+	if e.Backend != "" {
+		msg += fmt.Sprintf(" - using backend: %q", e.Backend)
+	}
+	if e.Reason != "" {
+		msg += fmt.Sprintf(" - %s", e.Reason)
+	}
+
+	return msg
+}

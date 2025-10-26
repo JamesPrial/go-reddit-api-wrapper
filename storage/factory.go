@@ -2,7 +2,6 @@ package storage
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"strings"
 	"time"
@@ -73,11 +72,22 @@ func New(ctx context.Context, cfg Config) (Store, error) {
 	// Provide helpful error for known drivers that aren't registered
 	switch driver {
 	case "sqlite", "sqlite3":
-		return nil, fmt.Errorf("SQLite driver not registered; ensure the storage/backends/sqlite subpackage is imported in your main package with 'import _ \"github.com/jamesprial/go-reddit-api-wrapper/storage/backends/sqlite\"'")
+		return nil, &DriverError{
+			Driver:  driver,
+			Backend: "sqlite",
+			Reason:  "driver not registered",
+		}
 	case "postgres", "postgresql", "pgx":
-		return nil, fmt.Errorf("PostgreSQL driver not registered; ensure the storage/backends/postgres subpackage is imported in your main package with 'import _ \"github.com/jamesprial/go-reddit-api-wrapper/storage/backends/postgres\"'")
+		return nil, &DriverError{
+			Driver:  driver,
+			Backend: "postgres",
+			Reason:  "driver not registered",
+		}
 	default:
-		return nil, fmt.Errorf("unsupported storage driver: %s", driver)
+		return nil, &DriverError{
+			Driver: driver,
+			Reason: "unsupported driver",
+		}
 	}
 }
 
