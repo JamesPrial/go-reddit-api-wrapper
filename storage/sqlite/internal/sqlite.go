@@ -207,7 +207,7 @@ func (s *SQLiteStore) runMigrations(migrationsPath string) error {
 
 	// Use default migrations path if not specified
 	if migrationsPath == "" {
-		migrationsPath = "storage/backends/sqlite/migrations"
+		migrationsPath = DEFAULT_MIGRATIONS_PATH
 	}
 
 	// Convert to absolute path if it's not already absolute
