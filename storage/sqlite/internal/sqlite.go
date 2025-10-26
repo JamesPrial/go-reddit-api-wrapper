@@ -16,6 +16,14 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
+const (
+	DEFAULT_DB_PATH         = "reddit.db"
+	DEFAULT_MAX_OPEN_CONNS  = 10
+	DEFAULT_MAX_IDLE_CONNS  = 5
+	DEFAULT_CONN_MAX_LIFE   = 0
+	DEFAULT_MIGRATIONS_PATH = "storage/sqlite/migrations"
+)
+
 // Config holds configuration options for SQLiteStore.
 // All fields have sensible defaults if left as zero values.
 type Config struct {
@@ -46,7 +54,7 @@ type Config struct {
 	ConnMaxLife time.Duration
 
 	// MigrationsPath specifies the directory containing migration files.
-	// If empty, defaults to "storage/migrations" relative to the working directory.
+	// If empty, defaults to DEFAULT_MIGRATIONS_PATH.
 	// This can be overridden for testing or when migrations are in a non-standard location.
 	MigrationsPath string
 
@@ -92,17 +100,17 @@ func NewSQLiteStore(cfg *Config) (*SQLiteStore, error) {
 	// Apply default values
 	dbPath := cfg.DBPath
 	if dbPath == "" {
-		dbPath = "reddit.db"
+		dbPath = DEFAULT_DB_PATH
 	}
 
 	maxOpenConns := cfg.MaxOpenConns
 	if maxOpenConns <= 0 {
-		maxOpenConns = 10
+		maxOpenConns = DEFAULT_MAX_OPEN_CONNS
 	}
 
 	maxIdleConns := cfg.MaxIdleConns
 	if maxIdleConns <= 0 {
-		maxIdleConns = 5
+		maxIdleConns = DEFAULT_MAX_IDLE_CONNS
 	}
 
 	logger := cfg.Logger
