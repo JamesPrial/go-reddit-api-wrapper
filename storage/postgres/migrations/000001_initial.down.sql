@@ -1,0 +1,51 @@
+-- PostgreSQL Schema Migration Rollback - STUB
+-- This is a placeholder rollback migration for the PostgreSQL storage backend
+--
+-- TODO: Implement the complete schema rollback with:
+--
+-- 1. Drop dependent tables first:
+--    - Drop closure table (no foreign key dependencies on it)
+--    - Drop comments table (has foreign key to posts table)
+--
+-- 2. Drop main tables:
+--    - Drop posts table (referenced by comments via foreign key)
+--
+-- 3. Drop any sequences (for auto-increment primary keys if used)
+--    - Note: VARCHAR(36) with UUID generation doesn't need sequences
+--
+-- 4. Drop any custom types or functions created in the up migration
+--
+-- Example Rollback Statements (PostgreSQL):
+--
+--   -- Drop indexes explicitly (some may be dropped automatically with CASCADE)
+--   DROP INDEX IF EXISTS idx_closure_descendant;
+--   DROP INDEX IF EXISTS idx_comments_depth;
+--   DROP INDEX IF EXISTS idx_comments_parent_id;
+--   DROP INDEX IF EXISTS idx_comments_created_utc;
+--   DROP INDEX IF EXISTS idx_comments_author;
+--   DROP INDEX IF EXISTS idx_comments_post_id;
+--   DROP INDEX IF EXISTS idx_posts_fetched_at;
+--   DROP INDEX IF EXISTS idx_posts_created_utc;
+--   DROP INDEX IF EXISTS idx_posts_author;
+--   DROP INDEX IF EXISTS idx_posts_subreddit;
+--
+--   -- Drop tables with CASCADE to remove foreign key dependencies
+--   DROP TABLE IF EXISTS comment_closure CASCADE;
+--   DROP TABLE IF EXISTS comments CASCADE;
+--   DROP TABLE IF EXISTS posts CASCADE;
+--
+-- Important Notes:
+--
+-- - Use CASCADE to automatically drop dependent objects (but be careful!)
+-- - In production, prefer explicit drops of all objects
+-- - Consider adding IF EXISTS clauses for safety
+-- - Order matters: drop dependent tables before referenced tables
+--   (PostgreSQL will enforce this with the cascade option)
+--
+-- For Migration Tool (golang-migrate):
+-- - This file will be automatically run when rolling back the migration
+-- - Must be idempotent (safe to run multiple times)
+-- - Should clean up all objects created in the up migration
+
+-- Placeholder: rollback statements to be implemented
+-- SELECT 1; -- This query should be replaced with actual DDL statements

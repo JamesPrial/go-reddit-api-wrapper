@@ -1,0 +1,121 @@
+-- PostgreSQL Schema Migration - STUB
+-- This is a placeholder migration for the PostgreSQL storage backend
+--
+-- TODO: Implement the complete PostgreSQL schema with:
+--
+-- 1. Posts Table:
+--    - Use BIGINT for numeric IDs (created_utc, created)
+--    - Use BOOLEAN for boolean fields instead of INTEGER
+--    - Use TIMESTAMPTZ for timestamp fields
+--    - Use JSONB for any complex/nested JSON data
+--    - Create indexes on frequently queried columns (subreddit, author, score, created_utc)
+--    - Add CHECK constraints for data validation
+--
+-- 2. Comments Table:
+--    - Similar structure to SQLite but with PostgreSQL types
+--    - Add FOREIGN KEY constraint to posts table (with ON DELETE CASCADE)
+--    - Track depth and parent relationship
+--    - Support efficient tree queries
+--
+-- 3. Closure Table (for comment tree relationships):
+--    - ancestor_id and descendant_id columns
+--    - Tracks all ancestor-descendant pairs at all depths
+--    - Enable efficient tree queries
+--    - Foreign keys to comments table with CASCADE delete
+--
+-- 4. Indexes:
+--    - B-tree indexes for id, subreddit, author, created_utc columns
+--    - Consider partial indexes for filtered queries (e.g., score > threshold)
+--    - Composite indexes for common filter combinations
+--
+-- 5. Constraints:
+--    - PRIMARY KEY constraints on id columns
+--    - FOREIGN KEY constraints for referential integrity
+--    - NOT NULL constraints for required fields
+--    - UNIQUE constraints where appropriate
+--
+-- Example Posts Table Structure (PostgreSQL):
+--
+--   CREATE TABLE posts (
+--       id VARCHAR(36) PRIMARY KEY,
+--       name VARCHAR(255) NOT NULL,
+--       score BIGINT DEFAULT 0,
+--       ups BIGINT DEFAULT 0,
+--       downs BIGINT DEFAULT 0,
+--       likes BOOLEAN,
+--       created BIGINT,
+--       created_utc BIGINT NOT NULL,
+--       author VARCHAR(255),
+--       author_flair_css_class VARCHAR(255),
+--       author_flair_text VARCHAR(255),
+--       clicked BOOLEAN DEFAULT FALSE,
+--       domain VARCHAR(255),
+--       hidden BOOLEAN DEFAULT FALSE,
+--       is_self BOOLEAN DEFAULT FALSE,
+--       link_flair_css_class VARCHAR(255),
+--       link_flair_text VARCHAR(255),
+--       locked BOOLEAN DEFAULT FALSE,
+--       media JSONB,
+--       media_embed JSONB,
+--       num_comments BIGINT DEFAULT 0,
+--       over_18 BOOLEAN DEFAULT FALSE,
+--       permalink VARCHAR(1024),
+--       saved BOOLEAN DEFAULT FALSE,
+--       selftext TEXT,
+--       selftext_html TEXT,
+--       subreddit VARCHAR(255) NOT NULL,
+--       subreddit_id VARCHAR(36),
+--       thumbnail VARCHAR(1024),
+--       title VARCHAR(1024) NOT NULL,
+--       url VARCHAR(2048),
+--       edited_is_edited BOOLEAN DEFAULT FALSE,
+--       edited_timestamp BIGINT,
+--       distinguished VARCHAR(255),
+--       stickied BOOLEAN DEFAULT FALSE,
+--       upvote_ratio NUMERIC(3, 2),
+--       fetched_at BIGINT NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW())::BIGINT,
+--       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+--       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+--   );
+--
+--   CREATE INDEX idx_posts_subreddit ON posts(LOWER(subreddit));
+--   CREATE INDEX idx_posts_author ON posts(author);
+--   CREATE INDEX idx_posts_created_utc ON posts(created_utc DESC);
+--   CREATE INDEX idx_posts_fetched_at ON posts(fetched_at DESC);
+--
+-- Example Comments Table Structure (PostgreSQL):
+--
+--   CREATE TABLE comments (
+--       id VARCHAR(36) PRIMARY KEY,
+--       name VARCHAR(255) NOT NULL,
+--       score BIGINT DEFAULT 0,
+--       ... (other comment fields)
+--       post_id VARCHAR(36) NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+--       parent_id VARCHAR(36),
+--       depth INTEGER DEFAULT 0,
+--       fetched_at BIGINT NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW())::BIGINT,
+--       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+--       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+--   );
+--
+--   CREATE INDEX idx_comments_post_id ON comments(post_id);
+--   CREATE INDEX idx_comments_author ON comments(author);
+--   CREATE INDEX idx_comments_created_utc ON comments(created_utc DESC);
+--   CREATE INDEX idx_comments_parent_id ON comments(parent_id);
+--   CREATE INDEX idx_comments_depth ON comments(depth);
+--
+-- Example Closure Table (for efficient tree queries):
+--
+--   CREATE TABLE comment_closure (
+--       ancestor_id VARCHAR(36) NOT NULL,
+--       descendant_id VARCHAR(36) NOT NULL,
+--       depth INTEGER NOT NULL,
+--       PRIMARY KEY (ancestor_id, descendant_id),
+--       FOREIGN KEY (ancestor_id) REFERENCES comments(id) ON DELETE CASCADE,
+--       FOREIGN KEY (descendant_id) REFERENCES comments(id) ON DELETE CASCADE
+--   );
+--
+--   CREATE INDEX idx_closure_descendant ON comment_closure(descendant_id);
+
+-- Placeholder: migrations to be implemented
+-- SELECT 1; -- This query should be replaced with actual DDL statements
