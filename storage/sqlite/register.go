@@ -15,10 +15,15 @@ package sqlite
 
 import (
 	"context"
+	"database/sql"
 
 	"github.com/jamesprial/go-reddit-api-wrapper/storage"
 	internalsqlite "github.com/jamesprial/go-reddit-api-wrapper/storage/sqlite/internal"
 )
+
+// SQLiteStore is the public type alias for the internal SQLiteStore implementation.
+// It is exported here to allow testutil packages to access it for testing purposes.
+type SQLiteStore = internalsqlite.SQLiteStore
 
 func init() {
 	// Register factory for both "sqlite" and "sqlite3" driver names
@@ -37,4 +42,11 @@ func newStoreFactory(ctx context.Context, cfg storage.Config) (storage.Store, er
 
 	// Delegate to internal SQLite implementation
 	return internalsqlite.NewStore(ctx, cfg)
+}
+
+// GetDB returns the underlying *sql.DB connection from a SQLiteStore.
+// This is exported for testing purposes only and should not be used in production code.
+// It allows test helpers to directly query the database for verification purposes.
+func GetDB(s *SQLiteStore) *sql.DB {
+	return internalsqlite.GetDB((*internalsqlite.SQLiteStore)(s))
 }
