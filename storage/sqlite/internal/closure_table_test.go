@@ -453,12 +453,12 @@ func TestClosureTable_CascadeDelete(t *testing.T) {
 	})
 
 	t.Run("delete parent comment removes only its own closure entries", func(t *testing.T) {
-		// C1 should have 3 closure entries (self, C2, C3)
+		// C1 should have 2 closure entries (self, C2) - C3 was already deleted in the previous test
 		var count int
 		err := sqlite.QueryRowContext(sqliteStore, ctx,
 			"SELECT COUNT(*) FROM comment_closures WHERE ancestor = ?", "c1").Scan(&count)
 		require.NoError(t, err)
-		require.Equal(t, 3, count, "C1 should have 3 closure entries (self + C2 + C3) before delete")
+		require.Equal(t, 2, count, "C1 should have 2 closure entries (self + C2) after C3 was deleted")
 
 		// Delete C1
 		err = store.DeleteComment(ctx, "c1")

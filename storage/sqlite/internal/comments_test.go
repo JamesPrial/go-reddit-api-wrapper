@@ -3,11 +3,12 @@ package sqlite_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 	"github.com/jamesprial/go-reddit-api-wrapper/storage"
 	"github.com/jamesprial/go-reddit-api-wrapper/storage/internal/testutil"
-	"github.com/jamesprial/go-reddit-api-wrapper/storage/sqlite/internal"
+	sqlite "github.com/jamesprial/go-reddit-api-wrapper/storage/sqlite/internal"
 	"github.com/stretchr/testify/require"
 )
 
@@ -919,4 +920,268 @@ func TestUpsertComments_ParentMissingClosureEntries(t *testing.T) {
 	require.NoError(t, err, "corrupted parent should still exist in database")
 	require.NotNil(t, retrievedParent)
 	require.Equal(t, "corrupted", retrievedParent.ID)
+}
+
+// TestComments_FileBasedDatabase verifies comment persistence with file-based SQLite storage.
+func TestComments_FileBasedDatabase(t *testing.T) {
+	store := testutil.NewFileBasedDB(t)
+	ctx := context.Background()
+
+	// Insert a post
+	post := testutil.BuildPost("post_persist", "test")
+	err := store.UpsertPost(ctx, post)
+	require.NoError(t, err, "failed to insert post")
+
+	// Insert comments
+	comments := []*types.Comment{
+		testutil.BuildComment("c_persist1", "post_persist", "", 0),
+		testutil.BuildComment("c_persist2", "post_persist", "c_persist1", 1),
+	}
+	err = store.UpsertComments(ctx, comments)
+	require.NoError(t, err, "failed to insert comments")
+
+	// Verify persistence and data integrity
+	retrieved1, err := store.GetComment(ctx, "c_persist1")
+	require.NoError(t, err)
+	require.NotNil(t, retrieved1)
+	require.Equal(t, "c_persist1", retrieved1.ID)
+	require.Equal(t, "t3_post_persist", retrieved1.ParentID)
+
+	retrieved2, err := store.GetComment(ctx, "c_persist2")
+	require.NoError(t, err)
+	require.NotNil(t, retrieved2)
+	require.Equal(t, "c_persist2", retrieved2.ID)
+	require.Equal(t, "t1_c_persist1", retrieved2.ParentID)
+}
+
+// TestComments_DeepCommentTree verifies storage and retrieval of deeply nested comment trees.
+func TestComments_DeepCommentTree(t *testing.T) {
+	store := NewTestDB(t)
+	ctx := context.Background()
+
+	// Cast to SQLiteStore for closure table access
+	sqliteStore, ok := store.(*sqlite.SQLiteStore)
+	if !ok {
+		t.Skip("store is not *sqlite.SQLiteStore, skipping deep tree tests")
+	}
+
+	// Insert a post
+	post := testutil.BuildPost("deep_post", "test")
+	err := store.UpsertPost(ctx, post)
+	require.NoError(t, err)
+
+	// Build a deep tree with depth=15
+	comments := testutil.BuildCommentTree("deep_post", 15, 2)
+
+	// Upsert all comments
+	err = store.UpsertComments(ctx, comments)
+	require.NoError(t, err, "failed to upsert deep comment tree")
+
+	// Retrieve the tree
+	tree, err := store.GetCommentTree(ctx, "deep_post", nil)
+	require.NoError(t, err)
+	require.NotEmpty(t, tree, "tree should not be empty")
+
+	// Verify we have comments at various depths by checking closure table max depth
+	var maxDepth int
+	err = sqlite.QueryRowContext(sqliteStore, ctx,
+		"SELECT MAX(depth) FROM comment_closures WHERE descendant IN (SELECT id FROM comments WHERE post_id = ?)",
+		"deep_post").Scan(&maxDepth)
+	require.NoError(t, err)
+	require.Greater(t, maxDepth, 10, "should have comments at depth > 10")
+
+	// Verify all comments were inserted
+	var commentCount int
+	err = sqlite.QueryRowContext(sqliteStore, ctx,
+		"SELECT COUNT(*) FROM comments WHERE post_id = ?",
+		"deep_post").Scan(&commentCount)
+	require.NoError(t, err)
+	require.Equal(t, len(comments), commentCount, "all comments should be inserted")
+}
+
+// TestComments_WideCommentTree verifies storage and retrieval of wide comment trees.
+func TestComments_WideCommentTree(t *testing.T) {
+	store := NewTestDB(t)
+	ctx := context.Background()
+
+	// Insert a post
+	post := testutil.BuildPost("wide_post", "test")
+	err := store.UpsertPost(ctx, post)
+	require.NoError(t, err)
+
+	// Build a wide tree with 100 top-level comments, each with 5 children
+	comments := testutil.BuildCommentTree("wide_post", 1, 100)
+
+	// Upsert all comments
+	err = store.UpsertComments(ctx, comments)
+	require.NoError(t, err, "failed to upsert wide comment tree")
+
+	// Verify total comment count
+	stats, err := store.GetStats(ctx)
+	require.NoError(t, err)
+	// With breadth=100 and depth=1: 100 top-level + 100*100 children = 10,100 comments
+	expectedCount := len(comments)
+	require.Equal(t, int64(expectedCount), stats.CommentCount, "should have correct total comments")
+
+	// Retrieve the tree
+	tree, err := store.GetCommentTree(ctx, "wide_post", nil)
+	require.NoError(t, err)
+	require.Len(t, tree, 100, "should have 100 top-level comments")
+
+	// Verify each top-level has children
+	for i, topLevel := range tree {
+		require.Len(t, topLevel.Replies, 100, "top-level comment %d should have 100 children", i)
+	}
+}
+
+// TestComments_MixedTopLevelAndNested verifies proper hierarchy with mixed depth comments.
+func TestComments_MixedTopLevelAndNested(t *testing.T) {
+	store := NewTestDB(t)
+	ctx := context.Background()
+
+	// Cast store for closure table access
+	sqliteStore, ok := store.(*sqlite.SQLiteStore)
+	if !ok {
+		t.Skip("store is not *sqlite.SQLiteStore, skipping mixed hierarchy tests")
+	}
+
+	// Insert a post
+	post := testutil.BuildPost("mixed_post", "test")
+	err := store.UpsertPost(ctx, post)
+	require.NoError(t, err)
+
+	// Create mixed hierarchy:
+	// - 3 top-level comments
+	// - 2 children under first
+	// - 3 children under second
+	// - 1 child under one of the nested comments
+	comments := []*types.Comment{
+		// Top-level
+		testutil.BuildComment("top1", "mixed_post", "", 0),
+		testutil.BuildComment("top2", "mixed_post", "", 0),
+		testutil.BuildComment("top3", "mixed_post", "", 0),
+		// Children of top1
+		testutil.BuildComment("top1_c1", "mixed_post", "top1", 1),
+		testutil.BuildComment("top1_c2", "mixed_post", "top1", 1),
+		// Children of top2
+		testutil.BuildComment("top2_c1", "mixed_post", "top2", 1),
+		testutil.BuildComment("top2_c2", "mixed_post", "top2", 1),
+		testutil.BuildComment("top2_c3", "mixed_post", "top2", 1),
+		// Child of top2_c1 (depth 2)
+		testutil.BuildComment("top2_c1_c1", "mixed_post", "top2_c1", 2),
+	}
+
+	err = store.UpsertComments(ctx, comments)
+	require.NoError(t, err, "failed to insert mixed hierarchy")
+
+	// Retrieve the tree
+	tree, err := store.GetCommentTree(ctx, "mixed_post", nil)
+	require.NoError(t, err)
+	require.Len(t, tree, 3, "should have 3 top-level comments")
+
+	// Verify comments were stored with correct parents via database queries
+	var top1Children int
+	err = sqlite.QueryRowContext(sqliteStore, ctx,
+		"SELECT COUNT(*) FROM comments WHERE parent_id = ?", "t1_top1").Scan(&top1Children)
+	require.NoError(t, err)
+	require.Equal(t, 2, top1Children, "top1 should have 2 children in database")
+
+	var top2Children int
+	err = sqlite.QueryRowContext(sqliteStore, ctx,
+		"SELECT COUNT(*) FROM comments WHERE parent_id = ?", "t1_top2").Scan(&top2Children)
+	require.NoError(t, err)
+	require.Equal(t, 3, top2Children, "top2 should have 3 children in database")
+
+	var top3Children int
+	err = sqlite.QueryRowContext(sqliteStore, ctx,
+		"SELECT COUNT(*) FROM comments WHERE parent_id = ?", "t1_top3").Scan(&top3Children)
+	require.NoError(t, err)
+	require.Equal(t, 0, top3Children, "top3 should have no children in database")
+
+	// Verify total comments
+	var totalComments int
+	err = sqlite.QueryRowContext(sqliteStore, ctx,
+		"SELECT COUNT(*) FROM comments WHERE post_id = ?", "mixed_post").Scan(&totalComments)
+	require.NoError(t, err)
+	require.Equal(t, len(comments), totalComments, "all comments should be in database")
+}
+
+// TestComments_SortingValidation verifies proper sorting of comment trees.
+func TestComments_SortingValidation(t *testing.T) {
+	store := NewTestDB(t)
+	ctx := context.Background()
+
+	// Insert a post
+	post := testutil.BuildPost("sort_post", "test")
+	err := store.UpsertPost(ctx, post)
+	require.NoError(t, err)
+
+	// Create comments with varied scores and timestamps
+	baseTime := time.Now().Unix()
+	comments := []*types.Comment{
+		testutil.BuildComment("sort_c1", "sort_post", "", 0),
+		testutil.BuildComment("sort_c2", "sort_post", "", 0),
+		testutil.BuildComment("sort_c3", "sort_post", "", 0),
+	}
+
+	// Set different scores
+	comments[0].Score = 100
+	comments[1].Score = 50
+	comments[2].Score = 75
+
+	// Set different timestamps
+	comments[0].Created.CreatedUTC = float64(baseTime)
+	comments[1].Created.CreatedUTC = float64(baseTime + 100)
+	comments[2].Created.CreatedUTC = float64(baseTime + 50)
+
+	err = store.UpsertComments(ctx, comments)
+	require.NoError(t, err)
+
+	t.Run("sort by score ascending", func(t *testing.T) {
+		opts := &storage.CommentTreeOptions{SortBy: "score", SortDir: "asc"}
+		tree, err := store.GetCommentTree(ctx, "sort_post", opts)
+		require.NoError(t, err)
+		require.Len(t, tree, 3)
+
+		// Should be ordered: 50, 75, 100
+		require.Equal(t, 50, tree[0].Score, "first should have score 50")
+		require.Equal(t, 75, tree[1].Score, "second should have score 75")
+		require.Equal(t, 100, tree[2].Score, "third should have score 100")
+	})
+
+	t.Run("sort by score descending", func(t *testing.T) {
+		opts := &storage.CommentTreeOptions{SortBy: "score", SortDir: "desc"}
+		tree, err := store.GetCommentTree(ctx, "sort_post", opts)
+		require.NoError(t, err)
+		require.Len(t, tree, 3)
+
+		// Should be ordered: 100, 75, 50
+		require.Equal(t, 100, tree[0].Score, "first should have score 100")
+		require.Equal(t, 75, tree[1].Score, "second should have score 75")
+		require.Equal(t, 50, tree[2].Score, "third should have score 50")
+	})
+
+	t.Run("sort by created_utc ascending", func(t *testing.T) {
+		opts := &storage.CommentTreeOptions{SortBy: "created_utc", SortDir: "asc"}
+		tree, err := store.GetCommentTree(ctx, "sort_post", opts)
+		require.NoError(t, err)
+		require.Len(t, tree, 3)
+
+		// Should be ordered by creation time
+		require.Equal(t, float64(baseTime), tree[0].Created.CreatedUTC, "first should be oldest")
+		require.Equal(t, float64(baseTime+50), tree[1].Created.CreatedUTC, "second should be middle")
+		require.Equal(t, float64(baseTime+100), tree[2].Created.CreatedUTC, "third should be newest")
+	})
+
+	t.Run("sort by created_utc descending", func(t *testing.T) {
+		opts := &storage.CommentTreeOptions{SortBy: "created_utc", SortDir: "desc"}
+		tree, err := store.GetCommentTree(ctx, "sort_post", opts)
+		require.NoError(t, err)
+		require.Len(t, tree, 3)
+
+		// Should be ordered by creation time (newest first)
+		require.Equal(t, float64(baseTime+100), tree[0].Created.CreatedUTC, "first should be newest")
+		require.Equal(t, float64(baseTime+50), tree[1].Created.CreatedUTC, "second should be middle")
+		require.Equal(t, float64(baseTime), tree[2].Created.CreatedUTC, "third should be oldest")
+	})
 }

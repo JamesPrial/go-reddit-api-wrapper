@@ -361,3 +361,256 @@ func TestUpsertPosts(t *testing.T) {
 		}
 	})
 }
+
+// TestPosts_FileBasedDatabase verifies post persistence with file-based SQLite storage.
+func TestPosts_FileBasedDatabase(t *testing.T) {
+	store := testutil.NewFileBasedDB(t)
+	ctx := context.Background()
+
+	// Insert a post
+	post := testutil.BuildPost("persist1", "golang", testutil.WithScore(100), testutil.WithAuthor("filebaseduser"))
+	err := store.UpsertPost(ctx, post)
+	require.NoError(t, err, "failed to insert post into file-based database")
+
+	// Retrieve the post and verify persistence
+	retrieved, err := store.GetPost(ctx, "persist1")
+	require.NoError(t, err, "failed to retrieve post from file-based database")
+	require.NotNil(t, retrieved, "retrieved post should not be nil")
+	require.Equal(t, "persist1", retrieved.ID)
+	require.Equal(t, "golang", retrieved.Subreddit)
+	require.Equal(t, "filebaseduser", retrieved.Author)
+	require.Equal(t, 100, retrieved.Score)
+
+	// Verify all fields are intact
+	require.Equal(t, "t3_persist1", retrieved.Name)
+	require.Equal(t, "Test Post", retrieved.Title)
+	require.Equal(t, "This is a test post body.", retrieved.SelfText)
+}
+
+// TestPosts_LargeBatchUpsert verifies that large batches of posts can be efficiently upserted.
+func TestPosts_LargeBatchUpsert(t *testing.T) {
+	store := NewTestDB(t)
+	ctx := context.Background()
+
+	// Build a large batch of posts
+	posts := testutil.BuildPostBatch(1000, "golang")
+
+	// Upsert the batch
+	err := store.UpsertPosts(ctx, posts)
+	require.NoError(t, err, "failed to upsert large batch")
+
+	// Verify all posts were inserted
+	stats, err := store.GetStats(ctx)
+	require.NoError(t, err)
+	require.Equal(t, int64(1000), stats.PostCount, "should have inserted 1000 posts")
+
+	// Spot check a few posts to verify data integrity
+	for _, checkID := range []string{"id0", "id500", "id999"} {
+		retrieved, err := store.GetPost(ctx, checkID)
+		require.NoError(t, err, "failed to retrieve post %s", checkID)
+		require.NotNil(t, retrieved)
+		require.Equal(t, checkID, retrieved.ID)
+		require.Equal(t, "golang", retrieved.Subreddit)
+	}
+}
+
+// TestPosts_SpecialCharactersInFields verifies that special characters are preserved correctly.
+func TestPosts_SpecialCharactersInFields(t *testing.T) {
+	store := NewTestDB(t)
+	ctx := context.Background()
+
+	// Create a post with special characters
+	post := testutil.BuildPost("special1", "golang",
+		testutil.WithTitle("Test <script>alert('xss')</script> in title"),
+	)
+	post.SelfText = "Body with special chars: \n\t\"quotes\"\n SQL injection: ' OR '1'='1\n Emoji: 🚀 ⭐ 💻"
+
+	// Insert the post
+	err := store.UpsertPost(ctx, post)
+	require.NoError(t, err, "failed to insert post with special characters")
+
+	// Retrieve and verify exact preservation
+	retrieved, err := store.GetPost(ctx, "special1")
+	require.NoError(t, err)
+	require.NotNil(t, retrieved)
+
+	// Verify special characters in title
+	require.Equal(t, "Test <script>alert('xss')</script> in title", retrieved.Title,
+		"special characters in title should be preserved exactly")
+
+	// Verify special characters in body
+	require.Equal(t, post.SelfText, retrieved.SelfText,
+		"special characters in body should be preserved exactly")
+}
+
+// TestPosts_ListPostsAllFilterCombinations verifies ListPosts with various filter combinations.
+func TestPosts_ListPostsAllFilterCombinations(t *testing.T) {
+	store := NewTestDB(t)
+	ctx := context.Background()
+
+	// Insert diverse set of posts
+	posts := []*types.Post{
+		testutil.BuildPost("p1", "golang", testutil.WithScore(100), testutil.WithAuthor("alice")),
+		testutil.BuildPost("p2", "golang", testutil.WithScore(200), testutil.WithAuthor("bob")),
+		testutil.BuildPost("p3", "python", testutil.WithScore(50), testutil.WithAuthor("alice")),
+		testutil.BuildPost("p4", "python", testutil.WithScore(150), testutil.WithAuthor("charlie")),
+		testutil.BuildPost("p5", "rust", testutil.WithScore(75), testutil.WithAuthor("bob")),
+		testutil.BuildPost("p6", "rust", testutil.WithScore(25), testutil.WithAuthor("alice")),
+	}
+
+	for _, p := range posts {
+		err := store.UpsertPost(ctx, p)
+		require.NoError(t, err)
+	}
+
+	t.Run("subreddit filter only", func(t *testing.T) {
+		opts := &storage.ListPostsOptions{Subreddit: "golang"}
+		results, err := store.ListPosts(ctx, opts)
+		require.NoError(t, err)
+		require.Len(t, results, 2, "should return 2 golang posts")
+		for _, p := range results {
+			require.Equal(t, "golang", p.Subreddit)
+		}
+	})
+
+	t.Run("author filter only", func(t *testing.T) {
+		opts := &storage.ListPostsOptions{Author: "alice"}
+		results, err := store.ListPosts(ctx, opts)
+		require.NoError(t, err)
+		require.Len(t, results, 3, "should return 3 posts by alice")
+		for _, p := range results {
+			require.Equal(t, "alice", p.Author)
+		}
+	})
+
+	t.Run("min score filter only", func(t *testing.T) {
+		opts := &storage.ListPostsOptions{MinScore: 100}
+		results, err := store.ListPosts(ctx, opts)
+		require.NoError(t, err)
+		require.Len(t, results, 3, "should return 3 posts with score >= 100")
+		for _, p := range results {
+			require.GreaterOrEqual(t, p.Score, 100)
+		}
+	})
+
+	t.Run("subreddit and author combined", func(t *testing.T) {
+		opts := &storage.ListPostsOptions{Subreddit: "golang", Author: "bob"}
+		results, err := store.ListPosts(ctx, opts)
+		require.NoError(t, err)
+		require.Len(t, results, 1, "should return 1 post from golang by bob")
+		require.Equal(t, "p2", results[0].ID)
+	})
+
+	t.Run("subreddit and min score combined", func(t *testing.T) {
+		opts := &storage.ListPostsOptions{Subreddit: "python", MinScore: 75}
+		results, err := store.ListPosts(ctx, opts)
+		require.NoError(t, err)
+		require.Len(t, results, 1, "should return 1 python post with score >= 75")
+		require.Equal(t, "p4", results[0].ID)
+	})
+
+	t.Run("author and min score combined", func(t *testing.T) {
+		opts := &storage.ListPostsOptions{Author: "alice", MinScore: 50}
+		results, err := store.ListPosts(ctx, opts)
+		require.NoError(t, err)
+		require.Len(t, results, 2, "should return 2 posts by alice with score >= 50")
+		for _, p := range results {
+			require.Equal(t, "alice", p.Author)
+			require.GreaterOrEqual(t, p.Score, 50)
+		}
+	})
+
+	t.Run("all filters combined", func(t *testing.T) {
+		opts := &storage.ListPostsOptions{Subreddit: "golang", Author: "alice", MinScore: 50}
+		results, err := store.ListPosts(ctx, opts)
+		require.NoError(t, err)
+		require.Len(t, results, 1, "should return 1 golang post by alice with score >= 50")
+		require.Equal(t, "p1", results[0].ID)
+	})
+}
+
+// TestPosts_PaginationEdgeCases verifies pagination with edge cases and boundary conditions.
+func TestPosts_PaginationEdgeCases(t *testing.T) {
+	store := NewTestDB(t)
+	ctx := context.Background()
+
+	// Insert 50 posts
+	posts := testutil.BuildPostBatch(50, "golang")
+	err := store.UpsertPosts(ctx, posts)
+	require.NoError(t, err)
+
+	t.Run("offset greater than total count", func(t *testing.T) {
+		opts := &storage.ListPostsOptions{Offset: 100, Limit: 10}
+		results, err := store.ListPosts(ctx, opts)
+		require.NoError(t, err)
+		require.Empty(t, results, "should return empty slice when offset exceeds total count")
+	})
+
+	t.Run("limit greater than total count", func(t *testing.T) {
+		opts := &storage.ListPostsOptions{Offset: 0, Limit: 100}
+		results, err := store.ListPosts(ctx, opts)
+		require.NoError(t, err)
+		require.Len(t, results, 50, "should return all remaining posts when limit exceeds total")
+	})
+
+	t.Run("offset at exact count boundary", func(t *testing.T) {
+		opts := &storage.ListPostsOptions{Offset: 50, Limit: 10}
+		results, err := store.ListPosts(ctx, opts)
+		require.NoError(t, err)
+		require.Empty(t, results, "should return empty when offset equals total count")
+	})
+
+	t.Run("limit zero", func(t *testing.T) {
+		opts := &storage.ListPostsOptions{Offset: 0, Limit: 0}
+		results, err := store.ListPosts(ctx, opts)
+		require.NoError(t, err)
+		// Behavior: either empty or all posts depending on implementation
+		// We verify it doesn't error
+		require.GreaterOrEqual(t, len(results), 0, "should not error with limit=0")
+	})
+
+	t.Run("negative limit handling", func(t *testing.T) {
+		opts := &storage.ListPostsOptions{Offset: 0, Limit: -1}
+		results, err := store.ListPosts(ctx, opts)
+		require.NoError(t, err)
+		// Should handle gracefully, either returning all or none
+		require.GreaterOrEqual(t, len(results), 0)
+	})
+
+	t.Run("negative offset handling", func(t *testing.T) {
+		opts := &storage.ListPostsOptions{Offset: -1, Limit: 10}
+		results, err := store.ListPosts(ctx, opts)
+		require.NoError(t, err)
+		// Should handle gracefully, treating negative offset as 0
+		require.GreaterOrEqual(t, len(results), 0)
+	})
+
+	t.Run("normal pagination through full dataset", func(t *testing.T) {
+		collected := make(map[string]bool)
+		page := 0
+		pageSize := 10
+
+		for {
+			opts := &storage.ListPostsOptions{
+				Offset:  page * pageSize,
+				Limit:   pageSize,
+				SortBy:  "score",
+				SortDir: "ASC",
+			}
+			results, err := store.ListPosts(ctx, opts)
+			require.NoError(t, err)
+
+			if len(results) == 0 {
+				break
+			}
+
+			for _, p := range results {
+				collected[p.ID] = true
+			}
+
+			page++
+		}
+
+		require.Equal(t, 50, len(collected), "should have collected all 50 unique posts through pagination")
+	})
+}
