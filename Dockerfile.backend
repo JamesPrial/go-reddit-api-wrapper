@@ -1,0 +1,66 @@
+# Stage 1: Builder
+FROM golang:1.25-alpine AS builder
+
+# Install build dependencies for CGo (required by SQLite driver)
+RUN apk add --no-cache gcc musl-dev sqlite-dev
+
+# Set working directory
+WORKDIR /build
+
+# Copy dependency files first for better layer caching
+COPY go.mod go.sum ./
+
+# Download dependencies
+RUN go mod download && go mod verify
+
+# Copy source code
+COPY . .
+
+# Build the API server
+# - CGO_ENABLED=1: Required for mattn/go-sqlite3
+# - Static linking for portability
+# - Strip debug symbols to reduce binary size
+RUN CGO_ENABLED=1 GOOS=linux go build \
+    -ldflags="-w -s -extldflags '-static'" \
+    -a -installsuffix cgo \
+    -o reddit-api \
+    ./cmd/api/main.go
+
+# Stage 2: Runtime
+FROM alpine:latest
+
+# Install runtime dependencies
+RUN apk add --no-cache \
+    ca-certificates \
+    sqlite \
+    tzdata
+
+# Create non-root user for running the application
+RUN addgroup -g 1000 appuser && \
+    adduser -D -u 1000 -G appuser appuser
+
+# Create data directory for SQLite database
+RUN mkdir -p /data && \
+    chown -R appuser:appuser /data
+
+# Set working directory
+WORKDIR /app
+
+# Copy binary from builder stage
+COPY --from=builder /build/reddit-api .
+
+# Change ownership to non-root user
+RUN chown appuser:appuser /app/reddit-api
+
+# Switch to non-root user
+USER appuser
+
+# Expose API port
+EXPOSE 8080
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD wget --no-verbose --tries=1 --spider http://localhost:8080/health || exit 1
+
+# Run the API server
+CMD ["/app/reddit-api"]

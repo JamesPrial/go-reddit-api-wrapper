@@ -1,0 +1,51 @@
+# Frontend directory (handled by separate Dockerfile)
+frontend/
+
+# Git files
+.git/
+.gitignore
+.github/
+
+# Documentation
+*.md
+!README.md
+docs/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Test files and data
+*.test
+*_test.go
+testdata/
+tmp/
+coverage.out
+
+# Database files
+*.db
+*.db-shm
+*.db-wal
+
+# Build artifacts
+reddit-example*
+cmd/examples/
+
+# Benchmarks
+benchmarks/
+comparative.test
+e2e.test
+parse.test
+reddit.test
+
+# Claude Code
+.claude/

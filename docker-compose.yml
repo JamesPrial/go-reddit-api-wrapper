@@ -1,0 +1,79 @@
+services:
+  # Backend API service
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: reddit-tracker-backend
+    ports:
+      - "8080:8080"
+    environment:
+      # Reddit API credentials (required)
+      - REDDIT_CLIENT_ID=${REDDIT_CLIENT_ID}
+      - REDDIT_CLIENT_SECRET=${REDDIT_CLIENT_SECRET}
+
+      # Reddit user authentication (optional)
+      - REDDIT_USERNAME=${REDDIT_USERNAME:-}
+      - REDDIT_PASSWORD=${REDDIT_PASSWORD:-}
+
+      # Application configuration
+      - DB_PATH=/data/reddit.db
+      - POLL_INTERVAL=${POLL_INTERVAL:-60s}
+      - PORT=8080
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - DEBUG=${DEBUG:-false}
+      - ENABLE_CORS=${ENABLE_CORS:-true}
+      - CORS_ORIGINS=${CORS_ORIGINS:-*}
+      - USER_AGENT=${USER_AGENT:-reddit-tracker/1.0}
+    volumes:
+      # Persist SQLite database
+      - reddit-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - reddit-tracker
+
+  # Frontend SvelteKit service
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: reddit-tracker-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      # API connection
+      - VITE_API_URL=${VITE_API_URL:-http://localhost:8080}
+      - VITE_WS_URL=${VITE_WS_URL:-ws://localhost:8080}
+
+      # Server configuration
+      - PORT=3000
+      - HOST=0.0.0.0
+      - NODE_ENV=production
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - reddit-tracker
+
+# Named volumes for data persistence
+volumes:
+  reddit-data:
+    driver: local
+
+# Network for service communication
+networks:
+  reddit-tracker:
+    driver: bridge
