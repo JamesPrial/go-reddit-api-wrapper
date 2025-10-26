@@ -5,25 +5,18 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"sync"
 	"time"
+
+	"github.com/jamesprial/go-reddit-api-wrapper/storage/internal"
 )
 
-// storeFactory is a function that creates a Store from Config.
-type storeFactory func(context.Context, Config) (Store, error)
-
-// registeredFactories maps driver names to their factory functions.
-var (
-	registeredFactories = make(map[string]storeFactory)
-	factoryMutex        sync.RWMutex
-)
+// registry holds the global factory registry for storage backends.
+var registry = internal.NewRegistry[Config, Store]()
 
 // RegisterFactory registers a factory function for a storage driver.
 // This is called by backend subpackages (like sqlite) in their init() function.
-func RegisterFactory(driver string, factory storeFactory) {
-	factoryMutex.Lock()
-	defer factoryMutex.Unlock()
-	registeredFactories[driver] = factory
+func RegisterFactory(driver string, factory func(context.Context, Config) (Store, error)) {
+	registry.Register(driver, factory)
 }
 
 // Config holds configuration for any storage backend.
@@ -71,9 +64,7 @@ func New(ctx context.Context, cfg Config) (Store, error) {
 	}
 
 	// Look up registered factory for the driver
-	factoryMutex.RLock()
-	factory, ok := registeredFactories[driver]
-	factoryMutex.RUnlock()
+	factory, ok := registry.Get(driver)
 
 	if ok && factory != nil {
 		return factory(ctx, cfg)

@@ -97,9 +97,29 @@ Use errors.As() to check for specific error types:
   - Stale data eviction with configurable time thresholds
   - Database statistics and monitoring
 
-# Conversion Utilities
+# Internal Package
 
-The storage/internal package provides database-agnostic conversion utilities for working with nullable SQL types:
+The storage/internal package provides internal implementation details that are shared
+across storage backends but not exposed to external packages:
+
+## Factory Registry
+
+The factory pattern uses a generic registry (storage/internal.Registry) for type-safe
+backend registration. Backends register themselves in their init() functions using
+storage.RegisterFactory():
+
+	// In storage/sqlite/sqlite.go
+	func init() {
+		storage.RegisterFactory("sqlite", NewStore)
+		storage.RegisterFactory("sqlite3", NewStore)
+	}
+
+The registry is thread-safe and uses read-write mutexes to allow concurrent reads
+while protecting writes during registration.
+
+## Conversion Utilities
+
+Database-agnostic conversion utilities for working with nullable SQL types:
 
   - StringToNullString / NullStringToString
   - Int64ToNullInt64 / NullInt64ToInt64
@@ -119,9 +139,10 @@ Backend implementations in subpackages (storage/sqlite, storage/postgres) must:
  1. Implement the Store interface
  2. Provide a NewStore(ctx context.Context, cfg storage.Config) (storage.Store, error) constructor
     that accepts storage.Config and adapts it to backend-specific needs
- 3. Translate internal errors to storage package error types
- 4. Handle migrations for schema versioning
- 5. Support graceful shutdown via Close()
+ 3. Register their factory function in init() using storage.RegisterFactory(driver, NewStore)
+ 4. Translate internal errors to storage package error types
+ 5. Handle migrations for schema versioning
+ 6. Support graceful shutdown via Close()
 
 See subpackage documentation for backend-specific details.
 */
