@@ -4,20 +4,20 @@
 // users to use PostgreSQL storage by simply importing this package with a blank import
 // in their main package:
 //
-//	import _ "github.com/jamesprial/go-reddit-api-wrapper/storage/backends/postgres"
+//	import _ "github.com/jamesprial/go-reddit-api-wrapper/storage/postgres"
 //
 // Once imported, storage.New() will automatically support "postgres", "postgresql", and "pgx"
 // driver names. All database configuration is done through the standard storage.Config
 // type (DSN, MaxOpenConns, MaxIdleConns, ConnMaxLifetime, MigrationsPath, Logger).
 //
-// The default migrations path is "storage/backends/postgres/migrations" if not specified.
+// The default migrations path is "storage/postgres/migrations" if not specified.
 package postgres
 
 import (
 	"context"
 
 	"github.com/jamesprial/go-reddit-api-wrapper/storage"
-	internalpostgres "github.com/jamesprial/go-reddit-api-wrapper/storage/internal/postgres"
+	internalpostgres "github.com/jamesprial/go-reddit-api-wrapper/storage/postgres/internal"
 )
 
 func init() {
@@ -33,7 +33,7 @@ func init() {
 func newStoreFactory(ctx context.Context, cfg storage.Config) (storage.Store, error) {
 	// Update migrations path default to point to the backend's migrations directory
 	if cfg.MigrationsPath == "" {
-		cfg.MigrationsPath = "storage/backends/postgres/migrations"
+		cfg.MigrationsPath = "storage/postgres/migrations"
 	}
 
 	// Delegate to internal PostgreSQL implementation

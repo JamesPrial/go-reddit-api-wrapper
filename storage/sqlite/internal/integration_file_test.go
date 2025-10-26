@@ -14,8 +14,8 @@ import (
 
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 	"github.com/jamesprial/go-reddit-api-wrapper/storage"
-	_ "github.com/jamesprial/go-reddit-api-wrapper/storage/backends/sqlite" // Register SQLite backend
 	"github.com/jamesprial/go-reddit-api-wrapper/storage/internal/testutil"
+	_ "github.com/jamesprial/go-reddit-api-wrapper/storage/sqlite" // Register SQLite backend
 )
 
 // reopenFileStore creates a new Store instance connected to an existing database file.

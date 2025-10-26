@@ -9,7 +9,7 @@ import (
 
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 	"github.com/jamesprial/go-reddit-api-wrapper/storage"
-	_ "github.com/jamesprial/go-reddit-api-wrapper/storage/backends/sqlite" // Register SQLite backend
+	_ "github.com/jamesprial/go-reddit-api-wrapper/storage/sqlite" // Register SQLite backend
 )
 
 // getMigrationsPath returns the absolute path to the migrations directory
@@ -24,7 +24,7 @@ func getMigrationsPath(t *testing.T) string {
 	for projectRoot != "/" && !fileExists(filepath.Join(projectRoot, "storage")) {
 		projectRoot = filepath.Dir(projectRoot)
 	}
-	return filepath.Join(projectRoot, "storage", "backends", "sqlite", "migrations")
+	return filepath.Join(projectRoot, "storage", "sqlite", "migrations")
 }
 
 // TestNewSQLiteStore_InMemory verifies that an in-memory SQLite store can be created

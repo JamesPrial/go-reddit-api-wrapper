@@ -6,8 +6,8 @@ import (
 
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 	"github.com/jamesprial/go-reddit-api-wrapper/storage"
-	"github.com/jamesprial/go-reddit-api-wrapper/storage/internal/sqlite"
 	"github.com/jamesprial/go-reddit-api-wrapper/storage/internal/testutil"
+	"github.com/jamesprial/go-reddit-api-wrapper/storage/sqlite/internal"
 	"github.com/stretchr/testify/require"
 )
 

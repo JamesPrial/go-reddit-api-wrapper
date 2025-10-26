@@ -15,8 +15,8 @@ The storage package defines interfaces that all storage backends must implement:
 
 Currently supported storage backends:
 
-  - SQLite (storage/backends/sqlite): Lightweight, file-based or in-memory storage
-  - PostgreSQL (storage/backends/postgres): Enterprise-grade relational database (stub implementation)
+  - SQLite (storage/sqlite): Lightweight, file-based or in-memory storage
+  - PostgreSQL (storage/postgres): Enterprise-grade relational database (stub implementation)
 
 # Usage
 
@@ -29,7 +29,7 @@ Note: You must import the desired backend subpackage (even with blank import) to
 
 	import (
 		"github.com/jamesprial/go-reddit-api-wrapper/storage"
-		_ "github.com/jamesprial/go-reddit-api-wrapper/storage/backends/sqlite"  // Register SQLite backend
+		_ "github.com/jamesprial/go-reddit-api-wrapper/storage/sqlite"  // Register SQLite backend
 	)
 
 	cfg := storage.Config{
@@ -53,7 +53,7 @@ You can either specify the driver explicitly or let the factory auto-detect from
 
 	import (
 		"github.com/jamesprial/go-reddit-api-wrapper/storage"
-		_ "github.com/jamesprial/go-reddit-api-wrapper/storage/backends/sqlite"
+		_ "github.com/jamesprial/go-reddit-api-wrapper/storage/sqlite"
 	)
 
 	// Auto-detection (DSN pattern determines driver)
@@ -116,7 +116,7 @@ The factory pattern uses a generic registry (storage/internal.Registry) for type
 backend registration. Backends register themselves in their init() functions using
 storage.RegisterFactory():
 
-	// In storage/backends/sqlite/register.go
+	// In storage/sqlite/register.go
 	func init() {
 		storage.RegisterFactory("sqlite", newStoreFactory)
 		storage.RegisterFactory("sqlite3", newStoreFactory)
@@ -144,8 +144,8 @@ these converters from storage/internal to maintain consistency across backends.
 
 Backend implementations are internal and registered transparently:
 
- 1. Backends implement the Store interface in storage/internal/{driver}/ packages
- 2. Public registration packages (storage/backends/{driver}/) handle factory registration
+ 1. Backends implement the Store interface in storage/{driver}/internal/ packages
+ 2. Public registration packages (storage/{driver}/) handle factory registration
  3. Users import the public registration package to enable backend support
  4. Backend implementations translate internal errors to storage package error types
  5. Backends handle migrations for schema versioning

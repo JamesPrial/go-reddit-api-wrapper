@@ -4,20 +4,20 @@
 // users to use SQLite storage by simply importing this package with a blank import
 // in their main package:
 //
-//	import _ "github.com/jamesprial/go-reddit-api-wrapper/storage/backends/sqlite"
+//	import _ "github.com/jamesprial/go-reddit-api-wrapper/storage/sqlite"
 //
 // Once imported, storage.New() will automatically support "sqlite" and "sqlite3"
 // driver names. All database configuration is done through the standard storage.Config
 // type (DSN, MaxOpenConns, MaxIdleConns, ConnMaxLifetime, MigrationsPath, Logger).
 //
-// The default migrations path is "storage/backends/sqlite/migrations" if not specified.
+// The default migrations path is "storage/sqlite/migrations" if not specified.
 package sqlite
 
 import (
 	"context"
 
 	"github.com/jamesprial/go-reddit-api-wrapper/storage"
-	internalsqlite "github.com/jamesprial/go-reddit-api-wrapper/storage/internal/sqlite"
+	internalsqlite "github.com/jamesprial/go-reddit-api-wrapper/storage/sqlite/internal"
 )
 
 func init() {
@@ -32,7 +32,7 @@ func init() {
 func newStoreFactory(ctx context.Context, cfg storage.Config) (storage.Store, error) {
 	// Update migrations path default to point to the backend's migrations directory
 	if cfg.MigrationsPath == "" {
-		cfg.MigrationsPath = "storage/backends/sqlite/migrations"
+		cfg.MigrationsPath = "storage/sqlite/migrations"
 	}
 
 	// Delegate to internal SQLite implementation

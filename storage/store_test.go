@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/jamesprial/go-reddit-api-wrapper/storage"
-	_ "github.com/jamesprial/go-reddit-api-wrapper/storage/backends/sqlite"
+	_ "github.com/jamesprial/go-reddit-api-wrapper/storage/sqlite"
 )
 
 // getMigrationsPath returns the absolute path to the migrations directory
@@ -22,7 +22,7 @@ func getMigrationsPath(t *testing.T) string {
 	for projectRoot != "/" && !fileExists(filepath.Join(projectRoot, "storage")) {
 		projectRoot = filepath.Dir(projectRoot)
 	}
-	return filepath.Join(projectRoot, "storage", "backends", "sqlite", "migrations")
+	return filepath.Join(projectRoot, "storage", "sqlite", "migrations")
 }
 
 // fileExists checks if a file or directory exists
