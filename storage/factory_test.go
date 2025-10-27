@@ -25,9 +25,8 @@ func TestFactory_RegisterAndRetrieveSQLite(t *testing.T) {
 
 	// Create store with explicit driver
 	store, err := storage.New(ctx, storage.Config{
-		Driver:         "sqlite",
-		DSN:            ":memory:",
-		MigrationsPath: getMigrationsPath(t),
+		Driver: "sqlite",
+		DSN:    ":memory:",
 	})
 	require.NoError(t, err, "failed to create store with sqlite driver")
 	require.NotNil(t, store, "store should not be nil")
@@ -44,9 +43,8 @@ func TestFactory_RegisterAndRetrieveSQLiteAlias(t *testing.T) {
 
 	// Create store with sqlite3 alias
 	store, err := storage.New(ctx, storage.Config{
-		Driver:         "sqlite3",
-		DSN:            ":memory:",
-		MigrationsPath: getMigrationsPath(t),
+		Driver: "sqlite3",
+		DSN:    ":memory:",
 	})
 	require.NoError(t, err, "failed to create store with sqlite3 driver")
 	require.NotNil(t, store, "store should not be nil")
@@ -95,11 +93,10 @@ func TestFactory_ConfigPropagation(t *testing.T) {
 
 	// Create store with specific configuration
 	store, err := storage.New(ctx, storage.Config{
-		Driver:         "sqlite",
-		DSN:            ":memory:",
-		MaxOpenConns:   10,
-		MaxIdleConns:   5,
-		MigrationsPath: getMigrationsPath(t),
+		Driver:       "sqlite",
+		DSN:          ":memory:",
+		MaxOpenConns: 10,
+		MaxIdleConns: 5,
 	})
 	require.NoError(t, err, "failed to create store with configuration")
 	require.NotNil(t, store, "store should not be nil")
@@ -125,7 +122,6 @@ func TestFactory_ThreadSafety(t *testing.T) {
 	stores := make([]storage.Store, numGoroutines)
 	errors := make([]error, numGoroutines)
 	mu := sync.Mutex{}
-	migrationsPath := getMigrationsPath(t)
 	tmpDir, err := os.MkdirTemp("", "factory_test_*")
 	require.NoError(t, err, "failed to create temp directory")
 	defer os.RemoveAll(tmpDir)
@@ -140,9 +136,8 @@ func TestFactory_ThreadSafety(t *testing.T) {
 			dbPath := filepath.Join(tmpDir, fmt.Sprintf("test_%d.sqlite", index))
 
 			store, err := storage.New(ctx, storage.Config{
-				Driver:         "sqlite",
-				DSN:            dbPath,
-				MigrationsPath: migrationsPath,
+				Driver: "sqlite",
+				DSN:    dbPath,
 			})
 
 			mu.Lock()
@@ -175,13 +170,10 @@ func TestFactory_MultipleDrivers(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	migrationsPath := getMigrationsPath(t)
-
 	// Create store with "sqlite" driver
 	storeSQLite, err := storage.New(ctx, storage.Config{
-		Driver:         "sqlite",
-		DSN:            ":memory:",
-		MigrationsPath: migrationsPath,
+		Driver: "sqlite",
+		DSN:    ":memory:",
 	})
 	require.NoError(t, err, "failed to create store with sqlite driver")
 	require.NotNil(t, storeSQLite, "sqlite store should not be nil")
@@ -189,9 +181,8 @@ func TestFactory_MultipleDrivers(t *testing.T) {
 
 	// Create store with "sqlite3" driver
 	storeSQLite3, err := storage.New(ctx, storage.Config{
-		Driver:         "sqlite3",
-		DSN:            ":memory:",
-		MigrationsPath: migrationsPath,
+		Driver: "sqlite3",
+		DSN:    ":memory:",
 	})
 	require.NoError(t, err, "failed to create store with sqlite3 driver")
 	require.NotNil(t, storeSQLite3, "sqlite3 store should not be nil")
@@ -224,9 +215,8 @@ func TestFactory_InvalidDSN(t *testing.T) {
 	// Try to create store with invalid DSN path that doesn't have write permissions
 	// (would fail at SQLite initialization level, not factory level)
 	store, err := storage.New(ctx, storage.Config{
-		Driver:         "sqlite",
-		DSN:            "/dev/null/nonexistent/db.sqlite",
-		MigrationsPath: getMigrationsPath(t),
+		Driver: "sqlite",
+		DSN:    "/dev/null/nonexistent/db.sqlite",
 	})
 
 	// We expect an error from SQLite trying to open the file
@@ -247,8 +237,7 @@ func TestFactory_AutoDetectDriver(t *testing.T) {
 
 	// Create store without specifying driver (should auto-detect as SQLite from DSN format)
 	store, err := storage.New(ctx, storage.Config{
-		DSN:            ":memory:",
-		MigrationsPath: getMigrationsPath(t),
+		DSN: ":memory:",
 		// Driver is empty, should auto-detect
 	})
 	require.NoError(t, err, "failed to create store with auto-detected driver")
@@ -268,9 +257,8 @@ func TestFactory_ContextCancellation(t *testing.T) {
 
 	// Try to create store with cancelled context
 	store, err := storage.New(ctx, storage.Config{
-		Driver:         "sqlite",
-		DSN:            ":memory:",
-		MigrationsPath: getMigrationsPath(t),
+		Driver: "sqlite",
+		DSN:    ":memory:",
 	})
 
 	// Should either return an error or successfully create a store
@@ -286,14 +274,11 @@ func TestFactory_ResourceCleanup(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	migrationsPath := getMigrationsPath(t)
-
 	// Create multiple stores and close them
 	for i := 0; i < 5; i++ {
 		store, err := storage.New(ctx, storage.Config{
-			Driver:         "sqlite",
-			DSN:            ":memory:",
-			MigrationsPath: migrationsPath,
+			Driver: "sqlite",
+			DSN:    ":memory:",
 		})
 		require.NoError(t, err, "iteration %d: failed to create store", i)
 		require.NotNil(t, store, "iteration %d: store should not be nil", i)

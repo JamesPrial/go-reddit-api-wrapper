@@ -42,10 +42,6 @@ type Config struct {
 	// Default: 0 (connections reused forever)
 	ConnMaxLifetime time.Duration
 
-	// MigrationsPath specifies the directory containing migration files
-	// If empty, uses default path for the driver
-	MigrationsPath string
-
 	// Logger for structured logging
 	// If nil, uses slog.Default()
 	Logger *slog.Logger

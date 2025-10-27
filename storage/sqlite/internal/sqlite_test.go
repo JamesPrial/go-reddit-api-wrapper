@@ -2,8 +2,6 @@ package sqlite_test
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -12,29 +10,13 @@ import (
 	_ "github.com/jamesprial/go-reddit-api-wrapper/storage/sqlite" // Register SQLite backend
 )
 
-// getMigrationsPath returns the absolute path to the migrations directory
-func getMigrationsPath(t *testing.T) string {
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("failed to get current working directory: %v", err)
-	}
-
-	// Navigate from project root to migrations directory
-	projectRoot := cwd
-	for projectRoot != "/" && !fileExists(filepath.Join(projectRoot, "storage")) {
-		projectRoot = filepath.Dir(projectRoot)
-	}
-	return filepath.Join(projectRoot, "storage", "sqlite", "migrations")
-}
-
 // TestNewSQLiteStore_InMemory verifies that an in-memory SQLite store can be created
 // and that migrations run successfully.
 func TestNewSQLiteStore_InMemory(t *testing.T) {
 	cfg := storage.Config{
-		DSN:            ":memory:",
-		MaxOpenConns:   5,
-		MaxIdleConns:   2,
-		MigrationsPath: getMigrationsPath(t),
+		DSN:          ":memory:",
+		MaxOpenConns: 5,
+		MaxIdleConns: 2,
 	}
 
 	store, err := storage.New(context.Background(), cfg)
@@ -57,8 +39,7 @@ func TestNewSQLiteStore_InMemory(t *testing.T) {
 // TestSQLiteStore_Ping verifies that the Ping method works correctly.
 func TestSQLiteStore_Ping(t *testing.T) {
 	cfg := storage.Config{
-		DSN:            ":memory:",
-		MigrationsPath: getMigrationsPath(t),
+		DSN: ":memory:",
 	}
 
 	store, err := storage.New(context.Background(), cfg)
@@ -78,8 +59,7 @@ func TestSQLiteStore_Ping(t *testing.T) {
 // TestSQLiteStore_Close verifies that the Close method works correctly.
 func TestSQLiteStore_Close(t *testing.T) {
 	cfg := storage.Config{
-		DSN:            ":memory:",
-		MigrationsPath: getMigrationsPath(t),
+		DSN: ":memory:",
 	}
 
 	store, err := storage.New(context.Background(), cfg)
@@ -104,8 +84,7 @@ func TestSQLiteStore_Close(t *testing.T) {
 func TestSQLiteStore_ConfigDefaults(t *testing.T) {
 	// Test with minimal config
 	cfg := storage.Config{
-		DSN:            ":memory:",
-		MigrationsPath: getMigrationsPath(t),
+		DSN: ":memory:",
 	}
 	store, err := storage.New(context.Background(), cfg)
 	if err != nil {
@@ -136,7 +115,6 @@ func TestSQLiteStore_ConnectionPoolConfig(t *testing.T) {
 		MaxOpenConns:    15,
 		MaxIdleConns:    8,
 		ConnMaxLifetime: 30 * time.Minute,
-		MigrationsPath:  getMigrationsPath(t),
 	}
 
 	store, err := storage.New(context.Background(), cfg)
@@ -162,10 +140,9 @@ func TestSQLiteStore_ConnectionPoolConfig(t *testing.T) {
 // TestInMemoryDatabaseConnectionPool verifies that in-memory databases use a single shared connection
 func TestInMemoryDatabaseConnectionPool(t *testing.T) {
 	cfg := storage.Config{
-		DSN:            ":memory:",
-		MaxOpenConns:   10, // Should be overridden to 1
-		MaxIdleConns:   5,  // Should be overridden to 1
-		MigrationsPath: getMigrationsPath(t),
+		DSN:          ":memory:",
+		MaxOpenConns: 10, // Should be overridden to 1
+		MaxIdleConns: 5,  // Should be overridden to 1
 	}
 
 	store, err := storage.New(context.Background(), cfg)
@@ -244,10 +221,9 @@ func TestInMemoryDatabaseURIFormats(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := storage.Config{
-				DSN:            tc.dbPath,
-				MaxOpenConns:   10, // Should be overridden to 1
-				MaxIdleConns:   5,  // Should be overridden to 1
-				MigrationsPath: getMigrationsPath(t),
+				DSN:          tc.dbPath,
+				MaxOpenConns: 10, // Should be overridden to 1
+				MaxIdleConns: 5,  // Should be overridden to 1
 			}
 
 			store, err := storage.New(context.Background(), cfg)

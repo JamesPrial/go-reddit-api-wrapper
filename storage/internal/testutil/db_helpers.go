@@ -2,7 +2,6 @@ package testutil
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"testing"
 
@@ -12,15 +11,14 @@ import (
 )
 
 // NewInMemoryDB creates an in-memory SQLite database for testing.
-// It automatically determines the migrations path and registers cleanup with t.Cleanup().
+// Registers cleanup with t.Cleanup().
 // The database is ready to use immediately with all migrations applied.
 // Fails the test if initialization fails.
 func NewInMemoryDB(t *testing.T) storage.Store {
 	t.Helper()
 
 	cfg := storage.Config{
-		DSN:            ":memory:",
-		MigrationsPath: GetMigrationsPath(),
+		DSN: ":memory:",
 	}
 
 	store, err := storage.New(context.Background(), cfg)
@@ -48,8 +46,7 @@ func NewFileBasedDB(t *testing.T) storage.Store {
 	dbPath := filepath.Join(tempDir, "test.db")
 
 	cfg := storage.Config{
-		DSN:            dbPath,
-		MigrationsPath: GetMigrationsPath(),
+		DSN: dbPath,
 	}
 
 	store, err := storage.New(context.Background(), cfg)
@@ -114,33 +111,4 @@ func AssertRowCount(t *testing.T, store storage.Store, table string, expected in
 	if count != expected {
 		t.Errorf("expected %d rows in %s, got %d", expected, table, count)
 	}
-}
-
-// GetMigrationsPath returns the absolute path to the migrations directory.
-// It searches upward from the current working directory to find the storage/sqlite/migrations directory.
-// Panics with a helpful message if the migrations directory cannot be found.
-func GetMigrationsPath() string {
-	cwd, err := os.Getwd()
-	if err != nil {
-		panic("failed to get current working directory: " + err.Error())
-	}
-
-	// Search upward from the current directory until we find the storage directory
-	projectRoot := cwd
-	for projectRoot != "/" {
-		migrationsPath := filepath.Join(projectRoot, "storage", "sqlite", "migrations")
-		if fileExists(migrationsPath) {
-			return migrationsPath
-		}
-		projectRoot = filepath.Dir(projectRoot)
-	}
-
-	panic("could not find storage/sqlite/migrations directory. " +
-		"Make sure you're running tests from within the project repository.")
-}
-
-// fileExists checks if a file or directory exists at the given path.
-func fileExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
 }

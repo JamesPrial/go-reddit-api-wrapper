@@ -54,8 +54,7 @@ func getTestStore(t *testing.T) storage.Store {
 	t.Helper()
 
 	cfg := storage.Config{
-		DSN:            ":memory:",
-		MigrationsPath: "migrations",
+		DSN: ":memory:",
 	}
 
 	store, err := storage.New(context.Background(), cfg)
@@ -73,8 +72,7 @@ func getTestFileStore(t *testing.T, dbPath string) storage.Store {
 	t.Helper()
 
 	cfg := storage.Config{
-		DSN:            dbPath,
-		MigrationsPath: "migrations",
+		DSN: dbPath,
 	}
 
 	store, err := storage.New(context.Background(), cfg)

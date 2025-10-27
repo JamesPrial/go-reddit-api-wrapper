@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 	"time"
 
@@ -107,40 +106,19 @@ func main() {
 		sqliteDbPath = "./reddit_cache.db"
 	}
 
-	// Determine migrations path - allow override via environment variable
-	migrationsPath := os.Getenv("SQLITE_MIGRATIONS_PATH")
-	if migrationsPath == "" {
-		// Default to path relative to executable
-		exePath, err := os.Executable()
-		if err != nil {
-			logger.Error("failed to get executable path", "error", err)
-			os.Exit(1)
-		}
-		migrationsPath = filepath.Join(filepath.Dir(exePath), "storage/sqlite/migrations")
-	}
-
-	// Verify migrations path exists
-	if _, err := os.Stat(migrationsPath); err != nil {
-		logger.Warn("migrations path does not exist",
-			"path", migrationsPath,
-			"error", err,
-			"help", "set SQLITE_MIGRATIONS_PATH environment variable to override")
-	}
-
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	storeConfig := storage.Config{
-		DSN:            sqliteDbPath,
-		MigrationsPath: migrationsPath,
-		Logger:         logger,
+		DSN:    sqliteDbPath,
+		Logger: logger,
 	}
 	store, err := storage.New(ctx, storeConfig)
 	cancel()
 	if err != nil {
-		logger.Error("failed to initialize storage", "db_path", sqliteDbPath, "migrations_path", migrationsPath, "error", err)
+		logger.Error("failed to initialize storage", "db_path", sqliteDbPath, "error", err)
 		os.Exit(1)
 	}
 
-	logger.Info("storage initialized successfully", "db_path", sqliteDbPath, "migrations_path", migrationsPath)
+	logger.Info("storage initialized successfully", "db_path", sqliteDbPath)
 
 	// Create handler with store
 	handler := NewHandler(sessionManager, logger, store)

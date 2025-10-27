@@ -20,8 +20,7 @@ func setupBenchmarkDB(b *testing.B) storage.Store {
 	b.Helper()
 
 	cfg := storage.Config{
-		DSN:            ":memory:",
-		MigrationsPath: testutil.GetMigrationsPath(),
+		DSN: ":memory:",
 	}
 
 	store, err := storage.New(context.Background(), cfg)

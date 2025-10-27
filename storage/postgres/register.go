@@ -8,9 +8,7 @@
 //
 // Once imported, storage.New() will automatically support "postgres", "postgresql", and "pgx"
 // driver names. All database configuration is done through the standard storage.Config
-// type (DSN, MaxOpenConns, MaxIdleConns, ConnMaxLifetime, MigrationsPath, Logger).
-//
-// The default migrations path is "storage/postgres/migrations" if not specified.
+// type (DSN, MaxOpenConns, MaxIdleConns, ConnMaxLifetime, Logger).
 package postgres
 
 import (
@@ -28,14 +26,8 @@ func init() {
 }
 
 // newStoreFactory is the factory function that creates a Store from storage.Config.
-// It sets the default migrations path to the backend's migrations directory if not specified,
-// then delegates to the internal PostgreSQL implementation.
+// It delegates to the internal PostgreSQL implementation.
 func newStoreFactory(ctx context.Context, cfg storage.Config) (storage.Store, error) {
-	// Update migrations path default to point to the backend's migrations directory
-	if cfg.MigrationsPath == "" {
-		cfg.MigrationsPath = "storage/postgres/migrations"
-	}
-
 	// Delegate to internal PostgreSQL implementation
 	return internalpostgres.NewStore(ctx, cfg)
 }

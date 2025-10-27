@@ -3,25 +3,27 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"embed"
 	"fmt"
 	"log/slog"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/database/sqlite3"
-	_ "github.com/golang-migrate/migrate/v4/source/file"
+	"github.com/golang-migrate/migrate/v4/source/iofs"
 	"github.com/jamesprial/go-reddit-api-wrapper/storage"
 	_ "github.com/mattn/go-sqlite3"
 )
 
+// migrationsFS holds the embedded migrations. It is set by init() in the public package.
+var migrationsFS embed.FS
+
 const (
-	DEFAULT_DB_PATH         = "reddit.db"
-	DEFAULT_MAX_OPEN_CONNS  = 10
-	DEFAULT_MAX_IDLE_CONNS  = 5
-	DEFAULT_CONN_MAX_LIFE   = 0
-	DEFAULT_MIGRATIONS_PATH = "storage/sqlite/migrations"
+	DEFAULT_DB_PATH        = "reddit.db"
+	DEFAULT_MAX_OPEN_CONNS = 10
+	DEFAULT_MAX_IDLE_CONNS = 5
+	DEFAULT_CONN_MAX_LIFE  = 0
 )
 
 // Config holds configuration options for SQLiteStore.
@@ -53,11 +55,6 @@ type Config struct {
 	// If <= 0, connections are not closed due to age (unlimited lifetime).
 	ConnMaxLife time.Duration
 
-	// MigrationsPath specifies the directory containing migration files.
-	// If empty, defaults to DEFAULT_MIGRATIONS_PATH.
-	// This can be overridden for testing or when migrations are in a non-standard location.
-	MigrationsPath string
-
 	// Logger is used for structured logging.
 	// If nil, uses slog.Default().
 	Logger *slog.Logger
@@ -78,12 +75,11 @@ type SQLiteStore struct {
 func NewStore(ctx context.Context, cfg storage.Config) (storage.Store, error) {
 	// Convert storage.Config to sqlite-specific Config
 	sqliteConfig := &Config{
-		DBPath:         cfg.DSN,
-		MaxOpenConns:   cfg.MaxOpenConns,
-		MaxIdleConns:   cfg.MaxIdleConns,
-		ConnMaxLife:    cfg.ConnMaxLifetime,
-		MigrationsPath: cfg.MigrationsPath,
-		Logger:         cfg.Logger,
+		DBPath:       cfg.DSN,
+		MaxOpenConns: cfg.MaxOpenConns,
+		MaxIdleConns: cfg.MaxIdleConns,
+		ConnMaxLife:  cfg.ConnMaxLifetime,
+		Logger:       cfg.Logger,
 	}
 
 	return NewSQLiteStore(sqliteConfig)
@@ -184,7 +180,7 @@ func NewSQLiteStore(cfg *Config) (*SQLiteStore, error) {
 	}
 
 	// Run database migrations
-	if err := store.runMigrations(cfg.MigrationsPath); err != nil {
+	if err := store.runMigrations(); err != nil {
 		db.Close() // Clean up on migration failure
 		return nil, &storage.DatabaseError{Operation: "NewSQLiteStore", Message: "failed to run migrations", Err: err}
 	}
@@ -195,38 +191,24 @@ func NewSQLiteStore(cfg *Config) (*SQLiteStore, error) {
 }
 
 // runMigrations applies all pending database migrations using golang-migrate.
-// It handles both file-based databases and in-memory databases.
+// It uses embedded migrations bundled at compile time, so they are always available.
 // Returns an error if migration setup or execution fails.
 // Returns nil if migrations are already up-to-date (ErrNoChange is not considered an error).
-func (s *SQLiteStore) runMigrations(migrationsPath string) error {
+func (s *SQLiteStore) runMigrations() error {
 	// Create a database driver instance for golang-migrate
 	driver, err := sqlite3.WithInstance(s.db, &sqlite3.Config{})
 	if err != nil {
 		return &storage.DatabaseError{Operation: "runMigrations", Message: "failed to create migration driver", Err: err}
 	}
 
-	// Use default migrations path if not specified
-	if migrationsPath == "" {
-		migrationsPath = DEFAULT_MIGRATIONS_PATH
+	// Create source from embedded FS
+	src, err := iofs.New(migrationsFS, "migrations")
+	if err != nil {
+		return &storage.DatabaseError{Operation: "runMigrations", Message: "failed to create embedded migrations source", Err: err}
 	}
 
-	// Convert to absolute path if it's not already absolute
-	if !filepath.IsAbs(migrationsPath) {
-		absPath, err := filepath.Abs(migrationsPath)
-		if err != nil {
-			return &storage.DatabaseError{Operation: "runMigrations", Message: "failed to resolve migrations path", Err: err}
-		}
-		migrationsPath = absPath
-	}
-
-	// Create migrate instance with file source and database driver
-	// Use file:// prefix for file-based migration source
-	sourceURL := fmt.Sprintf("file://%s", migrationsPath)
-	m, err := migrate.NewWithDatabaseInstance(
-		sourceURL,
-		"sqlite3",
-		driver,
-	)
+	// Create migrate instance with embedded source and database driver
+	m, err := migrate.NewWithInstance("iofs", src, "sqlite3", driver)
 	if err != nil {
 		return &storage.DatabaseError{Operation: "runMigrations", Message: "failed to create migrate instance", Err: err}
 	}
@@ -264,4 +246,10 @@ func (s *SQLiteStore) Ping(ctx context.Context) error {
 		return &storage.DatabaseError{Operation: "Ping", Message: "database ping failed", Err: err}
 	}
 	return nil
+}
+
+// SetMigrationsFS sets the embedded migrations filesystem.
+// This is called by the public package's init() function.
+func SetMigrationsFS(fs embed.FS) {
+	migrationsFS = fs
 }

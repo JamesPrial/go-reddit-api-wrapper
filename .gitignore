@@ -52,6 +52,7 @@ example
 frontend/server/reddit-server
 frontend/server/reddit-auth-server
 frontend/server/server
+frontend/server/test-server
 
 # Server log files
 *.log

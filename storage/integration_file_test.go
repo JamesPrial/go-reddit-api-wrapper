@@ -24,8 +24,7 @@ func reopenFileStore(t *testing.T, dbPath string) storage.Store {
 	t.Helper()
 
 	cfg := storage.Config{
-		DSN:            dbPath,
-		MigrationsPath: "migrations",
+		DSN: dbPath,
 	}
 
 	store, err := storage.New(context.Background(), cfg)

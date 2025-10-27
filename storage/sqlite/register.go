@@ -8,9 +8,9 @@
 //
 // Once imported, storage.New() will automatically support "sqlite" and "sqlite3"
 // driver names. All database configuration is done through the standard storage.Config
-// type (DSN, MaxOpenConns, MaxIdleConns, ConnMaxLifetime, MigrationsPath, Logger).
+// type (DSN, MaxOpenConns, MaxIdleConns, ConnMaxLifetime, Logger).
 //
-// The default migrations path is "storage/sqlite/migrations" if not specified.
+// Migrations are embedded at compile time and automatically applied when the store is created.
 package sqlite
 
 import (
@@ -26,20 +26,17 @@ import (
 type SQLiteStore = internalsqlite.SQLiteStore
 
 func init() {
+	// Set the embedded migrations filesystem in the internal package
+	internalsqlite.SetMigrationsFS(migrationsFS)
+
 	// Register factory for both "sqlite" and "sqlite3" driver names
 	storage.RegisterFactory("sqlite", newStoreFactory)
 	storage.RegisterFactory("sqlite3", newStoreFactory)
 }
 
 // newStoreFactory is the factory function that creates a Store from storage.Config.
-// It sets the default migrations path to the backend's migrations directory if not specified,
-// then delegates to the internal SQLite implementation.
+// It delegates to the internal SQLite implementation.
 func newStoreFactory(ctx context.Context, cfg storage.Config) (storage.Store, error) {
-	// Update migrations path default to point to the backend's migrations directory
-	if cfg.MigrationsPath == "" {
-		cfg.MigrationsPath = "storage/sqlite/migrations"
-	}
-
 	// Delegate to internal SQLite implementation
 	return internalsqlite.NewStore(ctx, cfg)
 }
