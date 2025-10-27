@@ -109,12 +109,6 @@ func (h *Handler) LoginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate input
-	if req.Username == "" || req.Password == "" {
-		sendErrorResponse(w, http.StatusBadRequest, "username and password are required")
-		return
-	}
-
 	// Get Reddit credentials from environment
 	clientID := os.Getenv("REDDIT_CLIENT_ID")
 	clientSecret := os.Getenv("REDDIT_CLIENT_SECRET")
@@ -125,10 +119,22 @@ func (h *Handler) LoginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Determine authentication mode
+	var authMode string
+	var sessionUsername string
+
+	if req.Username != "" && req.Password != "" {
+		authMode = "user"
+		sessionUsername = req.Username
+	} else {
+		authMode = "app-only"
+		sessionUsername = "app-only"
+	}
+
 	// Create Reddit client configuration
 	config := &graw.Config{
-		Username:     req.Username,
-		Password:     req.Password,
+		Username:     req.Username, // Empty string for app-only mode
+		Password:     req.Password, // Empty string for app-only mode
 		ClientID:     clientID,
 		ClientSecret: clientSecret,
 		UserAgent:    "reddit-frontend-server/1.0 by /u/yourredditname",
@@ -139,22 +145,24 @@ func (h *Handler) LoginHandler(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
+	h.logger.Info("authenticating with Reddit", "auth_mode", authMode)
+
 	client, err := graw.NewClientWithContext(ctx, config)
 	if err != nil {
-		h.logger.Error("failed to authenticate with Reddit", "error", err)
+		h.logger.Error("failed to authenticate with Reddit", "auth_mode", authMode, "error", err)
 		sendErrorResponse(w, http.StatusUnauthorized, "invalid credentials")
 		return
 	}
 
 	// Create session
-	sessionID, token, err := h.sessionManager.CreateSession(req.Username, client)
+	sessionID, token, err := h.sessionManager.CreateSession(sessionUsername, client)
 	if err != nil {
 		h.logger.Error("failed to create session", "error", err)
 		sendErrorResponse(w, http.StatusInternalServerError, "failed to create session")
 		return
 	}
 
-	h.logger.Info("user logged in", "username", req.Username, "session_id", sessionID)
+	h.logger.Info("user logged in", "auth_mode", authMode, "username", sessionUsername, "session_id", sessionID)
 
 	// Send response
 	w.Header().Set("Content-Type", "application/json")
@@ -162,7 +170,7 @@ func (h *Handler) LoginHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(LoginResponse{
 		Success:  true,
 		Token:    token,
-		Username: req.Username,
+		Username: sessionUsername,
 	})
 }
 
@@ -205,7 +213,20 @@ func (h *Handler) StatusHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get user info from Reddit
+	// For app-only sessions, skip user info fetch
+	if session.Username == "app-only" {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(StatusResponse{
+			Authenticated: true,
+			Username:      "app-only",
+			LinkKarma:     0,
+			CommentKarma:  0,
+		})
+		return
+	}
+
+	// Get user info from Reddit for user-authenticated sessions
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
