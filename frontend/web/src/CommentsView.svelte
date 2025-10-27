@@ -7,6 +7,7 @@
   export let loading = false;
   export let error = '';
   export let onClose = () => {};
+  export let source = 'live';
 
   let previouslyFocusedElement = null;
   let modalContent = null;
@@ -141,7 +142,12 @@
         </div>
       {:else if comments.length === 0}
         <div class="empty-comments">
-          <p>No comments found</p>
+          {#if source === 'saved'}
+            <p>Comments not cached</p>
+            <p class="empty-details">This post was saved but comments weren't loaded.</p>
+          {:else}
+            <p>No comments found</p>
+          {/if}
         </div>
       {:else}
         <div class="comments-list">
@@ -341,6 +347,15 @@
     padding: 40px 20px;
     color: #666;
     font-size: 14px;
+  }
+
+  .empty-comments p {
+    margin: 8px 0;
+  }
+
+  .empty-details {
+    font-size: 13px;
+    color: #999;
   }
 
   .comments-list {

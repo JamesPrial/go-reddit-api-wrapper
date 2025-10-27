@@ -6,8 +6,12 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
+
+	"github.com/jamesprial/go-reddit-api-wrapper/storage"
+	_ "github.com/jamesprial/go-reddit-api-wrapper/storage/sqlite"
 )
 
 // statusRecorder wraps http.ResponseWriter to capture the status code.
@@ -100,8 +104,50 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Create handler
-	handler := NewHandler(sessionManager, logger)
+	// Initialize storage for caching posts and comments
+	var store storage.Store
+	sqliteDbPath := os.Getenv("SQLITE_DB_PATH")
+	if sqliteDbPath == "" {
+		sqliteDbPath = "./reddit_cache.db"
+	}
+
+	// Determine migrations path - allow override via environment variable
+	migrationsPath := os.Getenv("SQLITE_MIGRATIONS_PATH")
+	if migrationsPath == "" {
+		// Default to path relative to executable
+		exePath, err := os.Executable()
+		if err != nil {
+			logger.Error("failed to get executable path", "error", err)
+			os.Exit(1)
+		}
+		migrationsPath = filepath.Join(filepath.Dir(exePath), "storage/sqlite/migrations")
+	}
+
+	// Verify migrations path exists
+	if _, err := os.Stat(migrationsPath); err != nil {
+		logger.Warn("migrations path does not exist",
+			"path", migrationsPath,
+			"error", err,
+			"help", "set SQLITE_MIGRATIONS_PATH environment variable to override")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	storeConfig := storage.Config{
+		DSN:            sqliteDbPath,
+		MigrationsPath: migrationsPath,
+		Logger:         logger,
+	}
+	store, err = storage.New(ctx, storeConfig)
+	cancel()
+	if err != nil {
+		logger.Error("failed to initialize storage", "db_path", sqliteDbPath, "migrations_path", migrationsPath, "error", err)
+		os.Exit(1)
+	}
+
+	logger.Info("storage initialized successfully", "db_path", sqliteDbPath, "migrations_path", migrationsPath)
+
+	// Create handler with store
+	handler := NewHandler(sessionManager, logger, store)
 
 	// Create router
 	mux := http.NewServeMux()
@@ -115,6 +161,10 @@ func main() {
 	mux.HandleFunc("/api/posts", handler.PostsHandler)
 	mux.HandleFunc("/api/comments", handler.CommentsHandler)
 
+	// Register cached content routes
+	mux.HandleFunc("GET /api/saved/posts", handler.handleGetSavedPosts)
+	mux.HandleFunc("GET /api/saved/comments", handler.handleGetSavedComments)
+
 	// Health check endpoint
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -126,6 +176,8 @@ func main() {
 	var muxWithMiddleware http.Handler = mux
 	muxWithMiddleware = CORSMiddleware(muxWithMiddleware)
 	muxWithMiddleware = LoggingMiddleware(logger)(muxWithMiddleware)
+
+	logger.Info("all components initialized successfully")
 
 	// Create HTTP server
 	server := &http.Server{
@@ -162,10 +214,27 @@ func main() {
 	// Stop session cleanup goroutine
 	sessionManager.Stop()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+	// Close storage with timeout
+	if store != nil {
+		_, closeCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer closeCancel()
 
-	if err := server.Shutdown(ctx); err != nil {
+		if err := store.Close(); err != nil {
+			logger.Error("failed to close storage on first attempt", "error", err)
+			// For SQLite, a delay may help with pending operations
+			time.Sleep(100 * time.Millisecond)
+			if err := store.Close(); err != nil {
+				logger.Error("failed to close storage on second attempt", "error", err)
+			}
+		} else {
+			logger.Info("storage closed successfully")
+		}
+	}
+
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer shutdownCancel()
+
+	if err := server.Shutdown(shutdownCtx); err != nil {
 		logger.Error("failed to shutdown server gracefully", "error", err)
 		os.Exit(1)
 	}

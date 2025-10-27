@@ -1,10 +1,11 @@
 <script>
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
   import Login from './Login.svelte';
   import SubredditSearch from './SubredditSearch.svelte';
   import PostsList from './PostsList.svelte';
+  import SavedPostsList from './SavedPostsList.svelte';
   import CommentsView from './CommentsView.svelte';
-  import { checkAuth, logout, fetchSubredditPosts, fetchPostComments, APIError } from './api.js';
+  import { checkAuth, logout, fetchSubredditPosts, fetchPostComments, fetchSavedComments, APIError } from './api.js';
   import { sanitizePost, sanitizeComment, sanitizeText, sanitizeNumber } from './utils/sanitize.js';
 
   // Authentication state
@@ -30,9 +31,15 @@
   let commentsLoading = false;
   let commentsError = '';
   let showCommentsModal = false;
+  let commentSource = 'live'; // 'live' or 'saved'
+  let currentlyFetchingPostId = null; // Track which post we're currently fetching comments for
+
+  // View state
+  let currentView = 'browse'; // 'browse' or 'saved'
 
   // Request cancellation
   let searchAbortController = null;
+  let commentsAbortController = null;
 
   /**
    * Check if user is already authenticated on mount
@@ -41,6 +48,24 @@
     // Check if we have a token in memory
     // (In a real app, you might use sessionStorage or localStorage)
     loading = false;
+  });
+
+  /**
+   * Cleanup on component destroy
+   * Abort any in-flight requests and prevent state updates after unmount
+   */
+  onDestroy(() => {
+    // Abort any in-flight search requests
+    if (searchAbortController) {
+      searchAbortController.abort();
+      searchAbortController = null;
+    }
+
+    // Abort any in-flight comments requests
+    if (commentsAbortController) {
+      commentsAbortController.abort();
+      commentsAbortController = null;
+    }
   });
 
   /**
@@ -83,6 +108,7 @@
       selectedPost = null;
       comments = [];
       showCommentsModal = false;
+      currentView = 'browse';
     }
   }
 
@@ -167,33 +193,67 @@
 
   /**
    * Handle post selection to view comments
+   * Tracks which post is being fetched to prevent race conditions from rapid clicks
    */
-  async function handleSelectPost(post) {
+  async function handleSelectPost(post, source = 'live') {
     // Sanitize the selected post before displaying
-    selectedPost = sanitizePost(post);
+    const sanitizedPost = sanitizePost(post);
+    const postId = sanitizedPost.id;
+
+    // Track which post we're currently fetching comments for
+    currentlyFetchingPostId = postId;
+
+    // Cancel previous comments fetch if one is in progress
+    if (commentsAbortController) {
+      commentsAbortController.abort();
+    }
+
+    // Create new abort controller for this comments fetch
+    commentsAbortController = new AbortController();
+
+    selectedPost = sanitizedPost;
+    commentSource = source;
     commentsError = '';
     commentsLoading = true;
     comments = [];
     showCommentsModal = true;
 
     try {
-      // Extract post ID from fullname (e.g., "t3_abc123" -> "abc123")
-      const postId = post.id;
-      const response = await fetchPostComments(token, postId, currentSubreddit);
+      let response;
 
-      // Sanitize all comments from the response
-      const sanitizedComments = (response.comments || []).map(sanitizeComment).filter(Boolean);
-
-      comments = sanitizedComments;
-    } catch (err) {
-      if (err instanceof APIError) {
-        commentsError = err.message || 'Failed to load comments';
+      if (source === 'saved') {
+        // For saved posts, try to fetch cached comments
+        response = await fetchSavedComments(token, postId, post.subreddit || '');
       } else {
-        commentsError = 'Network error. Please try again.';
+        // For live posts, fetch comments from the API
+        response = await fetchPostComments(token, postId, currentSubreddit);
       }
-      console.error('Comments fetch error:', err);
+
+      // Only update state if we're still fetching this specific post
+      if (currentlyFetchingPostId === postId) {
+        const sanitizedComments = (response.comments || []).map(sanitizeComment).filter(Boolean);
+        comments = sanitizedComments;
+      }
+    } catch (err) {
+      // Ignore abort errors (user clicked a different post while this was loading)
+      if (err.name === 'AbortError') {
+        return;
+      }
+
+      // Only update error state if we're still fetching this specific post
+      if (currentlyFetchingPostId === postId) {
+        if (err instanceof APIError) {
+          commentsError = err.message || 'Failed to load comments';
+        } else {
+          commentsError = 'Network error. Please try again.';
+        }
+        console.error('Comments fetch error:', err);
+      }
     } finally {
-      commentsLoading = false;
+      // Only clear loading state if we're still fetching this specific post
+      if (currentlyFetchingPostId === postId) {
+        commentsLoading = false;
+      }
     }
   }
 
@@ -241,51 +301,78 @@
         </div>
       </header>
 
+      <!-- Navigation Tabs -->
+      <div class="nav-tabs">
+        <button
+          class="nav-tab"
+          class:active={currentView === 'browse'}
+          on:click={() => currentView = 'browse'}
+        >
+          Browse Subreddits
+        </button>
+        <button
+          class="nav-tab"
+          class:active={currentView === 'saved'}
+          on:click={() => currentView = 'saved'}
+        >
+          Saved Posts
+        </button>
+      </div>
+
       <div class="content">
-        {#if !currentSubreddit}
-          <!-- Initial welcome state -->
-          <div class="welcome-card">
-            <h2>Welcome, {username}!</h2>
-            <p>You're successfully logged in to Reddit.</p>
+        {#if currentView === 'browse'}
+          <!-- Browse View -->
+          {#if !currentSubreddit}
+            <!-- Initial welcome state -->
+            <div class="welcome-card">
+              <h2>Welcome, {username}!</h2>
+              <p>You're successfully logged in to Reddit.</p>
 
-            {#if userInfo}
-              <div class="stats">
-                <div class="stat">
-                  <div class="stat-value">{userInfo.link_karma?.toLocaleString() || 0}</div>
-                  <div class="stat-label">Link Karma</div>
+              {#if userInfo}
+                <div class="stats">
+                  <div class="stat">
+                    <div class="stat-value">{userInfo.link_karma?.toLocaleString() || 0}</div>
+                    <div class="stat-label">Link Karma</div>
+                  </div>
+                  <div class="stat">
+                    <div class="stat-value">{userInfo.comment_karma?.toLocaleString() || 0}</div>
+                    <div class="stat-label">Comment Karma</div>
+                  </div>
+                  <div class="stat">
+                    <div class="stat-value">{(userInfo.link_karma + userInfo.comment_karma)?.toLocaleString() || 0}</div>
+                    <div class="stat-label">Total Karma</div>
+                  </div>
                 </div>
-                <div class="stat">
-                  <div class="stat-value">{userInfo.comment_karma?.toLocaleString() || 0}</div>
-                  <div class="stat-label">Comment Karma</div>
+              {/if}
+
+              {#if error}
+                <div class="error-banner">
+                  {error}
                 </div>
-                <div class="stat">
-                  <div class="stat-value">{(userInfo.link_karma + userInfo.comment_karma)?.toLocaleString() || 0}</div>
-                  <div class="stat-label">Total Karma</div>
-                </div>
-              </div>
-            {/if}
+              {/if}
+            </div>
+          {/if}
 
-            {#if error}
-              <div class="error-banner">
-                {error}
-              </div>
-            {/if}
-          </div>
-        {/if}
+          <!-- Subreddit search component -->
+          <SubredditSearch onSearch={handleSearch} loading={postsLoading} />
 
-        <!-- Subreddit search component -->
-        <SubredditSearch onSearch={handleSearch} loading={postsLoading} />
-
-        <!-- Posts list component -->
-        {#if currentSubreddit}
-          <PostsList
-            posts={posts}
-            loading={postsLoading}
-            error={postsError}
-            onSelectPost={handleSelectPost}
-            onLoadMore={handleLoadMore}
-            afterFullname={afterFullname}
-            hasMore={hasMore}
+          <!-- Posts list component -->
+          {#if currentSubreddit}
+            <PostsList
+              posts={posts}
+              loading={postsLoading}
+              error={postsError}
+              onSelectPost={(post) => handleSelectPost(post, 'live')}
+              onLoadMore={handleLoadMore}
+              afterFullname={afterFullname}
+              hasMore={hasMore}
+            />
+          {/if}
+        {:else if currentView === 'saved'}
+          <!-- Saved View -->
+          <SavedPostsList
+            token={token}
+            onSelectPost={(post) => handleSelectPost(post, 'saved')}
           />
         {/if}
 
@@ -297,6 +384,7 @@
             loading={commentsLoading}
             error={commentsError}
             onClose={handleCloseComments}
+            source={commentSource}
           />
         {/if}
       </div>
@@ -347,6 +435,37 @@
     background: white;
     border-bottom: 1px solid #e0e0e0;
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+  }
+
+  .nav-tabs {
+    background: white;
+    border-bottom: 1px solid #e0e0e0;
+    display: flex;
+    gap: 0;
+  }
+
+  .nav-tab {
+    flex: 1;
+    padding: 16px 24px;
+    border: none;
+    background: none;
+    color: #666;
+    font-size: 15px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+    border-bottom: 3px solid transparent;
+    position: relative;
+  }
+
+  .nav-tab:hover {
+    color: #333;
+    background-color: #f9f9f9;
+  }
+
+  .nav-tab.active {
+    color: #667eea;
+    border-bottom-color: #667eea;
   }
 
   .header-content {
@@ -515,6 +634,11 @@
 
     .welcome-card {
       padding: 24px;
+    }
+
+    .nav-tab {
+      padding: 14px 16px;
+      font-size: 13px;
     }
   }
 </style>

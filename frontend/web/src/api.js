@@ -1,6 +1,17 @@
 // API client for communicating with the backend server
+import { sanitizeText } from './utils/sanitize.js';
 
 const API_BASE_URL = '/api';
+
+// Allowed sort values for validation
+const ALLOWED_SORTS = ['hot', 'new', 'top', 'rising', 'created_utc', 'score', 'num_comments'];
+
+// Maximum reasonable limit value (Reddit API max is 100)
+const MAX_LIMIT = 100;
+const MIN_LIMIT = 1;
+
+// Maximum reasonable offset value
+const MAX_OFFSET = 10000;
 
 /**
  * Custom error class for API errors
@@ -12,6 +23,74 @@ export class APIError extends Error {
     this.status = status;
     this.details = details;
   }
+}
+
+/**
+ * Validate and sanitize a subreddit name
+ * @param {string} subreddit - Subreddit name to validate
+ * @returns {string} Sanitized subreddit name
+ * @throws {APIError} If subreddit is invalid
+ */
+function validateSubreddit(subreddit) {
+  if (!subreddit || typeof subreddit !== 'string') {
+    throw new APIError('Invalid subreddit name', 400, { field: 'subreddit' });
+  }
+
+  const sanitized = sanitizeText(subreddit, 100).trim();
+  if (!sanitized || sanitized.length === 0) {
+    throw new APIError('Subreddit name cannot be empty', 400, { field: 'subreddit' });
+  }
+
+  // Subreddit names can only contain alphanumeric, underscores, and hyphens
+  if (!/^[a-zA-Z0-9_-]+$/.test(sanitized)) {
+    throw new APIError('Invalid subreddit name format', 400, { field: 'subreddit' });
+  }
+
+  return sanitized;
+}
+
+/**
+ * Validate and sanitize a post ID
+ * @param {string} postId - Post ID to validate
+ * @returns {string} Sanitized post ID
+ * @throws {APIError} If post ID is invalid
+ */
+function validatePostId(postId) {
+  if (!postId || typeof postId !== 'string') {
+    throw new APIError('Invalid post ID', 400, { field: 'post_id' });
+  }
+
+  const sanitized = sanitizeText(postId, 100).trim();
+  if (!sanitized || sanitized.length === 0) {
+    throw new APIError('Post ID cannot be empty', 400, { field: 'post_id' });
+  }
+
+  // Post IDs are alphanumeric
+  if (!/^[a-zA-Z0-9_]+$/.test(sanitized)) {
+    throw new APIError('Invalid post ID format', 400, { field: 'post_id' });
+  }
+
+  return sanitized;
+}
+
+/**
+ * Validate and clamp pagination parameters
+ * @param {string} sort - Sort type to validate
+ * @param {number} limit - Limit to clamp
+ * @param {number} offset - Offset to clamp
+ * @returns {object} Validated parameters {sort, limit, offset}
+ */
+function validatePaginationParams(sort, limit, offset) {
+  // Validate sort parameter
+  const validatedSort = ALLOWED_SORTS.includes(sort) ? sort : 'created_utc';
+
+  // Clamp limit between MIN_LIMIT and MAX_LIMIT
+  const validatedLimit = Math.max(MIN_LIMIT, Math.min(MAX_LIMIT, Math.floor(limit || 25)));
+
+  // Clamp offset between 0 and MAX_OFFSET
+  const validatedOffset = Math.max(0, Math.min(MAX_OFFSET, Math.floor(offset || 0)));
+
+  return { sort: validatedSort, limit: validatedLimit, offset: validatedOffset };
 }
 
 /**
@@ -126,17 +205,22 @@ export async function logout(token) {
  * @returns {Promise<{posts: Array, after_fullname: string, before_fullname: string}>}
  */
 export async function fetchSubredditPosts(token, subreddit, sort = 'hot', after = '', limit = 25, signal = undefined) {
+  // Validate inputs
+  const validatedSubreddit = validateSubreddit(subreddit);
+  const { sort: validatedSort, limit: validatedLimit } = validatePaginationParams(sort, limit, undefined);
+  const sanitizedAfter = sanitizeText(after || '', 100);
+
   const params = new URLSearchParams({
-    subreddit,
-    sort,
-    limit: limit.toString(),
+    subreddit: validatedSubreddit,
+    sort: validatedSort,
+    limit: validatedLimit.toString(),
   });
 
-  if (after) {
-    params.append('after', after);
+  if (sanitizedAfter) {
+    params.append('after', sanitizedAfter);
   }
 
-  const data = await apiRequest(`/reddit/posts?${params.toString()}`, {
+  const data = await apiRequest(`/posts?${params.toString()}`, {
     method: 'GET',
     headers: {
       Authorization: `Bearer ${token}`,
@@ -155,12 +239,98 @@ export async function fetchSubredditPosts(token, subreddit, sort = 'hot', after 
  * @returns {Promise<{post: object, comments: Array, more_ids: Array}>}
  */
 export async function fetchPostComments(token, postId, subreddit) {
+  // Validate inputs
+  const validatedPostId = validatePostId(postId);
+  const validatedSubreddit = validateSubreddit(subreddit);
+
   const params = new URLSearchParams({
-    post_id: postId,
-    subreddit,
+    post_id: validatedPostId,
+    subreddit: validatedSubreddit,
   });
 
-  const data = await apiRequest(`/reddit/comments?${params.toString()}`, {
+  const data = await apiRequest(`/comments?${params.toString()}`, {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  return data;
+}
+
+/**
+ * Fetch saved posts from cache
+ * @param {string} token - JWT token
+ * @param {object} options - Query options
+ * @param {string} options.subreddit - Filter by subreddit (optional)
+ * @param {number} options.limit - Number of posts to fetch (default: 25)
+ * @param {number} options.offset - Pagination offset (default: 0)
+ * @param {string} options.sort - Sort by: 'created_utc', 'score', 'num_comments' (default: 'created_utc')
+ * @param {AbortSignal} signal - Abort signal for request cancellation (optional)
+ * @returns {Promise<{posts: Array, total: number, offset: number}>}
+ */
+export async function fetchSavedPosts(token, options = {}, signal = undefined) {
+  const { subreddit = '', limit = 25, offset = 0, sort = 'created_utc' } = options;
+
+  // Validate pagination parameters
+  const { sort: validatedSort, limit: validatedLimit, offset: validatedOffset } = validatePaginationParams(sort, limit, offset);
+
+  // Validate and sanitize subreddit filter if provided
+  let validatedSubreddit = '';
+  if (subreddit && subreddit.trim()) {
+    try {
+      validatedSubreddit = validateSubreddit(subreddit);
+    } catch (err) {
+      // If subreddit validation fails, ignore the filter (don't throw)
+      console.warn('Invalid subreddit filter:', err.message);
+      validatedSubreddit = '';
+    }
+  }
+
+  const params = new URLSearchParams();
+  if (validatedSubreddit) params.append('subreddit', validatedSubreddit);
+  params.append('limit', validatedLimit.toString());
+  params.append('offset', validatedOffset.toString());
+  params.append('sort', validatedSort);
+
+  const data = await apiRequest(`/saved/posts?${params.toString()}`, {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    signal,
+  });
+
+  return data;
+}
+
+/**
+ * Fetch comments for a saved post
+ * @param {string} token - JWT token
+ * @param {string} postId - Post ID (e.g., 'abc123' without the t3_ prefix)
+ * @param {string} subreddit - Subreddit name (e.g., 'javascript')
+ * @returns {Promise<{comments: Array}>}
+ */
+export async function fetchSavedComments(token, postId, subreddit = '') {
+  // Validate post ID
+  const validatedPostId = validatePostId(postId);
+
+  // Validate and sanitize subreddit if provided
+  let validatedSubreddit = '';
+  if (subreddit && subreddit.trim()) {
+    try {
+      validatedSubreddit = validateSubreddit(subreddit);
+    } catch (err) {
+      // If subreddit validation fails, ignore it (don't throw)
+      console.warn('Invalid subreddit:', err.message);
+      validatedSubreddit = '';
+    }
+  }
+
+  const params = new URLSearchParams({ post_id: validatedPostId });
+  if (validatedSubreddit) params.append('subreddit', validatedSubreddit);
+
+  const data = await apiRequest(`/saved/comments?${params.toString()}`, {
     method: 'GET',
     headers: {
       Authorization: `Bearer ${token}`,

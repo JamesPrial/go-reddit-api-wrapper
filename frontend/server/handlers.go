@@ -15,6 +15,7 @@ import (
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/validation"
 	graw "github.com/jamesprial/go-reddit-api-wrapper/reddit"
+	"github.com/jamesprial/go-reddit-api-wrapper/storage"
 	"golang.org/x/time/rate"
 )
 
@@ -29,6 +30,10 @@ const (
 	defaultCommentLimit = 25
 	// maxCommentLimit is the maximum number of comments allowed per request.
 	maxCommentLimit = 100
+	// maxOffsetLimit prevents deep pagination performance issues.
+	maxOffsetLimit = 10000
+	// cacheOperationTimeout is the timeout for background cache operations (posts, comments).
+	cacheOperationTimeout = 15 * time.Second
 )
 
 // Validation patterns for input sanitization
@@ -511,6 +516,21 @@ func (h *Handler) PostsHandler(w http.ResponseWriter, r *http.Request) {
 
 	h.logger.Info("fetched posts", "subreddit", subreddit, "sort", sortBy, "count", len(postDataList))
 
+	// Auto-cache posts in background if storage is available
+	if h.store != nil && len(resp.Posts) > 0 {
+		go func() {
+			// Use Background context since cache operation should continue even if request is cancelled
+			ctx, cancel := context.WithTimeout(context.Background(), cacheOperationTimeout)
+			defer cancel()
+
+			if err := h.store.UpsertPosts(ctx, resp.Posts); err != nil {
+				h.logger.Error("failed to cache posts", "subreddit", subreddit, "error", err)
+			} else {
+				h.logger.Info("posts cached successfully", "subreddit", subreddit, "count", len(resp.Posts))
+			}
+		}()
+	}
+
 	// Send response
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -669,6 +689,29 @@ func (h *Handler) CommentsHandler(w http.ResponseWriter, r *http.Request) {
 
 	h.logger.Info("fetched comments", "subreddit", subreddit, "post_id", postID, "count", len(commentDataList))
 
+	// Auto-cache post and comments in background if storage is available
+	if h.store != nil {
+		go func() {
+			// Use Background context since cache operation should continue even if request is cancelled
+			ctx, cancel := context.WithTimeout(context.Background(), cacheOperationTimeout)
+			defer cancel()
+
+			// Save the post if present
+			if err := h.store.UpsertPost(ctx, resp.Post); err != nil {
+				h.logger.Error("failed to cache post", "post_id", postID, "error", err)
+			}
+
+			// Save the comments
+			if len(resp.Comments) > 0 {
+				if err := h.store.UpsertComments(ctx, resp.Comments); err != nil {
+					h.logger.Error("failed to cache comments", "post_id", postID, "error", err)
+				} else {
+					h.logger.Info("comments cached successfully", "post_id", postID, "count", len(resp.Comments))
+				}
+			}
+		}()
+	}
+
 	// Send response
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -680,6 +723,263 @@ func (h *Handler) CommentsHandler(w http.ResponseWriter, r *http.Request) {
 		BeforeFullname: resp.BeforeFullname,
 	}); err != nil {
 		h.logger.Error("failed to encode comments response", "error", err)
+	}
+}
+
+// handleGetSavedPosts handles the GET /api/saved/posts endpoint.
+// It retrieves cached posts from storage with optional filtering and sorting.
+// Query parameters: subreddit (optional), limit (optional, default 25, max 100),
+// offset (optional, default 0), sort (optional, default "created_utc").
+func (h *Handler) handleGetSavedPosts(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		sendErrorResponse(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	// Check rate limit for API endpoint
+	if !h.apiLimiter.Allow() {
+		h.logger.Warn("API rate limit exceeded")
+		sendErrorResponse(w, http.StatusTooManyRequests, "rate limit exceeded, please try again later")
+		return
+	}
+
+	// Extract JWT from Authorization header
+	tokenString, err := extractBearerToken(r)
+	if err != nil {
+		h.logger.Warn("authorization header error", "error", err)
+		switch err {
+		case ErrMissingAuthHeader:
+			sendErrorResponse(w, http.StatusUnauthorized, "missing authorization header")
+		case ErrInvalidAuthHeaderFormat:
+			sendErrorResponse(w, http.StatusUnauthorized, "invalid authorization header format")
+		default:
+			sendErrorResponse(w, http.StatusUnauthorized, "authorization error")
+		}
+		return
+	}
+
+	// Validate JWT
+	sessionID, err := h.sessionManager.ValidateJWT(tokenString)
+	if err != nil {
+		h.logger.Error("invalid JWT token", "error", err)
+		sendErrorResponse(w, http.StatusUnauthorized, "invalid or expired token")
+		return
+	}
+
+	// Get session to verify it exists
+	_, err = h.sessionManager.GetSession(sessionID)
+	if err != nil {
+		h.logger.Error("session not found", "error", err)
+		sendErrorResponse(w, http.StatusUnauthorized, "session not found")
+		return
+	}
+
+	// Check if storage is available
+	if h.store == nil {
+		h.logger.Warn("storage not available")
+		sendErrorResponse(w, http.StatusServiceUnavailable, "caching service not available")
+		return
+	}
+
+	// Parse and validate query parameters
+	subreddit := r.URL.Query().Get("subreddit")
+	if subreddit != "" && !validation.IsValidSubreddit(subreddit) {
+		h.logger.Warn("invalid subreddit parameter", "subreddit", subreddit)
+		sendErrorResponse(w, http.StatusBadRequest, "invalid subreddit name")
+		return
+	}
+
+	limit := parseIntParam(r, "limit", defaultPostLimit, maxPostLimit)
+	offset := parseIntParam(r, "offset", 0, maxOffsetLimit)
+	sortBy := r.URL.Query().Get("sort")
+	if sortBy == "" {
+		sortBy = "created_utc"
+	}
+
+	// Validate sort parameter for storage queries
+	if !isValidStorageSortParam(sortBy) {
+		h.logger.Warn("invalid sort parameter", "sort", sortBy)
+		sendErrorResponse(w, http.StatusBadRequest, "invalid sort parameter, must be 'created_utc', 'score', or 'num_comments'")
+		return
+	}
+
+	// Create context with timeout
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	// Query storage
+	opts := &storage.ListPostsOptions{
+		Subreddit: subreddit,
+		SortBy:    sortBy,
+		SortDir:   "desc",
+		Limit:     limit,
+		Offset:    offset,
+	}
+
+	posts, err := h.store.ListPosts(ctx, opts)
+	if err != nil {
+		h.logger.Error("failed to list cached posts", "subreddit", subreddit, "error", err)
+		sendErrorResponse(w, http.StatusInternalServerError, "failed to retrieve cached posts")
+		return
+	}
+
+	// Convert Post objects to PostData for response
+	postDataList := make([]*PostData, len(posts))
+	for i, post := range posts {
+		postDataList[i] = &PostData{
+			ID:          post.ID,
+			Title:       post.Title,
+			Author:      post.Author,
+			Score:       post.Score,
+			NumComments: post.NumComments,
+			URL:         post.URL,
+			Permalink:   post.Permalink,
+			Subreddit:   post.Subreddit,
+			SelfText:    post.SelfText,
+			Created:     post.CreatedUTC,
+			UpvoteRatio: post.UpvoteRatio,
+			IsSelf:      post.IsSelf,
+			Over18:      post.Over18,
+			Stickied:    post.Stickied,
+			Locked:      post.Locked,
+		}
+	}
+
+	h.logger.Info("retrieved cached posts", "subreddit", subreddit, "count", len(postDataList), "offset", offset)
+
+	// Send response
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(PostsResponse{
+		Posts:          postDataList,
+		AfterFullname:  "", // Cached endpoints use offset-based pagination, not fullname cursors
+		BeforeFullname: "", // Cached endpoints use offset-based pagination, not fullname cursors
+	}); err != nil {
+		h.logger.Error("failed to encode saved posts response", "error", err)
+	}
+}
+
+// handleGetSavedComments handles the GET /api/saved/comments endpoint.
+// It retrieves cached comments for a specific post from storage.
+// Query parameters: post_id (required), subreddit (optional).
+func (h *Handler) handleGetSavedComments(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		sendErrorResponse(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	// Check rate limit for API endpoint
+	if !h.apiLimiter.Allow() {
+		h.logger.Warn("API rate limit exceeded")
+		sendErrorResponse(w, http.StatusTooManyRequests, "rate limit exceeded, please try again later")
+		return
+	}
+
+	// Extract JWT from Authorization header
+	tokenString, err := extractBearerToken(r)
+	if err != nil {
+		h.logger.Warn("authorization header error", "error", err)
+		switch err {
+		case ErrMissingAuthHeader:
+			sendErrorResponse(w, http.StatusUnauthorized, "missing authorization header")
+		case ErrInvalidAuthHeaderFormat:
+			sendErrorResponse(w, http.StatusUnauthorized, "invalid authorization header format")
+		default:
+			sendErrorResponse(w, http.StatusUnauthorized, "authorization error")
+		}
+		return
+	}
+
+	// Validate JWT
+	sessionID, err := h.sessionManager.ValidateJWT(tokenString)
+	if err != nil {
+		h.logger.Error("invalid JWT token", "error", err)
+		sendErrorResponse(w, http.StatusUnauthorized, "invalid or expired token")
+		return
+	}
+
+	// Get session to verify it exists
+	_, err = h.sessionManager.GetSession(sessionID)
+	if err != nil {
+		h.logger.Error("session not found", "error", err)
+		sendErrorResponse(w, http.StatusUnauthorized, "session not found")
+		return
+	}
+
+	// Check if storage is available
+	if h.store == nil {
+		h.logger.Warn("storage not available")
+		sendErrorResponse(w, http.StatusServiceUnavailable, "caching service not available")
+		return
+	}
+
+	// Parse and validate query parameters
+	postID := r.URL.Query().Get("post_id")
+	if postID == "" {
+		h.logger.Warn("missing post_id parameter")
+		sendErrorResponse(w, http.StatusBadRequest, "post_id parameter is required")
+		return
+	}
+
+	// Validate post ID format
+	if !validatePostID(postID) {
+		h.logger.Warn("invalid post_id parameter", "post_id", postID)
+		sendErrorResponse(w, http.StatusBadRequest, "invalid post_id format")
+		return
+	}
+
+	subreddit := r.URL.Query().Get("subreddit")
+	if subreddit != "" && !validation.IsValidSubreddit(subreddit) {
+		h.logger.Warn("invalid subreddit parameter", "subreddit", subreddit)
+		sendErrorResponse(w, http.StatusBadRequest, "invalid subreddit name")
+		return
+	}
+
+	// Create context with timeout
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	// Query storage for comments tree
+	opts := &storage.CommentTreeOptions{
+		SortBy:  "score",
+		SortDir: "desc",
+	}
+
+	comments, err := h.store.GetCommentTree(ctx, postID, opts)
+	if err != nil {
+		h.logger.Error("failed to get cached comment tree", "post_id", postID, "error", err)
+		sendErrorResponse(w, http.StatusInternalServerError, "failed to retrieve cached comments")
+		return
+	}
+
+	// Convert Comment objects to CommentData for response
+	commentDataList := make([]*CommentData, len(comments))
+	for i, comment := range comments {
+		commentDataList[i] = &CommentData{
+			ID:        comment.ID,
+			Author:    comment.Author,
+			Body:      comment.Body,
+			Score:     comment.Score,
+			Created:   comment.CreatedUTC,
+			Subreddit: comment.Subreddit,
+			ParentID:  comment.ParentID,
+			Edited:    comment.Edited.IsEdited,
+		}
+	}
+
+	h.logger.Info("retrieved cached comments", "post_id", postID, "count", len(commentDataList))
+
+	// Send response (without the post since we're only retrieving comments)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(CommentsResponse{
+		Post:           nil,
+		Comments:       commentDataList,
+		MoreIDs:        nil,
+		AfterFullname:  "", // Cached endpoints do not use pagination cursors
+		BeforeFullname: "", // Cached endpoints do not use pagination cursors
+	}); err != nil {
+		h.logger.Error("failed to encode saved comments response", "error", err)
 	}
 }
 
@@ -735,10 +1035,20 @@ func validatePaginationCursor(cursor string) bool {
 	return paginationFullnameRegex.MatchString(cursor)
 }
 
-// isValidSortParam validates the sort parameter value.
+// isValidSortParam validates the sort parameter value for listing posts.
 func isValidSortParam(sort string) bool {
 	switch sort {
 	case "hot", "new":
+		return true
+	default:
+		return false
+	}
+}
+
+// isValidStorageSortParam validates the sort parameter value for cached storage queries.
+func isValidStorageSortParam(sort string) bool {
+	switch sort {
+	case "created_utc", "score", "num_comments":
 		return true
 	default:
 		return false
@@ -767,15 +1077,18 @@ type Handler struct {
 	logger         *slog.Logger
 	loginLimiter   *rate.Limiter
 	apiLimiter     *rate.Limiter
+	store          storage.Store
 }
 
 // NewHandler creates a new Handler instance.
 // It initializes rate limiting for the login endpoint (5 requests per second)
 // and for the API endpoints (10 requests per second with burst of 5).
-func NewHandler(sessionManager *SessionManager, logger *slog.Logger) *Handler {
+// The store parameter is optional and may be nil if caching is disabled.
+func NewHandler(sessionManager *SessionManager, logger *slog.Logger, store storage.Store) *Handler {
 	return &Handler{
 		sessionManager: sessionManager,
 		logger:         logger,
+		store:          store,
 		// Initialize rate limiter for login: 5 requests per second
 		// TODO: Consider implementing per-IP rate limiting for production deployments
 		loginLimiter: rate.NewLimiter(rate.Limit(5), 1),
