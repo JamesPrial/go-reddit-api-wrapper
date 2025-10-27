@@ -7,9 +7,13 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
+	"github.com/jamesprial/go-reddit-api-wrapper/pkg/validation"
 	graw "github.com/jamesprial/go-reddit-api-wrapper/reddit"
 	"golang.org/x/time/rate"
 )
@@ -17,7 +21,70 @@ import (
 const (
 	// maxRequestBodySize is the maximum allowed size for request bodies (1 MB).
 	maxRequestBodySize = 1 * 1024 * 1024
+	// defaultPostLimit is the default number of posts to return.
+	defaultPostLimit = 25
+	// maxPostLimit is the maximum number of posts allowed per request.
+	maxPostLimit = 100
+	// defaultCommentLimit is the default number of comments to return.
+	defaultCommentLimit = 25
+	// maxCommentLimit is the maximum number of comments allowed per request.
+	maxCommentLimit = 100
 )
+
+// Validation patterns for input sanitization
+var (
+	// postIDRegex matches valid Reddit post IDs (base36, 6-10 chars typical but allow up to 20)
+	postIDRegex = regexp.MustCompile(`^[0-9a-z]{1,20}$`)
+	// paginationFullnameRegex matches valid fullname pagination cursors (t3_xxxxx or t1_xxxxx)
+	paginationFullnameRegex = regexp.MustCompile(`^t[13]_[0-9a-z]+$`)
+)
+
+// PostData represents a simplified post for API responses.
+type PostData struct {
+	ID          string  `json:"id"`
+	Title       string  `json:"title"`
+	Author      string  `json:"author"`
+	Score       int     `json:"score"`
+	NumComments int     `json:"num_comments"`
+	URL         string  `json:"url"`
+	Permalink   string  `json:"permalink"`
+	Subreddit   string  `json:"subreddit"`
+	SelfText    string  `json:"selftext"`
+	Created     float64 `json:"created_utc"`
+	UpvoteRatio float64 `json:"upvote_ratio"`
+	IsSelf      bool    `json:"is_self"`
+	Over18      bool    `json:"over_18"`
+	Stickied    bool    `json:"stickied"`
+	Locked      bool    `json:"locked"`
+}
+
+// CommentData represents a simplified comment for API responses.
+type CommentData struct {
+	ID        string  `json:"id"`
+	Author    string  `json:"author"`
+	Body      string  `json:"body"`
+	Score     int     `json:"score"`
+	Created   float64 `json:"created_utc"`
+	Subreddit string  `json:"subreddit"`
+	ParentID  string  `json:"parent_id"`
+	Edited    bool    `json:"edited"`
+}
+
+// PostsResponse represents a collection of posts from an API response.
+type PostsResponse struct {
+	Posts          []*PostData `json:"posts"`
+	AfterFullname  string      `json:"after"`
+	BeforeFullname string      `json:"before"`
+}
+
+// CommentsResponse represents comments from a post in an API response.
+type CommentsResponse struct {
+	Post           *PostData      `json:"post"`
+	Comments       []*CommentData `json:"comments"`
+	MoreIDs        []string       `json:"more_ids"`
+	AfterFullname  string         `json:"after"`
+	BeforeFullname string         `json:"before"`
+}
 
 // LoginRequest represents the JSON request body for the login endpoint.
 type LoginRequest struct {
@@ -167,11 +234,13 @@ func (h *Handler) LoginHandler(w http.ResponseWriter, r *http.Request) {
 	// Send response
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(LoginResponse{
+	if err := json.NewEncoder(w).Encode(LoginResponse{
 		Success:  true,
 		Token:    token,
 		Username: sessionUsername,
-	})
+	}); err != nil {
+		h.logger.Error("failed to encode login response", "error", err)
+	}
 }
 
 // StatusHandler handles the GET /api/auth/status endpoint.
@@ -217,17 +286,19 @@ func (h *Handler) StatusHandler(w http.ResponseWriter, r *http.Request) {
 	if session.Username == "app-only" {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(StatusResponse{
+		if err := json.NewEncoder(w).Encode(StatusResponse{
 			Authenticated: true,
 			Username:      "app-only",
 			LinkKarma:     0,
 			CommentKarma:  0,
-		})
+		}); err != nil {
+			h.logger.Error("failed to encode status response", "error", err)
+		}
 		return
 	}
 
 	// Get user info from Reddit for user-authenticated sessions
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 
 	accountData, err := session.RedditClient.Me(ctx)
@@ -240,12 +311,14 @@ func (h *Handler) StatusHandler(w http.ResponseWriter, r *http.Request) {
 	// Send response
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(StatusResponse{
+	if err := json.NewEncoder(w).Encode(StatusResponse{
 		Authenticated: true,
 		Username:      session.Username,
 		LinkKarma:     accountData.LinkKarma,
 		CommentKarma:  accountData.CommentKarma,
-	})
+	}); err != nil {
+		h.logger.Error("failed to encode status response", "error", err)
+	}
 }
 
 // LogoutHandler handles the POST /api/auth/logout endpoint.
@@ -296,14 +369,380 @@ func (h *Handler) LogoutHandler(w http.ResponseWriter, r *http.Request) {
 	// Send response
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(SuccessResponse{Success: true})
+	if err := json.NewEncoder(w).Encode(SuccessResponse{Success: true}); err != nil {
+		h.logger.Error("failed to encode logout response", "error", err)
+	}
+}
+
+// PostsHandler handles the GET /api/posts endpoint.
+// It retrieves hot, new, or other posts from a subreddit.
+// Query parameters: subreddit (required), limit (optional, default 25), after (optional for pagination).
+func (h *Handler) PostsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		sendErrorResponse(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	// Check rate limit for API endpoint (10 requests/sec with burst of 5)
+	if !h.apiLimiter.Allow() {
+		h.logger.Warn("API rate limit exceeded")
+		sendErrorResponse(w, http.StatusTooManyRequests, "rate limit exceeded, please try again later")
+		return
+	}
+
+	// Extract JWT from Authorization header
+	tokenString, err := extractBearerToken(r)
+	if err != nil {
+		h.logger.Warn("authorization header error", "error", err)
+		switch err {
+		case ErrMissingAuthHeader:
+			sendErrorResponse(w, http.StatusUnauthorized, "missing authorization header")
+		case ErrInvalidAuthHeaderFormat:
+			sendErrorResponse(w, http.StatusUnauthorized, "invalid authorization header format")
+		default:
+			sendErrorResponse(w, http.StatusUnauthorized, "authorization error")
+		}
+		return
+	}
+
+	// Validate JWT
+	sessionID, err := h.sessionManager.ValidateJWT(tokenString)
+	if err != nil {
+		h.logger.Error("invalid JWT token", "error", err)
+		sendErrorResponse(w, http.StatusUnauthorized, "invalid or expired token")
+		return
+	}
+
+	// Get session
+	session, err := h.sessionManager.GetSession(sessionID)
+	if err != nil {
+		h.logger.Error("session not found", "error", err)
+		sendErrorResponse(w, http.StatusUnauthorized, "session not found")
+		return
+	}
+
+	// Parse and validate query parameters
+	subreddit := r.URL.Query().Get("subreddit")
+	if subreddit == "" {
+		h.logger.Warn("missing subreddit parameter")
+		sendErrorResponse(w, http.StatusBadRequest, "subreddit parameter is required")
+		return
+	}
+
+	// Validate subreddit name using validation package
+	if !validation.IsValidSubreddit(subreddit) {
+		h.logger.Warn("invalid subreddit parameter", "subreddit", subreddit)
+		sendErrorResponse(w, http.StatusBadRequest, "invalid subreddit name")
+		return
+	}
+
+	limit := parseIntParam(r, "limit", defaultPostLimit, maxPostLimit)
+	after := r.URL.Query().Get("after")
+
+	// Validate pagination cursor if provided
+	if after != "" && !validatePaginationCursor(after) {
+		h.logger.Warn("invalid after pagination parameter", "after", after)
+		sendErrorResponse(w, http.StatusBadRequest, "invalid pagination cursor format")
+		return
+	}
+
+	sortBy := r.URL.Query().Get("sort")
+	if sortBy == "" {
+		sortBy = "hot" // Default to hot
+	}
+
+	// Validate sort parameter - only allow specific values
+	if !isValidSortParam(sortBy) {
+		h.logger.Warn("invalid sort parameter", "sort", sortBy)
+		sendErrorResponse(w, http.StatusBadRequest, "invalid sort parameter, must be 'hot' or 'new'")
+		return
+	}
+
+	// Create context with timeout, respecting request context
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	// Call appropriate Reddit API method based on sort parameter
+	var resp *types.PostsResponse
+	postsReq := &types.PostsRequest{
+		Subreddit: subreddit,
+		Pagination: types.Pagination{
+			Limit: limit,
+			After: after,
+		},
+	}
+
+	switch sortBy {
+	case "new":
+		resp, err = session.RedditClient.GetNew(ctx, postsReq)
+	case "hot":
+		fallthrough
+	default:
+		resp, err = session.RedditClient.GetHot(ctx, postsReq)
+	}
+
+	if err != nil {
+		h.logger.Error("failed to fetch posts", "subreddit", subreddit, "sort", sortBy, "error", err)
+		sendErrorResponse(w, http.StatusInternalServerError, "failed to fetch posts from Reddit")
+		return
+	}
+
+	// Convert Post objects to PostData for response
+	postDataList := make([]*PostData, len(resp.Posts))
+	for i, post := range resp.Posts {
+		postDataList[i] = &PostData{
+			ID:          post.ID,
+			Title:       post.Title,
+			Author:      post.Author,
+			Score:       post.Score,
+			NumComments: post.NumComments,
+			URL:         post.URL,
+			Permalink:   post.Permalink,
+			Subreddit:   post.Subreddit,
+			SelfText:    post.SelfText,
+			Created:     post.CreatedUTC,
+			UpvoteRatio: post.UpvoteRatio,
+			IsSelf:      post.IsSelf,
+			Over18:      post.Over18,
+			Stickied:    post.Stickied,
+			Locked:      post.Locked,
+		}
+	}
+
+	h.logger.Info("fetched posts", "subreddit", subreddit, "sort", sortBy, "count", len(postDataList))
+
+	// Send response
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(PostsResponse{
+		Posts:          postDataList,
+		AfterFullname:  resp.AfterFullname,
+		BeforeFullname: resp.BeforeFullname,
+	}); err != nil {
+		h.logger.Error("failed to encode posts response", "error", err)
+	}
+}
+
+// CommentsHandler handles the GET /api/comments endpoint.
+// It retrieves comments for a specific post.
+// Query parameters: subreddit (required), post_id (required), limit (optional, default 25), after (optional for pagination).
+func (h *Handler) CommentsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		sendErrorResponse(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	// Check rate limit for API endpoint (10 requests/sec with burst of 5)
+	if !h.apiLimiter.Allow() {
+		h.logger.Warn("API rate limit exceeded")
+		sendErrorResponse(w, http.StatusTooManyRequests, "rate limit exceeded, please try again later")
+		return
+	}
+
+	// Extract JWT from Authorization header
+	tokenString, err := extractBearerToken(r)
+	if err != nil {
+		h.logger.Warn("authorization header error", "error", err)
+		switch err {
+		case ErrMissingAuthHeader:
+			sendErrorResponse(w, http.StatusUnauthorized, "missing authorization header")
+		case ErrInvalidAuthHeaderFormat:
+			sendErrorResponse(w, http.StatusUnauthorized, "invalid authorization header format")
+		default:
+			sendErrorResponse(w, http.StatusUnauthorized, "authorization error")
+		}
+		return
+	}
+
+	// Validate JWT
+	sessionID, err := h.sessionManager.ValidateJWT(tokenString)
+	if err != nil {
+		h.logger.Error("invalid JWT token", "error", err)
+		sendErrorResponse(w, http.StatusUnauthorized, "invalid or expired token")
+		return
+	}
+
+	// Get session
+	session, err := h.sessionManager.GetSession(sessionID)
+	if err != nil {
+		h.logger.Error("session not found", "error", err)
+		sendErrorResponse(w, http.StatusUnauthorized, "session not found")
+		return
+	}
+
+	// Parse and validate query parameters
+	subreddit := r.URL.Query().Get("subreddit")
+	if subreddit == "" {
+		h.logger.Warn("missing subreddit parameter")
+		sendErrorResponse(w, http.StatusBadRequest, "subreddit parameter is required")
+		return
+	}
+
+	// Validate subreddit name using validation package
+	if !validation.IsValidSubreddit(subreddit) {
+		h.logger.Warn("invalid subreddit parameter", "subreddit", subreddit)
+		sendErrorResponse(w, http.StatusBadRequest, "invalid subreddit name")
+		return
+	}
+
+	postID := r.URL.Query().Get("post_id")
+	if postID == "" {
+		h.logger.Warn("missing post_id parameter")
+		sendErrorResponse(w, http.StatusBadRequest, "post_id parameter is required")
+		return
+	}
+
+	// Validate post ID format
+	if !validatePostID(postID) {
+		h.logger.Warn("invalid post_id parameter", "post_id", postID)
+		sendErrorResponse(w, http.StatusBadRequest, "invalid post_id format")
+		return
+	}
+
+	limit := parseIntParam(r, "limit", defaultCommentLimit, maxCommentLimit)
+	after := r.URL.Query().Get("after")
+
+	// Validate pagination cursor if provided
+	if after != "" && !validatePaginationCursor(after) {
+		h.logger.Warn("invalid after pagination parameter", "after", after)
+		sendErrorResponse(w, http.StatusBadRequest, "invalid pagination cursor format")
+		return
+	}
+
+	// Create context with timeout, respecting request context
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	// Fetch comments from Reddit API
+	commentsReq := &types.CommentsRequest{
+		Subreddit: subreddit,
+		PostID:    postID,
+		Pagination: types.Pagination{
+			Limit: limit,
+			After: after,
+		},
+	}
+
+	resp, err := session.RedditClient.GetComments(ctx, commentsReq)
+	if err != nil {
+		h.logger.Error("failed to fetch comments", "subreddit", subreddit, "post_id", postID, "error", err)
+		sendErrorResponse(w, http.StatusInternalServerError, "failed to fetch comments from Reddit")
+		return
+	}
+
+	// Convert Post to PostData
+	var postData *PostData
+	if resp.Post != nil {
+		postData = &PostData{
+			ID:          resp.Post.ID,
+			Title:       resp.Post.Title,
+			Author:      resp.Post.Author,
+			Score:       resp.Post.Score,
+			NumComments: resp.Post.NumComments,
+			URL:         resp.Post.URL,
+			Permalink:   resp.Post.Permalink,
+			Subreddit:   resp.Post.Subreddit,
+			SelfText:    resp.Post.SelfText,
+			Created:     resp.Post.CreatedUTC,
+			UpvoteRatio: resp.Post.UpvoteRatio,
+			IsSelf:      resp.Post.IsSelf,
+			Over18:      resp.Post.Over18,
+			Stickied:    resp.Post.Stickied,
+			Locked:      resp.Post.Locked,
+		}
+	}
+
+	// Convert Comment objects to CommentData
+	commentDataList := make([]*CommentData, len(resp.Comments))
+	for i, comment := range resp.Comments {
+		commentDataList[i] = &CommentData{
+			ID:        comment.ID,
+			Author:    comment.Author,
+			Body:      comment.Body,
+			Score:     comment.Score,
+			Created:   comment.CreatedUTC,
+			Subreddit: comment.Subreddit,
+			ParentID:  comment.ParentID,
+			Edited:    comment.Edited.IsEdited,
+		}
+	}
+
+	h.logger.Info("fetched comments", "subreddit", subreddit, "post_id", postID, "count", len(commentDataList))
+
+	// Send response
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(CommentsResponse{
+		Post:           postData,
+		Comments:       commentDataList,
+		MoreIDs:        resp.MoreIDs,
+		AfterFullname:  resp.AfterFullname,
+		BeforeFullname: resp.BeforeFullname,
+	}); err != nil {
+		h.logger.Error("failed to encode comments response", "error", err)
+	}
+}
+
+// parseIntParam parses an integer query parameter with a default value.
+// If the parameter is missing or invalid, the default value is returned.
+// If the value is greater than max, max is returned.
+func parseIntParam(r *http.Request, paramName string, defaultValue, max int) int {
+	valueStr := r.URL.Query().Get(paramName)
+	if valueStr == "" {
+		return defaultValue
+	}
+
+	value, err := strconv.Atoi(valueStr)
+	if err != nil {
+		return defaultValue
+	}
+
+	if value > max {
+		return max
+	}
+
+	if value < 0 {
+		return defaultValue
+	}
+
+	return value
 }
 
 // sendErrorResponse sends a JSON error response.
 func sendErrorResponse(w http.ResponseWriter, statusCode int, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
-	json.NewEncoder(w).Encode(ErrorResponse{Error: message})
+	if err := json.NewEncoder(w).Encode(ErrorResponse{Error: message}); err != nil {
+		// If encoding fails, we can't send a proper response, just log it
+		// since headers are already sent
+		slog.Error("failed to encode error response", "error", err)
+	}
+}
+
+// validatePostID validates a Reddit post ID format (base36, 1-20 chars).
+func validatePostID(id string) bool {
+	if id == "" || len(id) > 20 {
+		return false
+	}
+	return postIDRegex.MatchString(id)
+}
+
+// validatePaginationCursor validates a Reddit pagination cursor (fullname format: t3_xxxxx or t1_xxxxx).
+func validatePaginationCursor(cursor string) bool {
+	if cursor == "" || len(cursor) > 110 {
+		return false
+	}
+	return paginationFullnameRegex.MatchString(cursor)
+}
+
+// isValidSortParam validates the sort parameter value.
+func isValidSortParam(sort string) bool {
+	switch sort {
+	case "hot", "new":
+		return true
+	default:
+		return false
+	}
 }
 
 // Error types for authentication header parsing
@@ -327,16 +766,20 @@ type Handler struct {
 	sessionManager *SessionManager
 	logger         *slog.Logger
 	loginLimiter   *rate.Limiter
+	apiLimiter     *rate.Limiter
 }
 
 // NewHandler creates a new Handler instance.
-// It initializes rate limiting for the login endpoint (5 requests per second).
+// It initializes rate limiting for the login endpoint (5 requests per second)
+// and for the API endpoints (10 requests per second with burst of 5).
 func NewHandler(sessionManager *SessionManager, logger *slog.Logger) *Handler {
 	return &Handler{
 		sessionManager: sessionManager,
 		logger:         logger,
-		// Initialize rate limiter: 5 requests per second, unlimited burst
+		// Initialize rate limiter for login: 5 requests per second
 		// TODO: Consider implementing per-IP rate limiting for production deployments
 		loginLimiter: rate.NewLimiter(rate.Limit(5), 1),
+		// Initialize rate limiter for API: 10 requests per second with burst of 5
+		apiLimiter: rate.NewLimiter(rate.Limit(10), 5),
 	}
 }

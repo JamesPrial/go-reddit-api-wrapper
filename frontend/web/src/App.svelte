@@ -1,7 +1,11 @@
 <script>
   import { onMount } from 'svelte';
   import Login from './Login.svelte';
-  import { checkAuth, logout } from './api.js';
+  import SubredditSearch from './SubredditSearch.svelte';
+  import PostsList from './PostsList.svelte';
+  import CommentsView from './CommentsView.svelte';
+  import { checkAuth, logout, fetchSubredditPosts, fetchPostComments, APIError } from './api.js';
+  import { sanitizePost, sanitizeComment, sanitizeText, sanitizeNumber } from './utils/sanitize.js';
 
   // Authentication state
   let authenticated = false;
@@ -10,6 +14,25 @@
   let userInfo = null;
   let loading = true;
   let error = '';
+
+  // Posts and subreddit browsing state
+  let currentSubreddit = '';
+  let currentSort = 'hot';
+  let posts = [];
+  let afterFullname = '';
+  let beforeFullname = '';
+  let postsLoading = false;
+  let postsError = '';
+
+  // Comments state
+  let selectedPost = null;
+  let comments = [];
+  let commentsLoading = false;
+  let commentsError = '';
+  let showCommentsModal = false;
+
+  // Request cancellation
+  let searchAbortController = null;
 
   /**
    * Check if user is already authenticated on mount
@@ -55,8 +78,136 @@
       username = '';
       userInfo = null;
       authenticated = false;
+      currentSubreddit = '';
+      posts = [];
+      selectedPost = null;
+      comments = [];
+      showCommentsModal = false;
     }
   }
+
+  /**
+   * Handle subreddit search with request cancellation
+   */
+  async function handleSearch(subreddit, sort) {
+    // Cancel previous search if one is in progress
+    if (searchAbortController) {
+      searchAbortController.abort();
+    }
+
+    // Create new abort controller for this search
+    searchAbortController = new AbortController();
+
+    currentSubreddit = subreddit;
+    currentSort = sort;
+    postsError = '';
+    postsLoading = true;
+    posts = [];
+    afterFullname = '';
+    selectedPost = null;
+    showCommentsModal = false;
+
+    try {
+      const response = await fetchSubredditPosts(token, subreddit, sort, '', 25, searchAbortController.signal);
+
+      // Sanitize all posts from the response
+      const sanitizedPosts = (response.posts || []).map(sanitizePost).filter(Boolean);
+
+      posts = sanitizedPosts;
+      afterFullname = sanitizeText(response.after_fullname || '', 100);
+      beforeFullname = sanitizeText(response.before_fullname || '', 100);
+    } catch (err) {
+      // Ignore abort errors (user-initiated cancellation)
+      if (err.name === 'AbortError') {
+        return;
+      }
+
+      if (err instanceof APIError) {
+        if (err.status === 404) {
+          postsError = 'Subreddit not found';
+        } else if (err.status === 403) {
+          postsError = 'Subreddit is private or banned';
+        } else {
+          postsError = err.message || 'Failed to load posts';
+        }
+      } else {
+        postsError = 'Network error. Please try again.';
+      }
+      posts = [];
+    } finally {
+      postsLoading = false;
+    }
+  }
+
+  /**
+   * Handle load more posts
+   */
+  async function handleLoadMore() {
+    if (!afterFullname || !currentSubreddit) return;
+
+    postsError = '';
+    postsLoading = true;
+
+    try {
+      const response = await fetchSubredditPosts(token, currentSubreddit, currentSort, afterFullname, 25);
+
+      // Sanitize all posts from the response
+      const sanitizedPosts = (response.posts || []).map(sanitizePost).filter(Boolean);
+
+      posts = [...posts, ...sanitizedPosts];
+      afterFullname = sanitizeText(response.after_fullname || '', 100);
+      beforeFullname = sanitizeText(response.before_fullname || '', 100);
+    } catch (err) {
+      postsError = 'Failed to load more posts';
+      console.error('Load more error:', err);
+    } finally {
+      postsLoading = false;
+    }
+  }
+
+  /**
+   * Handle post selection to view comments
+   */
+  async function handleSelectPost(post) {
+    // Sanitize the selected post before displaying
+    selectedPost = sanitizePost(post);
+    commentsError = '';
+    commentsLoading = true;
+    comments = [];
+    showCommentsModal = true;
+
+    try {
+      // Extract post ID from fullname (e.g., "t3_abc123" -> "abc123")
+      const postId = post.id;
+      const response = await fetchPostComments(token, postId, currentSubreddit);
+
+      // Sanitize all comments from the response
+      const sanitizedComments = (response.comments || []).map(sanitizeComment).filter(Boolean);
+
+      comments = sanitizedComments;
+    } catch (err) {
+      if (err instanceof APIError) {
+        commentsError = err.message || 'Failed to load comments';
+      } else {
+        commentsError = 'Network error. Please try again.';
+      }
+      console.error('Comments fetch error:', err);
+    } finally {
+      commentsLoading = false;
+    }
+  }
+
+  /**
+   * Handle closing comments modal
+   */
+  function handleCloseComments() {
+    showCommentsModal = false;
+    selectedPost = null;
+    comments = [];
+  }
+
+  // Computed property for checking if there are more posts
+  $: hasMore = !!afterFullname && posts.length > 0;
 </script>
 
 <main>
@@ -91,46 +242,63 @@
       </header>
 
       <div class="content">
-        <div class="welcome-card">
-          <h2>Welcome, {username}!</h2>
-          <p>You're successfully logged in to Reddit.</p>
+        {#if !currentSubreddit}
+          <!-- Initial welcome state -->
+          <div class="welcome-card">
+            <h2>Welcome, {username}!</h2>
+            <p>You're successfully logged in to Reddit.</p>
 
-          {#if userInfo}
-            <div class="stats">
-              <div class="stat">
-                <div class="stat-value">{userInfo.link_karma?.toLocaleString() || 0}</div>
-                <div class="stat-label">Link Karma</div>
+            {#if userInfo}
+              <div class="stats">
+                <div class="stat">
+                  <div class="stat-value">{userInfo.link_karma?.toLocaleString() || 0}</div>
+                  <div class="stat-label">Link Karma</div>
+                </div>
+                <div class="stat">
+                  <div class="stat-value">{userInfo.comment_karma?.toLocaleString() || 0}</div>
+                  <div class="stat-label">Comment Karma</div>
+                </div>
+                <div class="stat">
+                  <div class="stat-value">{(userInfo.link_karma + userInfo.comment_karma)?.toLocaleString() || 0}</div>
+                  <div class="stat-label">Total Karma</div>
+                </div>
               </div>
-              <div class="stat">
-                <div class="stat-value">{userInfo.comment_karma?.toLocaleString() || 0}</div>
-                <div class="stat-label">Comment Karma</div>
-              </div>
-              <div class="stat">
-                <div class="stat-value">{(userInfo.link_karma + userInfo.comment_karma)?.toLocaleString() || 0}</div>
-                <div class="stat-label">Total Karma</div>
-              </div>
-            </div>
-          {/if}
+            {/if}
 
-          {#if error}
-            <div class="error-banner">
-              {error}
-            </div>
-          {/if}
-
-          <div class="placeholder-message">
-            <p>🚧 Dashboard features coming soon!</p>
-            <p class="sub-message">
-              This is a basic login implementation. Future features could include:
-            </p>
-            <ul>
-              <li>Browse subreddits</li>
-              <li>View posts and comments</li>
-              <li>User profile information</li>
-              <li>Saved posts and subscriptions</li>
-            </ul>
+            {#if error}
+              <div class="error-banner">
+                {error}
+              </div>
+            {/if}
           </div>
-        </div>
+        {/if}
+
+        <!-- Subreddit search component -->
+        <SubredditSearch onSearch={handleSearch} loading={postsLoading} />
+
+        <!-- Posts list component -->
+        {#if currentSubreddit}
+          <PostsList
+            posts={posts}
+            loading={postsLoading}
+            error={postsError}
+            onSelectPost={handleSelectPost}
+            onLoadMore={handleLoadMore}
+            afterFullname={afterFullname}
+            hasMore={hasMore}
+          />
+        {/if}
+
+        <!-- Comments modal component -->
+        {#if showCommentsModal && selectedPost}
+          <CommentsView
+            post={selectedPost}
+            comments={comments}
+            loading={commentsLoading}
+            error={commentsError}
+            onClose={handleCloseComments}
+          />
+        {/if}
       </div>
     </div>
   {/if}

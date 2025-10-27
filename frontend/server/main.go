@@ -111,6 +111,10 @@ func main() {
 	mux.HandleFunc("/api/auth/status", handler.StatusHandler)
 	mux.HandleFunc("/api/auth/logout", handler.LogoutHandler)
 
+	// Register content routes
+	mux.HandleFunc("/api/posts", handler.PostsHandler)
+	mux.HandleFunc("/api/comments", handler.CommentsHandler)
+
 	// Health check endpoint
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

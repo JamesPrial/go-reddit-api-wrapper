@@ -17,7 +17,7 @@ export class APIError extends Error {
 /**
  * Make an HTTP request to the backend API
  * @param {string} endpoint - API endpoint path (e.g., '/auth/login')
- * @param {object} options - Fetch options
+ * @param {object} options - Fetch options (can include signal for abort control)
  * @returns {Promise<object>} - Response data
  */
 async function apiRequest(endpoint, options = {}) {
@@ -49,6 +49,11 @@ async function apiRequest(endpoint, options = {}) {
 
     return data;
   } catch (error) {
+    // Ignore abort errors (user-initiated cancellation)
+    if (error.name === 'AbortError') {
+      throw error;
+    }
+
     // Re-throw APIErrors as-is
     if (error instanceof APIError) {
       throw error;
@@ -102,6 +107,61 @@ export async function checkAuth(token) {
 export async function logout(token) {
   const data = await apiRequest('/auth/logout', {
     method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  return data;
+}
+
+/**
+ * Fetch posts from a subreddit
+ * @param {string} token - JWT token
+ * @param {string} subreddit - Subreddit name (e.g., 'javascript')
+ * @param {string} sort - Sort type: 'hot', 'new', 'top', 'rising'
+ * @param {string} after - Pagination fullname (optional)
+ * @param {number} limit - Number of posts to fetch (default: 25)
+ * @param {AbortSignal} signal - Abort signal for request cancellation (optional)
+ * @returns {Promise<{posts: Array, after_fullname: string, before_fullname: string}>}
+ */
+export async function fetchSubredditPosts(token, subreddit, sort = 'hot', after = '', limit = 25, signal = undefined) {
+  const params = new URLSearchParams({
+    subreddit,
+    sort,
+    limit: limit.toString(),
+  });
+
+  if (after) {
+    params.append('after', after);
+  }
+
+  const data = await apiRequest(`/reddit/posts?${params.toString()}`, {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    signal,
+  });
+
+  return data;
+}
+
+/**
+ * Fetch comments for a post
+ * @param {string} token - JWT token
+ * @param {string} postId - Post ID (e.g., 'abc123' without the t3_ prefix)
+ * @param {string} subreddit - Subreddit name (e.g., 'javascript')
+ * @returns {Promise<{post: object, comments: Array, more_ids: Array}>}
+ */
+export async function fetchPostComments(token, postId, subreddit) {
+  const params = new URLSearchParams({
+    post_id: postId,
+    subreddit,
+  });
+
+  const data = await apiRequest(`/reddit/comments?${params.toString()}`, {
+    method: 'GET',
     headers: {
       Authorization: `Bearer ${token}`,
     },
