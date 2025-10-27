@@ -93,7 +93,6 @@ go run ./cmd/examples/analyzer
 ```bash
 # Terminal 1: Start the backend server
 cd frontend/server
-export JWT_SECRET_KEY="$(openssl rand -base64 32)"
 export REDDIT_CLIENT_ID="your-client-id"
 export REDDIT_CLIENT_SECRET="your-client-secret"
 go run .

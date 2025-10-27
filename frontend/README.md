@@ -38,9 +38,6 @@ cd frontend/server
 # Install Go dependencies
 go mod download
 
-# Generate a secure JWT secret
-export JWT_SECRET_KEY="$(openssl rand -base64 32)"
-
 # Set Reddit API credentials
 export REDDIT_CLIENT_ID="your-client-id"
 export REDDIT_CLIENT_SECRET="your-client-secret"
@@ -52,9 +49,10 @@ go run .
 The backend server will start on `http://localhost:8080`.
 
 **Environment Variables:**
-- `JWT_SECRET_KEY` - Secret key for JWT token signing (min 32 characters)
 - `REDDIT_CLIENT_ID` - Your Reddit app client ID
 - `REDDIT_CLIENT_SECRET` - Your Reddit app client secret
+
+**Note:** JWT secrets are now auto-generated at runtime (64 bytes). The server no longer requires a `JWT_SECRET_KEY` environment variable.
 
 ### 2. Frontend Web App Setup
 
@@ -162,17 +160,17 @@ npm run preview
 
 ### Current Implementation (Development)
 - Uses OAuth2 **password grant flow** (user credentials sent directly)
-- JWT secret must be set via environment variable
+- JWT secret auto-generated at runtime (ephemeral, regenerated on restart)
 - Sessions stored in-memory (lost on server restart)
 - Rate limiting prevents brute-force attacks
 - CORS restricted to localhost origins
 
 ### Production Recommendations
 - Migrate to **OAuth2 Authorization Code flow** (more secure)
-- Use Redis or database for session storage
+- Use Redis or database for session storage (persist JWT secret across restarts)
 - Implement per-IP rate limiting
 - Use HTTPS everywhere
-- Store JWT secret in secure secret manager (HashiCorp Vault, AWS Secrets Manager)
+- Store JWT secret in secure secret manager (HashiCorp Vault, AWS Secrets Manager) instead of ephemeral generation
 - Add session refresh tokens
 - Implement CSRF protection
 - Add comprehensive logging and monitoring
@@ -180,9 +178,9 @@ npm run preview
 ## Troubleshooting
 
 ### Backend won't start
-- Ensure `JWT_SECRET_KEY` is at least 32 characters
 - Verify Reddit API credentials are correct
 - Check port 8080 is not already in use
+- Ensure sufficient system entropy for JWT secret generation
 
 ### Frontend can't connect to backend
 - Ensure backend server is running on port 8080

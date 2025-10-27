@@ -1,9 +1,9 @@
 package main
 
 import (
+	"crypto/rand"
 	"errors"
 	"fmt"
-	"os"
 	"sync"
 	"time"
 
@@ -22,30 +22,9 @@ const (
 	// sessionMaxAge is the maximum age for a session before it's cleaned up.
 	sessionMaxAge = 24 * time.Hour
 
-	// jwtSecretMinLength is the minimum length for the JWT secret key.
-	jwtSecretMinLength = 32
+	// jwtSecretLength is the length of the randomly generated JWT secret in bytes.
+	jwtSecretLength = 64
 )
-
-var (
-	// jwtSecretKey holds the JWT secret loaded from environment.
-	jwtSecretKey string
-)
-
-// initJWTSecret initializes the JWT secret from environment variable.
-// It returns an error if the secret is not set or is too short.
-func initJWTSecret() error {
-	secret := os.Getenv("JWT_SECRET_KEY")
-	if secret == "" {
-		return errors.New("JWT_SECRET_KEY environment variable is not set. " +
-			"Generate one with: openssl rand -base64 32")
-	}
-	if len(secret) < jwtSecretMinLength {
-		return fmt.Errorf("JWT_SECRET_KEY must be at least %d characters long, got %d",
-			jwtSecretMinLength, len(secret))
-	}
-	jwtSecretKey = secret
-	return nil
-}
 
 // Session represents a user session with a Reddit client.
 type Session struct {
@@ -58,28 +37,36 @@ type Session struct {
 
 // SessionManager manages user sessions with thread-safe operations.
 type SessionManager struct {
-	mu       sync.RWMutex
+	mu sync.RWMutex
+	// sessions is protected by mu.
 	sessions map[string]*Session
+	// stopChan signals the cleanup goroutine to stop.
 	stopChan chan struct{}
+	// jwtSecretKey is set once during initialization and never modified.
+	// It is safe to read concurrently without synchronization after
+	// NewSessionManager returns.
+	jwtSecretKey []byte
 }
 
 // NewSessionManager creates a new SessionManager instance.
-// It initializes the JWT secret from the environment and starts the cleanup goroutine.
-func NewSessionManager() (*SessionManager, error) {
-	// Initialize JWT secret from environment
-	if err := initJWTSecret(); err != nil {
-		return nil, err
-	}
+// It generates a cryptographically secure JWT secret and starts the cleanup goroutine.
+func NewSessionManager() *SessionManager {
+	// Generate cryptographically secure random JWT secret.
+	// Note: crypto/rand.Read never returns an error in practice and will
+	// crash the program if the system's random number generator fails.
+	jwtSecret := make([]byte, jwtSecretLength)
+	rand.Read(jwtSecret)
 
 	sm := &SessionManager{
-		sessions: make(map[string]*Session),
-		stopChan: make(chan struct{}),
+		sessions:     make(map[string]*Session),
+		stopChan:     make(chan struct{}),
+		jwtSecretKey: jwtSecret,
 	}
 
 	// Start background cleanup goroutine
 	sm.startCleanup()
 
-	return sm, nil
+	return sm
 }
 
 // CreateSession creates a new session for the given username and Reddit client.
@@ -118,7 +105,7 @@ func (sm *SessionManager) CreateSession(username string, client *graw.Reddit) (s
 		"iat":        now.Unix(),
 	})
 
-	tokenString, err := token.SignedString([]byte(jwtSecretKey))
+	tokenString, err := token.SignedString(sm.jwtSecretKey)
 	if err != nil {
 		// Clean up session on token generation failure
 		sm.mu.Lock()
@@ -163,7 +150,7 @@ func (sm *SessionManager) ValidateJWT(tokenString string) (string, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
-		return []byte(jwtSecretKey), nil
+		return sm.jwtSecretKey, nil
 	})
 
 	if err != nil {

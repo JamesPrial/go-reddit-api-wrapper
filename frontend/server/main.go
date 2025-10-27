@@ -97,12 +97,8 @@ func main() {
 		Level: slog.LevelInfo,
 	}))
 
-	// Create session manager (initialize JWT secret from environment)
-	sessionManager, err := NewSessionManager()
-	if err != nil {
-		logger.Error("failed to create session manager", "error", err)
-		os.Exit(1)
-	}
+	// Create session manager (auto-generates JWT secret at runtime)
+	sessionManager := NewSessionManager()
 
 	// Initialize storage for caching posts and comments
 	var store storage.Store
@@ -137,7 +133,7 @@ func main() {
 		MigrationsPath: migrationsPath,
 		Logger:         logger,
 	}
-	store, err = storage.New(ctx, storeConfig)
+	store, err := storage.New(ctx, storeConfig)
 	cancel()
 	if err != nil {
 		logger.Error("failed to initialize storage", "db_path", sqliteDbPath, "migrations_path", migrationsPath, "error", err)
