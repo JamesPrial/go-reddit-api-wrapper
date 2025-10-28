@@ -40,6 +40,13 @@ type PostOperations interface {
 	// Returns an error if the operation fails.
 	ListPosts(ctx context.Context, opts *ListPostsOptions) ([]*types.Post, error)
 
+	// CountPosts returns the total number of posts matching the specified criteria.
+	// It applies the same filters as ListPosts (subreddit, author, score, age) but
+	// ignores pagination parameters (Limit, Offset) and returns only the count.
+	// Sorting parameters are also ignored as they don't affect the count.
+	// Returns an error if the operation fails.
+	CountPosts(ctx context.Context, opts *ListPostsOptions) (int64, error)
+
 	// DeletePost removes a post by its ID (without prefix, e.g., "abc123").
 	// Returns an error if the operation fails.
 	// Implementations may choose to return an error if the post doesn't exist,

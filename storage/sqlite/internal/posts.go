@@ -218,6 +218,68 @@ func (s *SQLiteStore) ListPosts(ctx context.Context, opts *storage.ListPostsOpti
 	return posts, nil
 }
 
+// CountPosts returns the total number of posts matching the specified criteria.
+// It applies the same filters as ListPosts (subreddit, author, score, age) but
+// ignores pagination parameters (Limit, Offset) and sorting parameters.
+// Returns 0 count (not an error) for empty results.
+// Returns an error if the operation fails.
+func (s *SQLiteStore) CountPosts(ctx context.Context, opts *storage.ListPostsOptions) (int64, error) {
+	s.logger.Debug("counting posts", "opts", opts)
+
+	// Build base query for counting
+	var query strings.Builder
+	query.WriteString("SELECT COUNT(*) FROM posts")
+
+	// Build WHERE clauses and args
+	var whereClauses []string
+	var args []interface{}
+
+	// Handle nil opts gracefully
+	if opts != nil {
+		// Subreddit filter (case-insensitive)
+		if opts.Subreddit != "" {
+			whereClauses = append(whereClauses, "LOWER(subreddit) = LOWER(?)")
+			args = append(args, opts.Subreddit)
+		}
+
+		// Author filter
+		if opts.Author != "" {
+			whereClauses = append(whereClauses, "author = ?")
+			args = append(args, opts.Author)
+		}
+
+		// MinScore filter
+		if opts.MinScore > 0 {
+			whereClauses = append(whereClauses, "score >= ?")
+			args = append(args, opts.MinScore)
+		}
+
+		// MaxAge filter (compare fetched_at to current time minus maxAge)
+		if opts.MaxAge > 0 {
+			cutoffTime := time.Now().Unix() - int64(opts.MaxAge.Seconds())
+			whereClauses = append(whereClauses, "fetched_at >= ?")
+			args = append(args, cutoffTime)
+		}
+	}
+
+	// Add WHERE clause if we have any filters
+	if len(whereClauses) > 0 {
+		query.WriteString(" WHERE ")
+		query.WriteString(strings.Join(whereClauses, " AND "))
+	}
+
+	// Execute query
+	var count int64
+	row := s.db.QueryRowContext(ctx, query.String(), args...)
+	err := row.Scan(&count)
+	if err != nil {
+		return 0, &storage.DatabaseError{Operation: "CountPosts", Message: "failed to execute count query", Err: err}
+	}
+
+	s.logger.Debug("successfully counted posts", "count", count)
+	return count, nil
+}
+
 // DeletePost removes a post by its ID (without prefix, e.g., "abc123").
 // Returns nil even if the post doesn't exist (idempotent delete).
 // Comments cascade automatically via foreign key constraints.

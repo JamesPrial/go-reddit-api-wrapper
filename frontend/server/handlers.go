@@ -80,6 +80,7 @@ type PostsResponse struct {
 	Posts          []*PostData `json:"posts"`
 	AfterFullname  string      `json:"after"`
 	BeforeFullname string      `json:"before"`
+	Total          int64       `json:"total"`
 }
 
 // CommentsResponse represents comments from a post in an API response.
@@ -538,6 +539,7 @@ func (h *Handler) PostsHandler(w http.ResponseWriter, r *http.Request) {
 		Posts:          postDataList,
 		AfterFullname:  resp.AfterFullname,
 		BeforeFullname: resp.BeforeFullname,
+		Total:          0, // Not applicable for cursor-based pagination
 	}); err != nil {
 		h.logger.Error("failed to encode posts response", "error", err)
 	}
@@ -803,8 +805,8 @@ func (h *Handler) handleGetSavedPosts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Create context with timeout
-	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	// Create context with timeout (10s to accommodate both ListPosts and CountPosts database operations)
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 
 	// Query storage
@@ -821,6 +823,15 @@ func (h *Handler) handleGetSavedPosts(w http.ResponseWriter, r *http.Request) {
 		h.logger.Error("failed to list cached posts", "subreddit", subreddit, "error", err)
 		sendErrorResponse(w, http.StatusInternalServerError, "failed to retrieve cached posts")
 		return
+	}
+
+	// Get total count of posts matching the filter criteria.
+	// If counting fails, we log a warning and continue with total=-1 to indicate unknown count.
+	// This allows the frontend to display posts even if pagination metadata is unavailable.
+	total, err := h.store.CountPosts(ctx, opts)
+	if err != nil {
+		h.logger.Warn("failed to count cached posts", "subreddit", subreddit, "error", err)
+		total = -1 // Signal to frontend that total count is unknown
 	}
 
 	// Convert Post objects to PostData for response
@@ -845,7 +856,7 @@ func (h *Handler) handleGetSavedPosts(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	h.logger.Info("retrieved cached posts", "subreddit", subreddit, "count", len(postDataList), "offset", offset)
+	h.logger.Info("retrieved cached posts", "subreddit", subreddit, "count", len(postDataList), "offset", offset, "total", total)
 
 	// Send response
 	w.Header().Set("Content-Type", "application/json")
@@ -854,6 +865,7 @@ func (h *Handler) handleGetSavedPosts(w http.ResponseWriter, r *http.Request) {
 		Posts:          postDataList,
 		AfterFullname:  "", // Cached endpoints use offset-based pagination, not fullname cursors
 		BeforeFullname: "", // Cached endpoints use offset-based pagination, not fullname cursors
+		Total:          total,
 	}); err != nil {
 		h.logger.Error("failed to encode saved posts response", "error", err)
 	}

@@ -53,6 +53,14 @@ func (s *PostgresStore) ListPosts(ctx context.Context, opts *storage.ListPostsOp
 	return nil, fmt.Errorf("PostgreSQL storage not yet implemented: ListPosts")
 }
 
+// CountPosts counts posts matching the specified criteria.
+// Returns the total number of posts matching the criteria.
+// The opts parameter allows filtering by subreddit, author, score, age, and other criteria.
+// This is a stub implementation - returns "not yet implemented" error.
+func (s *PostgresStore) CountPosts(ctx context.Context, opts *storage.ListPostsOptions) (int64, error) {
+	return 0, fmt.Errorf("PostgreSQL storage not yet implemented: CountPosts")
+}
+
 // DeletePost removes a post by its ID (without prefix, e.g., "abc123").
 // This is a stub implementation - returns "not yet implemented" error.
 func (s *PostgresStore) DeletePost(ctx context.Context, id string) error {
