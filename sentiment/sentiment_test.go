@@ -248,14 +248,134 @@ func TestAnalyzePost(t *testing.T) {
 					t.Fatal("expected non-nil response")
 				}
 				// Negated good should be negative
+				if resp.Sentiment >= Neutral {
+					t.Errorf("expected Negative or VeryNegative sentiment for 'Not good at all', got %s (score: %f)", resp.Sentiment, resp.Score)
+				}
+				if resp.Score >= 0 {
+					t.Errorf("expected negative score, got %f", resp.Score)
+				}
 				if resp.Confidence < 0 || resp.Confidence > 1 {
 					t.Errorf("expected confidence between 0 and 1, got %f", resp.Confidence)
 				}
 			},
 		},
+		{
+			name: "negated positive word should be negative",
+			post: &types.Post{
+				Title:    "not good",
+				SelfText: "",
+				Author:   "testuser",
+			},
+			ctx:       context.Background(),
+			expectErr: false,
+			validateResp: func(t *testing.T, resp *PostSentiment) {
+				if resp == nil {
+					t.Fatal("expected non-nil response")
+				}
+				if resp.Sentiment >= Neutral {
+					t.Errorf("expected Negative or VeryNegative sentiment for 'not good', got %s (score: %f)", resp.Sentiment, resp.Score)
+				}
+				if resp.Score >= 0 {
+					t.Errorf("expected negative score for 'not good', got %f", resp.Score)
+				}
+			},
+		},
+		{
+			name: "negated negative word should be positive",
+			post: &types.Post{
+				Title:    "not bad",
+				SelfText: "",
+				Author:   "testuser",
+			},
+			ctx:       context.Background(),
+			expectErr: false,
+			validateResp: func(t *testing.T, resp *PostSentiment) {
+				if resp == nil {
+					t.Fatal("expected non-nil response")
+				}
+				if resp.Sentiment <= Neutral {
+					t.Errorf("expected Positive or VeryPositive sentiment for 'not bad', got %s (score: %f)", resp.Sentiment, resp.Score)
+				}
+				if resp.Score <= 0 {
+					t.Errorf("expected positive score for 'not bad', got %f", resp.Score)
+				}
+			},
+		},
+		{
+			name: "negated strong positive word should be negative",
+			post: &types.Post{
+				Title:    "not amazing",
+				SelfText: "",
+				Author:   "testuser",
+			},
+			ctx:       context.Background(),
+			expectErr: false,
+			validateResp: func(t *testing.T, resp *PostSentiment) {
+				if resp == nil {
+					t.Fatal("expected non-nil response")
+				}
+				if resp.Sentiment >= Neutral {
+					t.Errorf("expected Negative or VeryNegative sentiment for 'not amazing', got %s (score: %f)", resp.Sentiment, resp.Score)
+				}
+				if resp.Score >= 0 {
+					t.Errorf("expected negative score for 'not amazing', got %f", resp.Score)
+				}
+			},
+		},
+		{
+			name: "contraction negation should be positive",
+			post: &types.Post{
+				Title:    "isn't terrible",
+				SelfText: "",
+				Author:   "testuser",
+			},
+			ctx:       context.Background(),
+			expectErr: false,
+			validateResp: func(t *testing.T, resp *PostSentiment) {
+				if resp == nil {
+					t.Fatal("expected non-nil response")
+				}
+				if resp.Sentiment <= Neutral {
+					t.Errorf("expected Positive or VeryPositive sentiment for 'isn't terrible', got %s (score: %f)", resp.Sentiment, resp.Score)
+				}
+				if resp.Score <= 0 {
+					t.Errorf("expected positive score for 'isn't terrible', got %f", resp.Score)
+				}
+			},
+		},
+		{
+			name: "negation with emphasis should be strongly negative",
+			post: &types.Post{
+				Title:    "NOT GREAT!!!",
+				SelfText: "",
+				Author:   "testuser",
+			},
+			ctx:       context.Background(),
+			expectErr: false,
+			validateResp: func(t *testing.T, resp *PostSentiment) {
+				if resp == nil {
+					t.Fatal("expected non-nil response")
+				}
+				// Should be negative with stronger score due to caps and punctuation
+				if resp.Sentiment >= Neutral {
+					t.Errorf("expected Negative or VeryNegative sentiment for 'NOT GREAT!!!', got %s (score: %f)", resp.Sentiment, resp.Score)
+				}
+				if resp.Score >= 0 {
+					t.Errorf("expected negative score for 'NOT GREAT!!!', got %f", resp.Score)
+				}
+				// Emphasis should result in stronger sentiment (more negative)
+				if resp.Score > -0.3 {
+					t.Logf("expected stronger negative sentiment due to emphasis, got score: %f", resp.Score)
+				}
+			},
+		},
 	}
 
-	analyzer := NewAnalyzer(nil)
+	// Use a config with MinWordCount=1 to allow testing short phrases like "not good"
+	analyzer := NewAnalyzer(&Config{
+		MinWordCount:    1,
+		EnableEmoticons: true,
+	})
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -531,9 +651,118 @@ func TestAnalyzeComment(t *testing.T) {
 				}
 			},
 		},
+		{
+			name: "comment with negated positive word should be negative",
+			comment: &types.Comment{
+				Body:   "not good",
+				Author: "testuser",
+			},
+			ctx:       context.Background(),
+			expectErr: false,
+			validateResp: func(t *testing.T, resp *CommentSentiment) {
+				if resp == nil {
+					t.Fatal("expected non-nil response")
+				}
+				if resp.Sentiment >= Neutral {
+					t.Errorf("expected Negative or VeryNegative sentiment for 'not good', got %s (score: %f)", resp.Sentiment, resp.Score)
+				}
+				if resp.Score >= 0 {
+					t.Errorf("expected negative score for 'not good', got %f", resp.Score)
+				}
+			},
+		},
+		{
+			name: "comment with negated negative word should be positive",
+			comment: &types.Comment{
+				Body:   "not bad",
+				Author: "testuser",
+			},
+			ctx:       context.Background(),
+			expectErr: false,
+			validateResp: func(t *testing.T, resp *CommentSentiment) {
+				if resp == nil {
+					t.Fatal("expected non-nil response")
+				}
+				if resp.Sentiment <= Neutral {
+					t.Errorf("expected Positive or VeryPositive sentiment for 'not bad', got %s (score: %f)", resp.Sentiment, resp.Score)
+				}
+				if resp.Score <= 0 {
+					t.Errorf("expected positive score for 'not bad', got %f", resp.Score)
+				}
+			},
+		},
+		{
+			name: "comment with negated strong positive word should be negative",
+			comment: &types.Comment{
+				Body:   "not amazing",
+				Author: "testuser",
+			},
+			ctx:       context.Background(),
+			expectErr: false,
+			validateResp: func(t *testing.T, resp *CommentSentiment) {
+				if resp == nil {
+					t.Fatal("expected non-nil response")
+				}
+				if resp.Sentiment >= Neutral {
+					t.Errorf("expected Negative or VeryNegative sentiment for 'not amazing', got %s (score: %f)", resp.Sentiment, resp.Score)
+				}
+				if resp.Score >= 0 {
+					t.Errorf("expected negative score for 'not amazing', got %f", resp.Score)
+				}
+			},
+		},
+		{
+			name: "comment with contraction negation should be positive",
+			comment: &types.Comment{
+				Body:   "isn't terrible",
+				Author: "testuser",
+			},
+			ctx:       context.Background(),
+			expectErr: false,
+			validateResp: func(t *testing.T, resp *CommentSentiment) {
+				if resp == nil {
+					t.Fatal("expected non-nil response")
+				}
+				if resp.Sentiment <= Neutral {
+					t.Errorf("expected Positive or VeryPositive sentiment for 'isn't terrible', got %s (score: %f)", resp.Sentiment, resp.Score)
+				}
+				if resp.Score <= 0 {
+					t.Errorf("expected positive score for 'isn't terrible', got %f", resp.Score)
+				}
+			},
+		},
+		{
+			name: "comment with negation and emphasis should be strongly negative",
+			comment: &types.Comment{
+				Body:   "NOT GREAT!!!",
+				Author: "testuser",
+			},
+			ctx:       context.Background(),
+			expectErr: false,
+			validateResp: func(t *testing.T, resp *CommentSentiment) {
+				if resp == nil {
+					t.Fatal("expected non-nil response")
+				}
+				// Should be negative with stronger score due to caps and punctuation
+				if resp.Sentiment >= Neutral {
+					t.Errorf("expected Negative or VeryNegative sentiment for 'NOT GREAT!!!', got %s (score: %f)", resp.Sentiment, resp.Score)
+				}
+				if resp.Score >= 0 {
+					t.Errorf("expected negative score for 'NOT GREAT!!!', got %f", resp.Score)
+				}
+				// Emphasis should result in stronger sentiment (more negative)
+				if resp.Score > -0.3 {
+					t.Logf("expected stronger negative sentiment due to emphasis, got score: %f", resp.Score)
+				}
+			},
+		},
 	}
 
-	analyzer := NewAnalyzer(nil)
+	// Use a config with MinWordCount=1 to allow testing short phrases like "not good"
+	analyzer := NewAnalyzer(&Config{
+		MinWordCount:    1,
+		EnableEmoticons: true,
+	})
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

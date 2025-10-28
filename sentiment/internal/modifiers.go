@@ -186,27 +186,29 @@ func isUpper(r rune) bool {
 	return unicode.IsUpper(r)
 }
 
-// ApplyModifiers applies sentiment modifiers (negation, punctuation, and capitalization) to a base score.
+// ApplyModifiers applies sentiment modifiers (punctuation and capitalization) to a base score.
 //
 // The algorithm:
-// 1. Checks for ANY negation words in the tokens and flips the score sign if found
-// 2. Applies punctuation boost as a multiplier (e.g., "!!!" increases emphasis)
-// 3. Applies capitalization boost as a multiplier (e.g., "GREAT" indicates stronger sentiment)
-// 4. Clamps the final score to the valid [-1.0, 1.0] range
+// 1. Applies punctuation boost as a multiplier (e.g., "!!!" increases emphasis)
+// 2. Applies capitalization boost as a multiplier (e.g., "GREAT" indicates stronger sentiment)
+// 3. Clamps the final score to the valid [-1.0, 1.0] range
+//
+// Note: Negation is handled per-token in AnalyzeText (analyzer.go), not here.
+// This avoids double negation which would incorrectly invert the sentiment.
+//
+// Example of the bug this design prevents:
+//   Text: "not good"
+//   - Per-token analysis: "good" (+0.7) → negated to -0.7 ✓
+//   - If we flipped here again: -0.7 → +0.7 ✗ (WRONG - classified as Positive!)
+//
+// By not flipping here, we preserve the correct per-token negation result.
 //
 // Returns the modified score value in the range [-1.0, 1.0].
 func ApplyModifiers(baseScore float64, text string, tokens []string) float64 {
 	modifiedScore := baseScore
 
-	// Check for any negation words in tokens and flip score if found
-	if len(tokens) > 0 {
-		for _, token := range tokens {
-			if negationWords[token] {
-				modifiedScore = -modifiedScore
-				break
-			}
-		}
-	}
+	// Note: Negation is handled per-token in analyzer.go (AnalyzeText function).
+	// We do NOT flip the score here to avoid double negation.
 
 	// Skip boost calculations if text is empty
 	if text == "" {

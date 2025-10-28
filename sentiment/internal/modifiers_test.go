@@ -310,6 +310,20 @@ func TestCalculateCapsBoost(t *testing.T) {
 }
 
 // TestApplyModifiers tests the ApplyModifiers function.
+// NOTE: These tests verify that ApplyModifiers applies punctuation and
+// capitalization boosts to a base score. Negation handling is NOT tested
+// here because ApplyModifiers does not flip scores based on negation.
+// Negation is handled earlier in the sentiment pipeline at the per-token
+// level (in AnalyzeText), and the base scores passed to ApplyModifiers
+// already have negation applied.
+//
+// HISTORICAL CONTEXT: In a previous buggy implementation, ApplyModifiers
+// would flip the entire score if ANY negation word existed in the tokens.
+// This caused "not good" to be classified as Positive because:
+//   1. Per-token: "good" (+0.7) was correctly negated to -0.7
+//   2. ApplyModifiers: -0.7 was incorrectly flipped AGAIN to +0.7 (BUG!)
+// The tests "positive/negative score with negation - score NOT flipped"
+// prevent regression of this bug.
 func TestApplyModifiers(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -343,18 +357,25 @@ func TestApplyModifiers(t *testing.T) {
 			expectedEq: -0.5,
 		},
 		{
-			name:       "positive score with negation",
+			name:       "positive score with negation - score NOT flipped",
 			baseScore:  0.5,
 			text:       "not good",
 			tokens:     []string{"not", "good"},
-			expectedEq: -0.5,
+			expectedEq: 0.5,
+			// NOTE: ApplyModifiers does NOT handle negation flipping. Negation is
+			// detected and applied earlier in the sentiment pipeline (in AnalyzeText)
+			// on a per-token basis. This test verifies that ApplyModifiers works with
+			// base scores that have already had negation applied.
 		},
 		{
-			name:       "negative score with negation",
+			name:       "negative score with negation - score NOT flipped",
 			baseScore:  -0.5,
 			text:       "not bad",
 			tokens:     []string{"not", "bad"},
-			expectedEq: 0.5,
+			expectedEq: -0.5,
+			// NOTE: ApplyModifiers does NOT handle negation flipping. The base score
+			// passed here is already negation-adjusted from per-token analysis.
+			// This test verifies punctuation/caps modifiers work independently.
 		},
 		{
 			name:       "score boosted by punctuation",
@@ -436,33 +457,41 @@ func TestApplyModifiers(t *testing.T) {
 }
 
 // TestModifiersIntegration tests modifiers working together.
+// NOTE: These tests use pre-adjusted base scores where negation has already been
+// applied (from per-token negation detection in AnalyzeText). ApplyModifiers only
+// applies punctuation and capitalization boosts, not negation flipping.
 func TestModifiersIntegration(t *testing.T) {
-	t.Run("negation flips positive to negative", func(t *testing.T) {
+	t.Run("positive score boosted by punctuation", func(t *testing.T) {
 		baseScore := 0.8
-		text := "not good"
-		tokens := []string{"not", "good"}
+		text := "good!!!"
+		tokens := []string{"good"}
 
 		result := ApplyModifiers(baseScore, text, tokens)
 
-		if result >= 0 {
-			t.Errorf("expected negative score after negation, got %f", result)
+		// Should boost the positive score with punctuation modifier
+		if result <= baseScore {
+			t.Errorf("expected score boosted from %f, got %f", baseScore, result)
+		}
+		// Should not exceed bounds
+		if result > 1.0 {
+			t.Errorf("expected score clamped to 1.0, got %f", result)
 		}
 	})
 
-	t.Run("multiple modifiers compound effects", func(t *testing.T) {
-		baseScore := 0.5
-		text := "NOT AMAZING!!!"
-		tokens := []string{"not", "amazing"}
+	t.Run("negative score with caps and punctuation boosts", func(t *testing.T) {
+		baseScore := -0.5
+		text := "TERRIBLE!!!"
+		tokens := []string{"terrible"}
 
 		result := ApplyModifiers(baseScore, text, tokens)
 
-		// Should flip to negative and apply boosts
-		if result >= 0 {
-			t.Error("expected negative score")
+		// Should boost the magnitude (more negative)
+		if result >= baseScore {
+			t.Errorf("expected magnitude increased from %f, got %f", baseScore, result)
 		}
 
-		// Should have some boost applied (not just -0.5)
-		if result > -0.3 {
+		// Should apply boosts (more negative than -0.5)
+		if result > -0.5 {
 			t.Errorf("expected more negative score with boosts, got %f", result)
 		}
 	})
