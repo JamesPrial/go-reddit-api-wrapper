@@ -16,6 +16,8 @@ go.work
 
 # SQLite database files
 *.db
+*.db-shm
+*.db-wal
 
 # Dependency directories (remove the comment below to include it)
 # vendor/
@@ -45,6 +47,17 @@ Thumbs.db
 example_binary
 reddit-example
 example
+
+# Frontend server binaries
+frontend/server/reddit-server
+frontend/server/reddit-auth-server
+frontend/server/server
+frontend/server/test-server
+
+# Server log files
+*.log
+server*.log
+start.sh
 
 # Reddit wiki documentation (already present)
 reddit.wiki/

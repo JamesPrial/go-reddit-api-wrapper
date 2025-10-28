@@ -338,10 +338,9 @@ func TestConcurrency_ConnectionPoolExhaustion(t *testing.T) {
 	dbPath := fmt.Sprintf("%s/test_pool.db", tempDir)
 
 	cfg := storage.Config{
-		DSN:            dbPath,
-		MaxOpenConns:   2,
-		MaxIdleConns:   1,
-		MigrationsPath: testutil.GetMigrationsPath(),
+		DSN:          dbPath,
+		MaxOpenConns: 2,
+		MaxIdleConns: 1,
 	}
 
 	store, err := storage.New(context.Background(), cfg)

@@ -2,8 +2,6 @@ package sqlite_test
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -14,37 +12,16 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// fileExists checks if a file or directory exists
-func fileExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
-}
-
 // NewTestDB creates an in-memory SQLite database for testing.
 // It runs migrations and returns a configured store.
 // Uses t.Cleanup() to ensure the database is closed after the test.
 func NewTestDB(t *testing.T) storage.Store {
 	t.Helper()
 
-	// Compute absolute path to migrations directory
-	// This test is in storage/sqlite/internal, so we need to go up to find storage/sqlite/migrations
-	cwd, err := os.Getwd()
-	require.NoError(t, err, "failed to get current working directory")
-
-	// Navigate from project root to migrations directory
-	// From the project root, migrations are at storage/sqlite/migrations
-	projectRoot := cwd
-	// Find the project root by looking for the storage directory
-	for projectRoot != "/" && !fileExists(filepath.Join(projectRoot, "storage")) {
-		projectRoot = filepath.Dir(projectRoot)
-	}
-	migrationsPath := filepath.Join(projectRoot, "storage", "sqlite", "migrations")
-
 	cfg := storage.Config{
-		DSN:            ":memory:",
-		MaxOpenConns:   1,
-		MaxIdleConns:   1,
-		MigrationsPath: migrationsPath,
+		DSN:          ":memory:",
+		MaxOpenConns: 1,
+		MaxIdleConns: 1,
 	}
 
 	// Use the factory pattern with blank import of sqlite
