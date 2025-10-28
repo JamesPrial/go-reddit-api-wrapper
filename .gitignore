@@ -53,11 +53,17 @@ frontend/server/reddit-server
 frontend/server/reddit-auth-server
 frontend/server/server
 frontend/server/test-server
+frontend/server/test-build
 
 # Server log files
 *.log
 server*.log
 start.sh
+
+# Frontend build artifacts and caches
+node_modules/
+.vite/
+dist/
 
 # Reddit wiki documentation (already present)
 reddit.wiki/
