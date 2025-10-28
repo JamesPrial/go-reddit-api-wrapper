@@ -1,6 +1,7 @@
 <script>
   import { onMount, onDestroy } from 'svelte';
   import Login from './Login.svelte';
+  import BulkSavePosts from './BulkSavePosts.svelte';
   import SubredditSearch from './SubredditSearch.svelte';
   import PostsList from './PostsList.svelte';
   import SavedPostsList from './SavedPostsList.svelte';
@@ -36,6 +37,9 @@
 
   // View state
   let currentView = 'browse'; // 'browse' or 'saved'
+
+  // SavedPostsList component reference for triggering reloads
+  let savedPostsListKey = 0;
 
   // Request cancellation
   let searchAbortController = null;
@@ -266,6 +270,25 @@
     comments = [];
   }
 
+  /**
+   * Handle successful bulk save operation
+   * Switch to saved posts tab and trigger reload
+   */
+  function handleBulkSaveSuccess() {
+    // Switch to saved posts tab
+    currentView = 'saved';
+
+    // Clear any existing browse results
+    posts = [];
+    currentSubreddit = '';
+
+    // Add a short delay to ensure backend persistence is complete
+    // before triggering the saved posts reload
+    setTimeout(() => {
+      savedPostsListKey += 1;
+    }, 100);
+  }
+
   // Computed property for checking if there are more posts
   $: hasMore = !!afterFullname && posts.length > 0;
 </script>
@@ -353,6 +376,9 @@
             </div>
           {/if}
 
+          <!-- Bulk save posts component -->
+          <BulkSavePosts token={token} onSuccess={handleBulkSaveSuccess} />
+
           <!-- Subreddit search component -->
           <SubredditSearch onSearch={handleSearch} loading={postsLoading} />
 
@@ -370,10 +396,12 @@
           {/if}
         {:else if currentView === 'saved'}
           <!-- Saved View -->
-          <SavedPostsList
-            token={token}
-            onSelectPost={(post) => handleSelectPost(post, 'saved')}
-          />
+          {#key savedPostsListKey}
+            <SavedPostsList
+              token={token}
+              onSelectPost={(post) => handleSelectPost(post, 'saved')}
+            />
+          {/key}
         {/if}
 
         <!-- Comments modal component -->

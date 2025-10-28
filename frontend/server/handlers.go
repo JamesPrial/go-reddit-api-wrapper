@@ -2,14 +2,18 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"os"
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
@@ -34,6 +38,18 @@ const (
 	maxOffsetLimit = 10000
 	// cacheOperationTimeout is the timeout for background cache operations (posts, comments).
 	cacheOperationTimeout = 15 * time.Second
+	// bulkSaveOperationTimeout is the timeout for bulk save operations.
+	bulkSaveOperationTimeout = 10 * time.Minute
+	// maxBulkSaveCount is the maximum number of posts allowed in a bulk save operation.
+	maxBulkSaveCount = 2000
+	// minBulkSaveCount is the minimum number of posts allowed in a bulk save operation.
+	minBulkSaveCount = 1
+	// bulkSaveBatchSize is the number of posts to save in each database batch.
+	bulkSaveBatchSize = 500
+	// bulkSavePageSize is the number of posts to fetch per Reddit API call.
+	bulkSavePageSize = 100
+	// maxConcurrentJobs is the maximum number of bulk save jobs that can run concurrently.
+	maxConcurrentJobs = 10
 )
 
 // Validation patterns for input sanitization
@@ -122,6 +138,68 @@ type StatusResponse struct {
 type SuccessResponse struct {
 	Success bool `json:"success"`
 }
+
+// BulkSaveRequest represents the JSON request body for the bulk save posts endpoint.
+type BulkSaveRequest struct {
+	Subreddit       string `json:"subreddit"`
+	Sort            string `json:"sort"`
+	Count           int    `json:"count"`
+	IncludeComments bool   `json:"include_comments"`
+}
+
+// BulkSaveResponse represents the JSON response for initiating a bulk save operation.
+type BulkSaveResponse struct {
+	JobID   string `json:"job_id"`
+	Message string `json:"message"`
+}
+
+// BulkSaveProgress represents the progress of a bulk save operation.
+type BulkSaveProgress struct {
+	Status        string `json:"status"`                 // "in_progress", "completed", "error"
+	PostsSaved    int    `json:"posts_saved"`            // Number of posts successfully saved
+	PostsTotal    int    `json:"posts_total"`            // Total number of posts to save
+	CommentsSaved int    `json:"comments_saved"`         // Number of comments successfully saved
+	Error         string `json:"error,omitempty"`        // Error message if status is "error"
+	CompletedAt   string `json:"completed_at,omitempty"` // ISO 8601 timestamp when job completed
+}
+
+// bulkSaveJob represents a bulk save operation job.
+type bulkSaveJob struct {
+	mu            sync.RWMutex
+	status        string
+	postsSaved    int
+	postsTotal    int
+	commentsSaved int
+	errorMsg      string
+	completedAt   time.Time
+}
+
+// getProgress returns a snapshot of the current job progress.
+func (j *bulkSaveJob) getProgress() BulkSaveProgress {
+	j.mu.RLock()
+	defer j.mu.RUnlock()
+
+	progress := BulkSaveProgress{
+		Status:        j.status,
+		PostsSaved:    j.postsSaved,
+		PostsTotal:    j.postsTotal,
+		CommentsSaved: j.commentsSaved,
+		Error:         j.errorMsg,
+	}
+
+	if !j.completedAt.IsZero() {
+		progress.CompletedAt = j.completedAt.Format(time.RFC3339)
+	}
+
+	return progress
+}
+
+// bulkSaveJobs is a global map of job IDs to job states.
+// It is protected by bulkSaveJobsMutex for concurrent access.
+var (
+	bulkSaveJobs      = make(map[string]*bulkSaveJob)
+	bulkSaveJobsMutex sync.RWMutex
+)
 
 // extractBearerToken extracts the JWT token from the Authorization header.
 // It expects the header to be in the format "Bearer <token>".
@@ -1065,6 +1143,539 @@ func isValidStorageSortParam(sort string) bool {
 	default:
 		return false
 	}
+}
+
+// generateJobID generates a unique job ID using crypto/rand.
+func generateJobID() (string, error) {
+	bytes := make([]byte, 16)
+	if _, err := rand.Read(bytes); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(bytes), nil
+}
+
+// jobIDRegex matches valid job IDs (hex string, exactly 32 chars).
+var jobIDRegex = regexp.MustCompile(`^[0-9a-fA-F]{32}$`)
+
+// validateJobID validates a job ID format (hex string, exactly 32 chars).
+func validateJobID(id string) bool {
+	if id == "" || len(id) != 32 {
+		return false
+	}
+	return jobIDRegex.MatchString(id)
+}
+
+// cleanupOldJobs removes completed or errored jobs older than the specified duration.
+// It should be called periodically to prevent the jobs map from growing unbounded.
+func cleanupOldJobs(maxAge time.Duration, logger *slog.Logger) {
+	bulkSaveJobsMutex.Lock()
+	defer bulkSaveJobsMutex.Unlock()
+
+	now := time.Now()
+	deletedCount := 0
+
+	for jobID, job := range bulkSaveJobs {
+		job.mu.RLock()
+		status := job.status
+		completedAt := job.completedAt
+		job.mu.RUnlock()
+
+		// Only clean up completed or errored jobs
+		if (status == "completed" || status == "error") && !completedAt.IsZero() {
+			if now.Sub(completedAt) > maxAge {
+				delete(bulkSaveJobs, jobID)
+				deletedCount++
+			}
+		}
+	}
+
+	if deletedCount > 0 {
+		logger.Info("cleaned up old bulk save jobs", "count", deletedCount)
+	}
+}
+
+// handleBulkSavePosts handles the POST /api/bulk-save/posts endpoint.
+// It initiates a background job to save posts (and optionally comments) from a subreddit.
+func (h *Handler) handleBulkSavePosts(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		sendErrorResponse(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	// Check rate limit for API endpoint
+	if !h.apiLimiter.Allow() {
+		h.logger.Warn("API rate limit exceeded")
+		sendErrorResponse(w, http.StatusTooManyRequests, "rate limit exceeded, please try again later")
+		return
+	}
+
+	// Extract JWT from Authorization header
+	tokenString, err := extractBearerToken(r)
+	if err != nil {
+		h.logger.Warn("authorization header error", "error", err)
+		switch err {
+		case ErrMissingAuthHeader:
+			sendErrorResponse(w, http.StatusUnauthorized, "missing authorization header")
+		case ErrInvalidAuthHeaderFormat:
+			sendErrorResponse(w, http.StatusUnauthorized, "invalid authorization header format")
+		default:
+			sendErrorResponse(w, http.StatusUnauthorized, "authorization error")
+		}
+		return
+	}
+
+	// Validate JWT
+	sessionID, err := h.sessionManager.ValidateJWT(tokenString)
+	if err != nil {
+		h.logger.Error("invalid JWT token", "error", err)
+		sendErrorResponse(w, http.StatusUnauthorized, "invalid or expired token")
+		return
+	}
+
+	// Get session
+	session, err := h.sessionManager.GetSession(sessionID)
+	if err != nil {
+		h.logger.Error("session not found", "error", err)
+		sendErrorResponse(w, http.StatusUnauthorized, "session not found")
+		return
+	}
+
+	// Check if storage is available
+	if h.store == nil {
+		h.logger.Warn("storage not available")
+		sendErrorResponse(w, http.StatusServiceUnavailable, "storage service not available")
+		return
+	}
+
+	// Parse request body with size limit
+	var req BulkSaveRequest
+	limitedBody := io.LimitReader(r.Body, maxRequestBodySize)
+	body, err := io.ReadAll(limitedBody)
+	if err != nil {
+		h.logger.Error("failed to read request body", "error", err)
+		sendErrorResponse(w, http.StatusBadRequest, "failed to read request body")
+		return
+	}
+	defer r.Body.Close()
+
+	// Check if body size limit was exceeded
+	if len(body) >= maxRequestBodySize {
+		h.logger.Warn("request body size limit exceeded")
+		sendErrorResponse(w, http.StatusRequestEntityTooLarge, "request body too large")
+		return
+	}
+
+	if err := json.Unmarshal(body, &req); err != nil {
+		h.logger.Error("failed to unmarshal request", "error", err)
+		sendErrorResponse(w, http.StatusBadRequest, "invalid request format")
+		return
+	}
+
+	// Validate subreddit name
+	if req.Subreddit == "" {
+		h.logger.Warn("missing subreddit parameter")
+		sendErrorResponse(w, http.StatusBadRequest, "subreddit is required")
+		return
+	}
+
+	if !validation.IsValidSubreddit(req.Subreddit) {
+		h.logger.Warn("invalid subreddit parameter", "subreddit", req.Subreddit)
+		sendErrorResponse(w, http.StatusBadRequest, "invalid subreddit name")
+		return
+	}
+
+	// Validate sort parameter
+	if req.Sort == "" {
+		req.Sort = "hot" // Default to hot
+	}
+
+	if !isValidSortParam(req.Sort) {
+		h.logger.Warn("invalid sort parameter", "sort", req.Sort)
+		sendErrorResponse(w, http.StatusBadRequest, "sort must be 'hot' or 'new'")
+		return
+	}
+
+	// Validate count parameter
+	if req.Count < minBulkSaveCount || req.Count > maxBulkSaveCount {
+		h.logger.Warn("invalid count parameter", "count", req.Count)
+		sendErrorResponse(w, http.StatusBadRequest, "count must be between 1 and 2000")
+		return
+	}
+
+	// Check if we've reached max concurrent jobs
+	bulkSaveJobsMutex.RLock()
+	activeJobsCount := 0
+	for _, job := range bulkSaveJobs {
+		job.mu.RLock()
+		if job.status == "in_progress" {
+			activeJobsCount++
+		}
+		job.mu.RUnlock()
+	}
+	bulkSaveJobsMutex.RUnlock()
+
+	if activeJobsCount >= maxConcurrentJobs {
+		h.logger.Warn("max concurrent jobs limit reached", "active_jobs", activeJobsCount, "max", maxConcurrentJobs)
+		sendErrorResponse(w, http.StatusTooManyRequests, "maximum number of concurrent bulk save jobs reached, please try again later")
+		return
+	}
+
+	// Generate unique job ID
+	jobID, err := generateJobID()
+	if err != nil {
+		h.logger.Error("failed to generate job ID", "error", err)
+		sendErrorResponse(w, http.StatusInternalServerError, "failed to create job")
+		return
+	}
+
+	// Create job record
+	job := &bulkSaveJob{
+		status:     "in_progress",
+		postsTotal: req.Count,
+	}
+
+	// Register job in global map
+	bulkSaveJobsMutex.Lock()
+	bulkSaveJobs[jobID] = job
+	bulkSaveJobsMutex.Unlock()
+
+	h.logger.Info("starting bulk save job",
+		"job_id", jobID,
+		"subreddit", req.Subreddit,
+		"sort", req.Sort,
+		"count", req.Count,
+		"include_comments", req.IncludeComments,
+	)
+
+	// Start background goroutine to perform bulk save
+	go h.performBulkSave(jobID, job, session.RedditClient, req)
+
+	// Send immediate response with job ID
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
+	if err := json.NewEncoder(w).Encode(BulkSaveResponse{
+		JobID:   jobID,
+		Message: "Bulk save operation started successfully",
+	}); err != nil {
+		h.logger.Error("failed to encode bulk save response", "error", err)
+	}
+}
+
+// handleBulkSaveProgress handles the GET /api/bulk-save/progress/{jobId} endpoint.
+// It retrieves the current progress of a bulk save operation.
+func (h *Handler) handleBulkSaveProgress(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		sendErrorResponse(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	// Check rate limit for API endpoint
+	if !h.apiLimiter.Allow() {
+		h.logger.Warn("API rate limit exceeded")
+		sendErrorResponse(w, http.StatusTooManyRequests, "rate limit exceeded, please try again later")
+		return
+	}
+
+	// Extract JWT from Authorization header
+	tokenString, err := extractBearerToken(r)
+	if err != nil {
+		h.logger.Warn("authorization header error", "error", err)
+		switch err {
+		case ErrMissingAuthHeader:
+			sendErrorResponse(w, http.StatusUnauthorized, "missing authorization header")
+		case ErrInvalidAuthHeaderFormat:
+			sendErrorResponse(w, http.StatusUnauthorized, "invalid authorization header format")
+		default:
+			sendErrorResponse(w, http.StatusUnauthorized, "authorization error")
+		}
+		return
+	}
+
+	// Validate JWT
+	sessionID, err := h.sessionManager.ValidateJWT(tokenString)
+	if err != nil {
+		h.logger.Error("invalid JWT token", "error", err)
+		sendErrorResponse(w, http.StatusUnauthorized, "invalid or expired token")
+		return
+	}
+
+	// Get session to verify it exists
+	_, err = h.sessionManager.GetSession(sessionID)
+	if err != nil {
+		h.logger.Error("session not found", "error", err)
+		sendErrorResponse(w, http.StatusUnauthorized, "session not found")
+		return
+	}
+
+	// Extract job ID from URL path
+	// Expected format: /api/bulk-save/progress/{jobId}
+	path := r.URL.Path
+	jobID := strings.TrimPrefix(path, "/api/bulk-save/progress/")
+	if jobID == "" || jobID == path {
+		h.logger.Warn("missing or invalid job ID in URL path", "path", path)
+		sendErrorResponse(w, http.StatusBadRequest, "job ID is required in URL path")
+		return
+	}
+
+	// Validate job ID format
+	if !validateJobID(jobID) {
+		h.logger.Warn("invalid job ID format", "job_id", jobID)
+		sendErrorResponse(w, http.StatusBadRequest, "invalid job ID format")
+		return
+	}
+
+	// Look up job in the global jobs map
+	bulkSaveJobsMutex.RLock()
+	job, exists := bulkSaveJobs[jobID]
+	bulkSaveJobsMutex.RUnlock()
+
+	if !exists {
+		h.logger.Warn("job not found", "job_id", jobID)
+		sendErrorResponse(w, http.StatusNotFound, "job not found")
+		return
+	}
+
+	// Get current progress from the job
+	progress := job.getProgress()
+
+	h.logger.Info("bulk save progress retrieved", "job_id", jobID, "status", progress.Status)
+
+	// Send response
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(progress); err != nil {
+		h.logger.Error("failed to encode bulk save progress response", "error", err)
+	}
+}
+
+// performBulkSave performs the actual bulk save operation in the background.
+func (h *Handler) performBulkSave(jobID string, job *bulkSaveJob, redditClient *graw.Reddit, req BulkSaveRequest) {
+	// Create context with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), bulkSaveOperationTimeout)
+	defer cancel()
+
+	// Defer cleanup to ensure job status is updated even on panic
+	defer func() {
+		if r := recover(); r != nil {
+			h.logger.Error("panic in bulk save operation", "job_id", jobID, "panic", r)
+			job.mu.Lock()
+			job.status = "error"
+			job.errorMsg = "internal error: operation panicked"
+			job.completedAt = time.Now()
+			job.mu.Unlock()
+		}
+	}()
+
+	// Calculate number of pages needed (Reddit max is 100 posts per page)
+	pagesNeeded := int(math.Ceil(float64(req.Count) / float64(bulkSavePageSize)))
+	var allPosts []*types.Post
+	afterCursor := ""
+
+	// Fetch posts page by page
+	for page := 0; page < pagesNeeded; page++ {
+		// Check if context is cancelled
+		if ctx.Err() != nil {
+			job.mu.Lock()
+			job.status = "error"
+			job.errorMsg = "operation timed out"
+			job.completedAt = time.Now()
+			job.mu.Unlock()
+			h.logger.Error("bulk save timed out", "job_id", jobID)
+			return
+		}
+
+		// Determine limit for this page
+		remainingPosts := req.Count - len(allPosts)
+		limit := bulkSavePageSize
+		if remainingPosts < bulkSavePageSize {
+			limit = remainingPosts
+		}
+
+		// Prepare request
+		postsReq := &types.PostsRequest{
+			Subreddit: req.Subreddit,
+			Pagination: types.Pagination{
+				Limit: limit,
+				After: afterCursor,
+			},
+		}
+
+		// Fetch posts based on sort parameter
+		var resp *types.PostsResponse
+		var err error
+
+		switch req.Sort {
+		case "new":
+			resp, err = redditClient.GetNew(ctx, postsReq)
+		case "hot":
+			resp, err = redditClient.GetHot(ctx, postsReq)
+		default:
+			resp, err = redditClient.GetHot(ctx, postsReq)
+		}
+
+		if err != nil {
+			job.mu.Lock()
+			job.status = "error"
+			job.errorMsg = "failed to fetch posts: " + err.Error()
+			job.completedAt = time.Now()
+			job.mu.Unlock()
+			h.logger.Error("failed to fetch posts in bulk save", "job_id", jobID, "error", err)
+			return
+		}
+
+		// Add posts to collection
+		allPosts = append(allPosts, resp.Posts...)
+
+		// Update job progress
+		job.mu.Lock()
+		job.postsSaved = len(allPosts)
+		job.mu.Unlock()
+
+		h.logger.Info("fetched posts page",
+			"job_id", jobID,
+			"page", page+1,
+			"posts_fetched", len(resp.Posts),
+			"total_posts", len(allPosts),
+		)
+
+		// Update cursor for next page
+		afterCursor = resp.AfterFullname
+
+		// Stop if we've reached the end or have enough posts
+		if afterCursor == "" || len(allPosts) >= req.Count {
+			break
+		}
+	}
+
+	// Truncate to exact count if we fetched more
+	if len(allPosts) > req.Count {
+		allPosts = allPosts[:req.Count]
+	}
+
+	// Update postsTotal if we fetched fewer posts than requested
+	if len(allPosts) < req.Count {
+		job.mu.Lock()
+		job.postsTotal = len(allPosts)
+		job.mu.Unlock()
+	}
+
+	// Save posts in batches
+	for i := 0; i < len(allPosts); i += bulkSaveBatchSize {
+		// Check if context is cancelled
+		if ctx.Err() != nil {
+			job.mu.Lock()
+			job.status = "error"
+			job.errorMsg = "operation timed out during save"
+			job.completedAt = time.Now()
+			job.mu.Unlock()
+			h.logger.Error("bulk save timed out during save", "job_id", jobID)
+			return
+		}
+
+		end := i + bulkSaveBatchSize
+		if end > len(allPosts) {
+			end = len(allPosts)
+		}
+
+		batch := allPosts[i:end]
+
+		if err := h.store.UpsertPosts(ctx, batch); err != nil {
+			job.mu.Lock()
+			job.status = "error"
+			job.errorMsg = "failed to save posts: " + err.Error()
+			job.completedAt = time.Now()
+			job.mu.Unlock()
+			h.logger.Error("failed to save posts in bulk save", "job_id", jobID, "error", err)
+			return
+		}
+
+		h.logger.Info("saved posts batch",
+			"job_id", jobID,
+			"batch_size", len(batch),
+			"total_saved", end,
+		)
+	}
+
+	// Fetch and save comments if requested
+	if req.IncludeComments && len(allPosts) > 0 {
+		// Check if context is cancelled before starting comment fetching
+		if ctx.Err() != nil {
+			job.mu.Lock()
+			job.status = "error"
+			job.errorMsg = "operation timed out before fetching comments"
+			job.completedAt = time.Now()
+			job.mu.Unlock()
+			h.logger.Error("bulk save timed out before fetching comments", "job_id", jobID)
+			return
+		}
+
+		// Collect post IDs
+		postIDs := make([]string, len(allPosts))
+		for i, post := range allPosts {
+			postIDs[i] = post.ID
+		}
+
+		// Prepare comments requests
+		commentsReqs := make([]*types.CommentsRequest, len(postIDs))
+		for i, postID := range postIDs {
+			commentsReqs[i] = &types.CommentsRequest{
+				Subreddit: req.Subreddit,
+				PostID:    postID,
+				Pagination: types.Pagination{
+					Limit: 100, // Fetch up to 100 comments per post
+				},
+			}
+		}
+
+		// Fetch comments for all posts using GetCommentsMultiple
+		commentsResponses, err := redditClient.GetCommentsMultiple(ctx, commentsReqs)
+		if err != nil {
+			// Log error but don't fail the entire job since posts were saved
+			h.logger.Error("failed to fetch comments in bulk save", "job_id", jobID, "error", err)
+			job.mu.Lock()
+			job.errorMsg = "posts saved, but failed to fetch comments: " + err.Error()
+			job.mu.Unlock()
+		} else {
+			// Collect all comments
+			var allComments []*types.Comment
+			for _, resp := range commentsResponses {
+				allComments = append(allComments, resp.Comments...)
+			}
+
+			// Save comments
+			if len(allComments) > 0 {
+				if err := h.store.UpsertComments(ctx, allComments); err != nil {
+					h.logger.Error("failed to save comments in bulk save", "job_id", jobID, "error", err)
+					job.mu.Lock()
+					job.errorMsg = "posts saved, but failed to save comments: " + err.Error()
+					job.mu.Unlock()
+				} else {
+					job.mu.Lock()
+					job.commentsSaved = len(allComments)
+					job.mu.Unlock()
+					h.logger.Info("saved comments",
+						"job_id", jobID,
+						"comments_saved", len(allComments),
+					)
+				}
+			}
+		}
+	}
+
+	// Mark job as completed
+	job.mu.Lock()
+	// Only mark as completed if status is still in_progress (not already set to error)
+	if job.status == "in_progress" {
+		job.status = "completed"
+	}
+	job.completedAt = time.Now()
+	job.mu.Unlock()
+
+	h.logger.Info("bulk save job completed",
+		"job_id", jobID,
+		"posts_saved", len(allPosts),
+		"comments_saved", job.commentsSaved,
+	)
 }
 
 // Error types for authentication header parsing

@@ -13,6 +13,10 @@ const MIN_LIMIT = 1;
 // Maximum reasonable offset value
 const MAX_OFFSET = 10000;
 
+// Bulk save count limits
+const MIN_BULK_SAVE_COUNT = 1;
+const MAX_BULK_SAVE_COUNT = 2000;
+
 /**
  * Custom error class for API errors
  */
@@ -335,6 +339,78 @@ export async function fetchSavedComments(token, postId, subreddit = '') {
     headers: {
       Authorization: `Bearer ${token}`,
     },
+  });
+
+  return data;
+}
+
+/**
+ * Start a bulk save operation for posts
+ * @param {string} token - JWT token
+ * @param {string} subreddit - Subreddit name (e.g., 'javascript')
+ * @param {string} sort - Sort type: 'hot' or 'new'
+ * @param {number} count - Number of posts to save (1-2000)
+ * @param {boolean} includeComments - Whether to include comments
+ * @param {AbortSignal} signal - Abort signal for request cancellation (optional)
+ * @returns {Promise<{jobId: string, message: string}>}
+ */
+export async function bulkSavePosts(token, subreddit, sort, count, includeComments, signal = undefined) {
+  // Validate subreddit
+  const validatedSubreddit = validateSubreddit(subreddit);
+
+  // Validate sort parameter
+  const validatedSort = ['hot', 'new'].includes(sort) ? sort : 'hot';
+
+  // Clamp count to 1-2000 range
+  const validatedCount = Math.max(MIN_BULK_SAVE_COUNT, Math.min(MAX_BULK_SAVE_COUNT, Math.floor(count || 100)));
+
+  // Validate includeComments is boolean
+  const validatedIncludeComments = Boolean(includeComments);
+
+  const data = await apiRequest('/bulk-save/posts', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      subreddit: validatedSubreddit,
+      sort: validatedSort,
+      count: validatedCount,
+      include_comments: validatedIncludeComments,
+    }),
+    signal,
+  });
+
+  return data;
+}
+
+/**
+ * Get progress of a bulk save operation
+ * @param {string} token - JWT token
+ * @param {string} jobId - Job ID from bulkSavePosts
+ * @param {AbortSignal} signal - Abort signal for request cancellation (optional)
+ * @returns {Promise<{status: string, postsSaved: number, postsTotal: number, commentsSaved: number, error: string}>}
+ */
+export async function getBulkSaveProgress(token, jobId, signal = undefined) {
+  // Validate jobId
+  if (!jobId || typeof jobId !== 'string' || jobId.trim().length === 0) {
+    throw new APIError('Job ID must be a non-empty string', 400, { field: 'jobId' });
+  }
+
+  const sanitizedJobId = sanitizeText(jobId, 100).trim();
+
+  // Validate jobId format (UUID v4 or hexadecimal string)
+  if (!/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(sanitizedJobId) &&
+      !/^[a-f0-9]+$/i.test(sanitizedJobId)) {
+    throw new APIError('Invalid job ID format', 400, { field: 'jobId' });
+  }
+
+  const data = await apiRequest(`/bulk-save/progress/${sanitizedJobId}`, {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    signal,
   });
 
   return data;

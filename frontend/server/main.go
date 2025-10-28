@@ -139,6 +139,10 @@ func main() {
 	mux.HandleFunc("GET /api/saved/posts", handler.handleGetSavedPosts)
 	mux.HandleFunc("GET /api/saved/comments", handler.handleGetSavedComments)
 
+	// Register bulk save routes
+	mux.HandleFunc("POST /api/bulk-save/posts", handler.handleBulkSavePosts)
+	mux.HandleFunc("GET /api/bulk-save/progress/", handler.handleBulkSaveProgress)
+
 	// Health check endpoint
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -169,6 +173,27 @@ func main() {
 		serverErrors <- server.ListenAndServe()
 	}()
 
+	// Start job cleanup goroutine
+	cleanupStop := make(chan struct{})
+	cleanupDone := make(chan struct{})
+	go func() {
+		defer close(cleanupDone)
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+
+		logger.Info("starting bulk save job cleanup goroutine", "interval", "5m", "max_age", "5m")
+
+		for {
+			select {
+			case <-ticker.C:
+				cleanupOldJobs(5*time.Minute, logger)
+			case <-cleanupStop:
+				logger.Info("stopping job cleanup goroutine")
+				return
+			}
+		}
+	}()
+
 	// Wait for interrupt signal or server error
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
@@ -185,14 +210,15 @@ func main() {
 	// Graceful shutdown
 	logger.Info("shutting down server...")
 
+	// Stop job cleanup goroutine
+	close(cleanupStop)
+	<-cleanupDone
+
 	// Stop session cleanup goroutine
 	sessionManager.Stop()
 
-	// Close storage with timeout
+	// Close storage
 	if store != nil {
-		_, closeCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer closeCancel()
-
 		if err := store.Close(); err != nil {
 			logger.Error("failed to close storage on first attempt", "error", err)
 			// For SQLite, a delay may help with pending operations
