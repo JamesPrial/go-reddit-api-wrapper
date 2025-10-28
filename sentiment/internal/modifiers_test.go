@@ -1,0 +1,569 @@
+package internal
+
+import (
+	"math"
+	"testing"
+)
+
+// TestDetectNegation tests the DetectNegation function.
+func TestDetectNegation(t *testing.T) {
+	tests := []struct {
+		name     string
+		tokens   []string
+		index    int
+		expected bool
+	}{
+		{
+			name:     "no negation before word",
+			tokens:   []string{"this", "is", "good"},
+			index:    2,
+			expected: false,
+		},
+		{
+			name:     "negation immediately before word",
+			tokens:   []string{"not", "good"},
+			index:    1,
+			expected: true,
+		},
+		{
+			name:     "negation one token before",
+			tokens:   []string{"is", "not", "good"},
+			index:    2,
+			expected: true,
+		},
+		{
+			name:     "negation two tokens before",
+			tokens:   []string{"it", "is", "not", "good"},
+			index:    3,
+			expected: true,
+		},
+		{
+			name:     "negation three tokens before",
+			tokens:   []string{"i", "think", "it", "is", "not", "good"},
+			index:    5,
+			expected: true,
+		},
+		{
+			name:     "negation too far before (more than 3 tokens)",
+			tokens:   []string{"i", "really", "truly", "think", "good"},
+			index:    4,
+			expected: false,
+		},
+		{
+			name:     "negation after word is not detected",
+			tokens:   []string{"good", "not"},
+			index:    0,
+			expected: false,
+		},
+		{
+			name:     "no negation with no tokens",
+			tokens:   []string{},
+			index:    0,
+			expected: false,
+		},
+		{
+			name:     "no negation at index 0",
+			tokens:   []string{"good"},
+			index:    0,
+			expected: false,
+		},
+		{
+			name:     "different negation words",
+			tokens:   []string{"never", "good"},
+			index:    1,
+			expected: true,
+		},
+		{
+			name:     "multiple negations in lookback range",
+			tokens:   []string{"no", "not", "never", "good"},
+			index:    3,
+			expected: true,
+		},
+		{
+			name:     "contraction negation",
+			tokens:   []string{"don't", "like"},
+			index:    1,
+			expected: true,
+		},
+		{
+			name:     "contraction negation with apostrophe",
+			tokens:   []string{"isn't", "great"},
+			index:    1,
+			expected: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := DetectNegation(tt.tokens, tt.index)
+			if result != tt.expected {
+				t.Errorf("DetectNegation(%v, %d) = %v, want %v", tt.tokens, tt.index, result, tt.expected)
+			}
+		})
+	}
+}
+
+// TestCalculatePunctuationBoost tests the CalculatePunctuationBoost function.
+func TestCalculatePunctuationBoost(t *testing.T) {
+	tests := []struct {
+		name       string
+		text       string
+		minBoost   float64
+		maxBoost   float64
+		expectedEq float64 // exact match if set to non-zero
+	}{
+		{
+			name:       "empty string",
+			text:       "",
+			minBoost:   1.0,
+			maxBoost:   1.0,
+			expectedEq: 1.0,
+		},
+		{
+			name:       "no punctuation",
+			text:       "hello world",
+			minBoost:   1.0,
+			maxBoost:   1.0,
+			expectedEq: 1.0,
+		},
+		{
+			name:       "single punctuation",
+			text:       "hello!",
+			minBoost:   1.0,
+			maxBoost:   1.0,
+			expectedEq: 1.0,
+		},
+		{
+			name:       "double exclamation",
+			text:       "hello!!",
+			minBoost:   1.1,
+			maxBoost:   1.1,
+			expectedEq: 1.1,
+		},
+		{
+			name:       "triple exclamation",
+			text:       "hello!!!",
+			minBoost:   1.2,
+			maxBoost:   1.2,
+			expectedEq: 1.2,
+		},
+		{
+			name:       "five exclamations",
+			text:       "hello!!!!!",
+			minBoost:   1.4,
+			maxBoost:   1.4,
+			expectedEq: 1.4,
+		},
+		{
+			name:       "many exclamations capped at 1.5",
+			text:       "hello!!!!!!!!!",
+			minBoost:   1.5,
+			maxBoost:   1.5,
+			expectedEq: 1.5,
+		},
+		{
+			name:       "double question marks",
+			text:       "what??",
+			minBoost:   1.1,
+			maxBoost:   1.1,
+			expectedEq: 1.1,
+		},
+		{
+			name:       "multiple punctuation sequences",
+			text:       "amazing!!! and great??",
+			minBoost:   1.2, // max consecutive is 3 (!!!)
+			maxBoost:   1.2,
+			expectedEq: 1.2,
+		},
+		{
+			name:       "mixed punctuation not repeated",
+			text:       "hello!? world?!",
+			minBoost:   1.0,
+			maxBoost:   1.0,
+			expectedEq: 1.0,
+		},
+		{
+			name:       "dots repeated",
+			text:       "wait...",
+			minBoost:   1.2,
+			maxBoost:   1.2,
+			expectedEq: 1.2,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := CalculatePunctuationBoost(tt.text)
+
+			if tt.expectedEq > 0 {
+				if !almostEqual(result, tt.expectedEq) {
+					t.Errorf("CalculatePunctuationBoost(%q) = %f, want %f", tt.text, result, tt.expectedEq)
+				}
+			} else {
+				if result < tt.minBoost || result > tt.maxBoost {
+					t.Errorf("CalculatePunctuationBoost(%q) = %f, want in range [%f, %f]", tt.text, result, tt.minBoost, tt.maxBoost)
+				}
+			}
+
+			// Verify boost is always >= 1.0 and <= 1.5
+			if result < 1.0 || result > 1.5 {
+				t.Errorf("boost %f outside valid range [1.0, 1.5]", result)
+			}
+		})
+	}
+}
+
+// TestCalculateCapsBoost tests the CalculateCapsBoost function.
+func TestCalculateCapsBoost(t *testing.T) {
+	tests := []struct {
+		name       string
+		text       string
+		minBoost   float64
+		maxBoost   float64
+		expectedEq float64 // exact match if set to non-zero
+	}{
+		{
+			name:       "empty string",
+			text:       "",
+			minBoost:   1.0,
+			maxBoost:   1.0,
+			expectedEq: 1.0,
+		},
+		{
+			name:       "no caps words",
+			text:       "this is a test",
+			minBoost:   1.0,
+			maxBoost:   1.0,
+			expectedEq: 1.0,
+		},
+		{
+			name:       "single word all caps",
+			text:       "This is GREAT",
+			minBoost:   1.0,
+			maxBoost:   1.1,
+			expectedEq: 0, // approximately 1.05 (1/3 words in caps)
+		},
+		{
+			name:       "two words all caps",
+			text:       "THIS IS great",
+			minBoost:   1.15,
+			maxBoost:   1.25,
+			expectedEq: 0, // approximately 1.2 (2/3 words in caps)
+		},
+		{
+			name:       "all words all caps",
+			text:       "THIS IS GREAT",
+			minBoost:   1.25,
+			maxBoost:   1.3,
+			expectedEq: 1.3,
+		},
+		{
+			name:       "single letter words ignored",
+			text:       "I A TEST",
+			minBoost:   1.0,
+			maxBoost:   1.1,
+			expectedEq: 0, // TEST is caps, but only 1/3 words
+		},
+		{
+			name:       "mixed case not counted as caps",
+			text:       "TeSt test",
+			minBoost:   1.0,
+			maxBoost:   1.0,
+			expectedEq: 1.0,
+		},
+		{
+			name:       "caps with punctuation",
+			text:       "HELLO! WORLD?",
+			minBoost:   1.25,
+			maxBoost:   1.3,
+			expectedEq: 1.3,
+		},
+		{
+			name:       "fifty percent caps",
+			text:       "HELLO world GOOD bad",
+			minBoost:   1.1,
+			maxBoost:   1.2,
+			expectedEq: 0, // 2/4 words = 50% = 1.15
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := CalculateCapsBoost(tt.text)
+
+			if tt.expectedEq > 0 {
+				if !almostEqual(result, tt.expectedEq) {
+					t.Errorf("CalculateCapsBoost(%q) = %f, want %f", tt.text, result, tt.expectedEq)
+				}
+			} else {
+				if result < tt.minBoost || result > tt.maxBoost {
+					t.Errorf("CalculateCapsBoost(%q) = %f, want in range [%f, %f]", tt.text, result, tt.minBoost, tt.maxBoost)
+				}
+			}
+
+			// Verify boost is always >= 1.0 and <= 1.3
+			if result < 1.0 || result > 1.3 {
+				t.Errorf("boost %f outside valid range [1.0, 1.3]", result)
+			}
+		})
+	}
+}
+
+// TestApplyModifiers tests the ApplyModifiers function.
+func TestApplyModifiers(t *testing.T) {
+	tests := []struct {
+		name       string
+		baseScore  float64
+		text       string
+		tokens     []string
+		checkRange bool // if true, check min/max range instead of exact value
+		minScore   float64
+		maxScore   float64
+		expectedEq float64 // exact match if set to non-zero
+	}{
+		{
+			name:       "zero base score unchanged",
+			baseScore:  0.0,
+			text:       "test text",
+			tokens:     []string{"test", "text"},
+			expectedEq: 0.0,
+		},
+		{
+			name:       "positive score with no modifiers",
+			baseScore:  0.5,
+			text:       "good",
+			tokens:     []string{"good"},
+			expectedEq: 0.5,
+		},
+		{
+			name:       "negative score with no modifiers",
+			baseScore:  -0.5,
+			text:       "bad",
+			tokens:     []string{"bad"},
+			expectedEq: -0.5,
+		},
+		{
+			name:       "positive score with negation",
+			baseScore:  0.5,
+			text:       "not good",
+			tokens:     []string{"not", "good"},
+			expectedEq: -0.5,
+		},
+		{
+			name:       "negative score with negation",
+			baseScore:  -0.5,
+			text:       "not bad",
+			tokens:     []string{"not", "bad"},
+			expectedEq: 0.5,
+		},
+		{
+			name:       "score boosted by punctuation",
+			baseScore:  0.5,
+			text:       "good!!!",
+			tokens:     []string{"good"},
+			checkRange: true,
+			minScore:   0.5,
+			maxScore:   0.8, // 0.5 * 1.5 = 0.75
+		},
+		{
+			name:       "score boosted by caps",
+			baseScore:  0.5,
+			text:       "THIS IS GOOD",
+			tokens:     []string{"this", "is", "good"},
+			checkRange: true,
+			minScore:   0.5,
+			maxScore:   0.8, // 0.5 * 1.3 = 0.65
+		},
+		{
+			name:       "score boosted by both caps and punctuation",
+			baseScore:  0.5,
+			text:       "THIS IS GOOD!!!",
+			tokens:     []string{"this", "is", "good"},
+			checkRange: true,
+			minScore:   0.5,
+			maxScore:   1.0, // 0.5 * 1.3 * 1.5 = 0.975, clamped to 1.0
+		},
+		{
+			name:       "very positive score clamped to 1.0",
+			baseScore:  2.0,
+			text:       "GREAT!!!",
+			tokens:     []string{"great"},
+			expectedEq: 1.0,
+		},
+		{
+			name:       "very negative score clamped to -1.0",
+			baseScore:  -2.0,
+			text:       "TERRIBLE!!!",
+			tokens:     []string{"terrible"},
+			expectedEq: -1.0,
+		},
+		{
+			name:       "empty tokens no modifiers",
+			baseScore:  0.5,
+			text:       "test",
+			tokens:     []string{},
+			expectedEq: 0.5,
+		},
+		{
+			name:       "empty text no modifiers",
+			baseScore:  0.5,
+			text:       "",
+			tokens:     []string{"test"},
+			expectedEq: 0.5,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ApplyModifiers(tt.baseScore, tt.text, tt.tokens)
+
+			if tt.checkRange {
+				if result < tt.minScore || result > tt.maxScore {
+					t.Errorf("ApplyModifiers = %f, want in range [%f, %f]", result, tt.minScore, tt.maxScore)
+				}
+			} else if tt.expectedEq != 0 || (tt.expectedEq == 0 && tt.baseScore == 0) {
+				if !almostEqual(result, tt.expectedEq) {
+					t.Errorf("ApplyModifiers = %f, want %f", result, tt.expectedEq)
+				}
+			}
+
+			// Verify score is always in valid range
+			if result < -1.0 || result > 1.0 {
+				t.Errorf("score %f outside valid range [-1.0, 1.0]", result)
+			}
+		})
+	}
+}
+
+// TestModifiersIntegration tests modifiers working together.
+func TestModifiersIntegration(t *testing.T) {
+	t.Run("negation flips positive to negative", func(t *testing.T) {
+		baseScore := 0.8
+		text := "not good"
+		tokens := []string{"not", "good"}
+
+		result := ApplyModifiers(baseScore, text, tokens)
+
+		if result >= 0 {
+			t.Errorf("expected negative score after negation, got %f", result)
+		}
+	})
+
+	t.Run("multiple modifiers compound effects", func(t *testing.T) {
+		baseScore := 0.5
+		text := "NOT AMAZING!!!"
+		tokens := []string{"not", "amazing"}
+
+		result := ApplyModifiers(baseScore, text, tokens)
+
+		// Should flip to negative and apply boosts
+		if result >= 0 {
+			t.Error("expected negative score")
+		}
+
+		// Should have some boost applied (not just -0.5)
+		if result > -0.3 {
+			t.Errorf("expected more negative score with boosts, got %f", result)
+		}
+	})
+
+	t.Run("boosts don't exceed bounds", func(t *testing.T) {
+		baseScore := 1.0
+		text := "AMAZING!!!"
+		tokens := []string{"amazing"}
+
+		result := ApplyModifiers(baseScore, text, tokens)
+
+		if result > 1.0 {
+			t.Errorf("expected clamped score, got %f", result)
+		}
+	})
+}
+
+// TestPunctuationBoostRange tests punctuation boost stays in range.
+func TestPunctuationBoostRange(t *testing.T) {
+	tests := []string{
+		"",
+		"test",
+		"test!",
+		"test!!",
+		"test!!!",
+		"test!!!!",
+		"test!!!!!",
+		"test!!!!!!",
+	}
+
+	for _, text := range tests {
+		result := CalculatePunctuationBoost(text)
+		if result < 1.0 || result > 1.5 {
+			t.Errorf("CalculatePunctuationBoost(%q) = %f, expected range [1.0, 1.5]", text, result)
+		}
+	}
+}
+
+// TestCapsBoostRange tests caps boost stays in range.
+func TestCapsBoostRange(t *testing.T) {
+	tests := []string{
+		"",
+		"test",
+		"TEST",
+		"THIS IS TEST",
+		"THIS IS A TEST",
+		"THIS IS A TEST CASE",
+	}
+
+	for _, text := range tests {
+		result := CalculateCapsBoost(text)
+		if result < 1.0 || result > 1.3 {
+			t.Errorf("CalculateCapsBoost(%q) = %f, expected range [1.0, 1.3]", text, result)
+		}
+	}
+}
+
+// almostEqual checks if two float64 values are approximately equal.
+func almostEqual(a, b float64) bool {
+	epsilon := 0.0001
+	return math.Abs(a-b) < epsilon
+}
+
+// TestNegationWordsList tests that all expected negation words are recognized.
+func TestNegationWordsList(t *testing.T) {
+	negationWords := []string{
+		"not", "no", "never", "neither",
+		"don't", "doesn't", "didn't",
+		"won't", "can't", "shouldn't",
+		"couldn't", "wouldn't",
+		"isn't", "wasn't", "haven't", "hasn't",
+	}
+
+	for _, word := range negationWords {
+		tokens := []string{word, "good"}
+		if !DetectNegation(tokens, 1) {
+			t.Errorf("expected negation word %q to be detected", word)
+		}
+	}
+}
+
+// TestBoostEdgeCases tests edge cases in boost calculations.
+func TestBoostEdgeCases(t *testing.T) {
+	t.Run("punctuation boost with only special characters", func(t *testing.T) {
+		result := CalculatePunctuationBoost("!!!...???")
+		if result < 1.0 || result > 1.5 {
+			t.Errorf("unexpected boost for special characters: %f", result)
+		}
+	})
+
+	t.Run("caps boost with only single letters", func(t *testing.T) {
+		result := CalculateCapsBoost("I A B C")
+		if result != 1.0 {
+			t.Errorf("expected no boost for single letters, got %f", result)
+		}
+	})
+
+	t.Run("caps boost with numbers only", func(t *testing.T) {
+		result := CalculateCapsBoost("123 456 789")
+		if result != 1.0 {
+			t.Errorf("expected no boost for numbers only, got %f", result)
+		}
+	})
+}
