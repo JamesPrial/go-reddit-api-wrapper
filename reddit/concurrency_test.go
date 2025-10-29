@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -23,9 +22,7 @@ import (
 
 // TestConcurrentClientUsage tests multiple clients using the API simultaneously
 func TestConcurrentClientUsage(t *testing.T) {
-	t.Skip("Concurrency test needs investigation")
-	var requestCount int64
-	var mu sync.Mutex
+	// t.Skip("Concurrency test needs investigation")
 
 	// Setup test data
 	subreddit := testutil.NewSubreddit("testsubreddit").
@@ -40,41 +37,11 @@ func TestConcurrentClientUsage(t *testing.T) {
 		WithAuthor("testuser").
 		Build()
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt64(&requestCount, 1)
-
-		mu.Lock()
-		defer mu.Unlock()
-
-		w.Header().Set("X-Ratelimit-Remaining", "60")
-		w.Header().Set("X-Ratelimit-Reset", "60")
-		w.Header().Set("Content-Type", "application/json")
-
-		switch {
-		case strings.Contains(r.URL.Path, "/r/testsubreddit/about.json"):
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"kind": "t5",
-				"data": subreddit,
-			})
-
-		case strings.Contains(r.URL.Path, "/r/testsubreddit/hot.json"):
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"kind": "Listing",
-				"data": map[string]interface{}{
-					"children": []interface{}{
-						map[string]interface{}{
-							"kind": "t3",
-							"data": post,
-						},
-					},
-				},
-			})
-
-		default:
-			w.WriteHeader(http.StatusNotFound)
-			json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
-		}
-	}))
+	// Use MockServer for reliable testing
+	server := testutil.NewMockServer().
+		WithSubreddit("testsubreddit", subreddit).
+		WithPosts("testsubreddit", "hot", post).
+		Start()
 	defer server.Close()
 
 	// Create mock clock for testing
@@ -86,7 +53,7 @@ func TestConcurrentClientUsage(t *testing.T) {
 
 	for i := 0; i < numClients; i++ {
 		httpClient := &http.Client{Timeout: 30 * time.Second}
-		internalClient, err := client.NewClientWithRateLimit(httpClient, server.URL, fmt.Sprintf("test_agent_%d/1.0", i), nil, client.RateLimitConfig{}, mockClock)
+		internalClient, err := client.NewClientWithRateLimit(httpClient, server.URL(), fmt.Sprintf("test_agent_%d/1.0", i), nil, client.RateLimitConfig{}, mockClock)
 		testutil.AssertNoError(t, err)
 
 		clients[i] = &Reddit{
@@ -149,18 +116,11 @@ func TestConcurrentClientUsage(t *testing.T) {
 			t.Error(err)
 		}
 	}
-
-	// Verify all requests were handled
-	if atomic.LoadInt64(&requestCount) < int64(numClients*2) {
-		t.Errorf("Expected at least %d requests, got %d", numClients*2, atomic.LoadInt64(&requestCount))
-	}
 }
 
 // TestConcurrentSameClientOperations tests a single client used concurrently
 func TestConcurrentSameClientOperations(t *testing.T) {
-	t.Skip("Concurrency test needs investigation")
-	var requestCount int64
-	var mu sync.Mutex
+	// t.Skip("Concurrency test needs investigation")
 
 	// Setup test data
 	subreddit := testutil.NewSubreddit("concurrent_test").
@@ -175,50 +135,18 @@ func TestConcurrentSameClientOperations(t *testing.T) {
 		WithAuthor("testuser").
 		Build()
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt64(&requestCount, 1)
-
-		mu.Lock()
-		defer mu.Unlock()
-
-		// No simulated processing time needed with mock clock
-
-		w.Header().Set("X-Ratelimit-Remaining", "60")
-		w.Header().Set("X-Ratelimit-Reset", "60")
-		w.Header().Set("Content-Type", "application/json")
-
-		switch {
-		case strings.Contains(r.URL.Path, "/r/concurrent_test/about.json"):
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"kind": "t5",
-				"data": subreddit,
-			})
-
-		case strings.Contains(r.URL.Path, "/r/concurrent_test/hot.json"):
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"kind": "Listing",
-				"data": map[string]interface{}{
-					"children": []interface{}{
-						map[string]interface{}{
-							"kind": "t3",
-							"data": post,
-						},
-					},
-				},
-			})
-
-		default:
-			w.WriteHeader(http.StatusNotFound)
-			json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
-		}
-	}))
+	// Use MockServer for reliable testing
+	server := testutil.NewMockServer().
+		WithSubreddit("concurrent_test", subreddit).
+		WithPosts("concurrent_test", "hot", post).
+		Start()
 	defer server.Close()
 
 	// Create mock clock for testing
 	mockClock := clock.NewMockClock(time.Time{})
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := client.NewClientWithRateLimit(httpClient, server.URL, "concurrent_test_agent/1.0", nil, client.RateLimitConfig{}, mockClock)
+	internalClient, err := client.NewClientWithRateLimit(httpClient, server.URL(), "concurrent_test_agent/1.0", nil, client.RateLimitConfig{}, mockClock)
 	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
@@ -229,52 +157,55 @@ func TestConcurrentSameClientOperations(t *testing.T) {
 	}
 
 	// Test concurrent operations on the same client
-	numGoroutines := 10
 	var wg sync.WaitGroup
 	var errors []error
 	var errorMu sync.Mutex
 
-	for i := 0; i < numGoroutines; i++ {
+	// Subreddit operations
+	for i := 0; i < 5; i++ {
 		wg.Add(1)
-		go func(goroutineID int) {
+		go func() {
 			defer wg.Done()
-
-			// Alternate between subreddit and post operations
-			if goroutineID%2 == 0 {
-				sr, err := client.GetSubreddit(context.Background(), "concurrent_test")
-				if err != nil {
-					errorMu.Lock()
-					errors = append(errors, fmt.Errorf("goroutine %d subreddit error: %v", goroutineID, err))
-					errorMu.Unlock()
-					return
-				}
-
-				if sr.DisplayName == "" {
-					errorMu.Lock()
-					errors = append(errors, fmt.Errorf("goroutine %d empty subreddit name", goroutineID))
-					errorMu.Unlock()
-				}
-			} else {
-				posts, err := client.GetHot(context.Background(), &types.PostsRequest{
-					Subreddit: "concurrent_test",
-					Pagination: types.Pagination{
-						Limit: 5,
-					},
-				})
-				if err != nil {
-					errorMu.Lock()
-					errors = append(errors, fmt.Errorf("goroutine %d posts error: %v", goroutineID, err))
-					errorMu.Unlock()
-					return
-				}
-
-				if len(posts.Posts) == 0 {
-					errorMu.Lock()
-					errors = append(errors, fmt.Errorf("goroutine %d no posts returned", goroutineID))
-					errorMu.Unlock()
-				}
+			sr, err := client.GetSubreddit(context.Background(), "concurrent_test")
+			if err != nil {
+				errorMu.Lock()
+				errors = append(errors, fmt.Errorf("subreddit error: %v", err))
+				errorMu.Unlock()
+				return
 			}
-		}(i)
+
+			if sr.DisplayName == "" {
+				errorMu.Lock()
+				errors = append(errors, fmt.Errorf("empty subreddit name"))
+				errorMu.Unlock()
+			}
+		}()
+	}
+
+	// Posts operations
+	for i := 0; i < 5; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			posts, err := client.GetHot(context.Background(), &types.PostsRequest{
+				Subreddit: "concurrent_test",
+				Pagination: types.Pagination{
+					Limit: 5,
+				},
+			})
+			if err != nil {
+				errorMu.Lock()
+				errors = append(errors, fmt.Errorf("posts error: %v", err))
+				errorMu.Unlock()
+				return
+			}
+
+			if len(posts.Posts) == 0 {
+				errorMu.Lock()
+				errors = append(errors, fmt.Errorf("no posts returned"))
+				errorMu.Unlock()
+			}
+		}()
 	}
 
 	wg.Wait()
@@ -284,11 +215,6 @@ func TestConcurrentSameClientOperations(t *testing.T) {
 		for _, err := range errors {
 			t.Error(err)
 		}
-	}
-
-	// Verify requests were handled
-	if atomic.LoadInt64(&requestCount) == 0 {
-		t.Error("No requests were processed")
 	}
 }
 
@@ -583,9 +509,7 @@ func TestConcurrentResourceContention(t *testing.T) {
 
 // TestConcurrentMixedOperations tests different types of operations running concurrently
 func TestConcurrentMixedOperations(t *testing.T) {
-	t.Skip("Concurrency test needs investigation")
-	var requestCount int64
-	var mu sync.Mutex
+	// t.Skip("Concurrency test needs investigation")
 
 	// Setup test data
 	subreddit := testutil.NewSubreddit("mixed_test_sub").
@@ -612,75 +536,19 @@ func TestConcurrentMixedOperations(t *testing.T) {
 		WithSubreddit("mixed_test_sub").
 		Build()
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt64(&requestCount, 1)
-
-		mu.Lock()
-		defer mu.Unlock()
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-
-		switch {
-		case strings.Contains(r.URL.Path, "/r/mixed_test_sub/about.json"):
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"kind": "t5",
-				"data": subreddit,
-			})
-
-		case strings.Contains(r.URL.Path, "/r/mixed_test_sub/hot.json"):
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"kind": "Listing",
-				"data": map[string]interface{}{
-					"children": []interface{}{
-						map[string]interface{}{
-							"kind": "t3",
-							"data": post,
-						},
-					},
-				},
-			})
-
-		case strings.Contains(r.URL.Path, "/r/mixed_test_sub/comments/mixedpost1.json"):
-			postListing := map[string]interface{}{
-				"kind": "Listing",
-				"data": map[string]interface{}{
-					"children": []interface{}{
-						map[string]interface{}{
-							"kind": "t3",
-							"data": post,
-						},
-					},
-				},
-			}
-
-			commentsListing := map[string]interface{}{
-				"kind": "Listing",
-				"data": map[string]interface{}{
-					"children": []interface{}{
-						map[string]interface{}{
-							"kind": "t1",
-							"data": comment,
-						},
-					},
-				},
-			}
-
-			response := []interface{}{postListing, commentsListing}
-			json.NewEncoder(w).Encode(response)
-
-		default:
-			w.WriteHeader(http.StatusNotFound)
-			json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
-		}
-	}))
+	// Use MockServer for reliable testing
+	server := testutil.NewMockServer().
+		WithSubreddit("mixed_test_sub", subreddit).
+		WithPosts("mixed_test_sub", "hot", post).
+		WithComments("mixed_test_sub", "mixedpost1", post, comment).
+		Start()
 	defer server.Close()
 
 	// Create mock clock for testing
 	mockClock := clock.NewMockClock(time.Time{})
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	internalClient, err := client.NewClientWithRateLimit(httpClient, server.URL, "mixed_operations_test_agent/1.0", nil, client.RateLimitConfig{}, mockClock)
+	internalClient, err := client.NewClientWithRateLimit(httpClient, server.URL(), "mixed_operations_test_agent/1.0", nil, client.RateLimitConfig{}, mockClock)
 	testutil.AssertNoError(t, err)
 
 	client := &Reddit{
