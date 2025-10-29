@@ -10,6 +10,7 @@ import (
 
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/validation"
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/client"
 )
 
 const (
@@ -249,7 +250,14 @@ func (v *Validator) ValidateConfig(clientID, clientSecret, userAgent string, htt
 
 	// Set default HTTP client if not provided
 	if httpClient == nil {
-		httpClient = &http.Client{Timeout: defaultTimeout}
+		// Create HTTP client with optimized transport for connection pooling and HTTP/2.
+		// Metrics are not captured here since this is the default client creation path.
+		// Users who need metrics should create their own transport and call SetTransportMetrics.
+		transport, _ := client.NewOptimizedTransport(nil)
+		httpClient = &http.Client{
+			Timeout:   defaultTimeout,
+			Transport: transport,
+		}
 	} else if httpClient.Timeout == 0 {
 		// Create a shallow copy to avoid mutating the user's client
 		clientCopy := *httpClient

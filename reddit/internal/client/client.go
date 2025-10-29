@@ -106,8 +106,9 @@ type Client struct {
 	clock           clock.Clock // Time abstraction for testing
 
 	limiter            *rate.Limiter
-	forceWaitUntil     atomic.Int64 // Unix nanoseconds
-	rateLimitThreshold float64      // When to start proactive throttling
+	forceWaitUntil     atomic.Int64                     // Unix nanoseconds
+	rateLimitThreshold float64                          // When to start proactive throttling
+	transportMetrics   atomic.Pointer[TransportMetrics] // Connection and DNS metrics (optional)
 }
 
 // RateLimitConfig controls how requests are throttled before reaching Reddit.
@@ -131,6 +132,10 @@ func NewClient(httpClient *http.Client, baseURL string, userAgent string, logger
 // NewClientWithRateLimit returns a new Reddit API client with custom rate limiting.
 // If a nil httpClient is provided, http.DefaultClient will be used.
 // If a nil clock is provided, a real clock will be used.
+//
+// Transport metrics are not automatically detected. Call SetTransportMetrics()
+// after creating the client to enable connection metrics logging.
+// SetTransportMetrics is thread-safe and can be called at any time.
 func NewClientWithRateLimit(httpClient *http.Client, baseURL string, userAgent string, logger *slog.Logger, cfg RateLimitConfig, clk clock.Clock) (*Client, error) {
 	if httpClient == nil {
 		httpClient = http.DefaultClient
@@ -167,6 +172,7 @@ func NewClientWithRateLimit(httpClient *http.Client, baseURL string, userAgent s
 		rateLimitThreshold: threshold,
 		clock:              clk,
 	}
+	// transportMetrics is initialized to nil (zero value of atomic.Pointer)
 
 	return c, nil
 }
@@ -179,6 +185,20 @@ func (c *Client) SetLogBodyLimit(limit int) {
 		return
 	}
 	c.maxLogBodyBytes = limit
+}
+
+// SetTransportMetrics sets the transport metrics to track connection statistics.
+// This enables connection and DNS metrics to be included in debug logs.
+// Thread-safe - can be called concurrently.
+func (c *Client) SetTransportMetrics(metrics *TransportMetrics) {
+	c.transportMetrics.Store(metrics)
+}
+
+// GetConnectionMetrics returns the transport metrics if available, or nil.
+// Returns a pointer to the live metrics object which continues to be updated.
+// Thread-safe - can be called concurrently.
+func (c *Client) GetConnectionMetrics() *TransportMetrics {
+	return c.transportMetrics.Load()
 }
 
 // NewRequest creates an API request. A relative URL can be provided in path,
@@ -668,6 +688,17 @@ func (c *Client) logHTTPResult(ctx context.Context, req *http.Request, resp *htt
 		if v := resp.Header.Get("Retry-After"); v != "" {
 			attrs = append(attrs, slog.String("retry_after", v))
 		}
+	}
+
+	// Include connection metrics if available
+	metrics := c.transportMetrics.Load()
+	if metrics != nil {
+		attrs = append(attrs,
+			slog.Int64("connections_opened", metrics.ConnectionsOpened.Load()),
+			slog.Int64("connections_reused", metrics.ConnectionsReused.Load()),
+			slog.Int64("connections_failed", metrics.ConnectionsFailed.Load()),
+			slog.Int64("dns_lookups_total", metrics.DNSLookupsTotal.Load()),
+		)
 	}
 
 	level := slog.LevelInfo

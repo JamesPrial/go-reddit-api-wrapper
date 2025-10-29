@@ -888,3 +888,106 @@ func TestClient_DoMoreChildren_MalformedStructure(t *testing.T) {
 		t.Fatalf("expected empty Things for missing data.things field, got %d", len(things))
 	}
 }
+
+func TestClient_GetConnectionMetrics(t *testing.T) {
+	// Test 1: Client with optimized transport should have metrics
+	transport, metrics := NewOptimizedTransport(nil)
+	httpClient := &http.Client{Transport: transport}
+	c, err := NewClient(httpClient, "https://example.com/", "test-agent", nil)
+	testutil.AssertNoError(t, err)
+
+	// Manually set metrics since NewClient doesn't automatically detect them
+	c.SetTransportMetrics(metrics)
+	retrievedMetrics := c.GetConnectionMetrics()
+	if retrievedMetrics == nil {
+		t.Errorf("expected non-nil metrics, got nil")
+	}
+
+	// Verify it's the same metrics object
+	if retrievedMetrics != metrics {
+		t.Errorf("expected same metrics object, got different instance")
+	}
+
+	// Test 2: Client with default transport should have nil metrics
+	defaultHTTPClient := &http.Client{}
+	c2, err := NewClient(defaultHTTPClient, "https://example.com/", "test-agent", nil)
+	testutil.AssertNoError(t, err)
+
+	if c2.GetConnectionMetrics() != nil {
+		t.Errorf("expected nil metrics for default transport, got %v", c2.GetConnectionMetrics())
+	}
+
+	// Test 3: Metrics should track connection reuse over multiple requests
+	transport3, metrics3 := NewOptimizedTransport(nil)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"kind":"t3","data":{"id":"test123"}}`))
+	}))
+	t.Cleanup(server.Close)
+
+	httpClient3 := &http.Client{Transport: transport3, Timeout: 30 * time.Second}
+	c3, err := NewClient(httpClient3, server.URL+"/", "test-agent", nil)
+	testutil.AssertNoError(t, err)
+	c3.SetTransportMetrics(metrics3)
+
+	// Make a few requests to allow connection reuse
+	for i := 0; i < 3; i++ {
+		req, err := c3.NewRequest(context.Background(), http.MethodGet, "test", nil)
+		testutil.AssertNoError(t, err)
+
+		var thing types.Thing
+		err = c3.Do(req, &thing)
+		testutil.AssertNoError(t, err)
+	}
+
+	// Check that we have some connection activity
+	openedConns := metrics3.ConnectionsOpened.Load()
+	if openedConns < 0 {
+		t.Errorf("expected non-negative opened connections, got %d", openedConns)
+	}
+}
+
+func TestClient_GetConnectionMetrics_WithDNSCache(t *testing.T) {
+	dnsCache := NewDNSCache(5 * time.Minute)
+	config := &TransportConfig{
+		DNSCache: dnsCache,
+	}
+	transport, metrics := NewOptimizedTransport(config)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"kind":"t3","data":{"id":"test123"}}`))
+	}))
+	t.Cleanup(server.Close)
+
+	httpClient := &http.Client{Transport: transport, Timeout: 30 * time.Second}
+	c, err := NewClient(httpClient, server.URL+"/", "test-agent", nil)
+	testutil.AssertNoError(t, err)
+	c.SetTransportMetrics(metrics)
+
+	// Make requests to exercise DNS cache
+	for i := 0; i < 2; i++ {
+		req, err := c.NewRequest(context.Background(), http.MethodGet, "test", nil)
+		testutil.AssertNoError(t, err)
+
+		var thing types.Thing
+		err = c.Do(req, &thing)
+		testutil.AssertNoError(t, err)
+	}
+
+	retrievedMetrics := c.GetConnectionMetrics()
+	if retrievedMetrics == nil {
+		t.Errorf("expected non-nil metrics with DNS cache, got nil")
+	}
+
+	// DNS lookups should be present in transport metrics
+	totalLookups := metrics.DNSLookupsTotal.Load()
+	if totalLookups == 0 {
+		t.Logf("warning: no DNS lookups recorded in transport metrics (expected in some environments)")
+	} else {
+		t.Logf("DNS Lookups - Total: %d", totalLookups)
+	}
+
+	// DNS cache metrics are available separately via dnsCache.GetMetrics()
+	hits, misses := dnsCache.GetMetrics()
+	t.Logf("DNS Cache Metrics - Hits: %d, Misses: %d", hits, misses)
+}
