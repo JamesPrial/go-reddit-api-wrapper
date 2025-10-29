@@ -5,6 +5,7 @@ package sqlite_test
 import (
 	"context"
 	"fmt"
+	"os"
 	"testing"
 	"time"
 
@@ -13,14 +14,22 @@ import (
 	"github.com/jamesprial/go-reddit-api-wrapper/storage/internal/testutil"
 )
 
-// setupBenchmarkDB creates a fresh in-memory database for benchmarking.
+// setupBenchmarkDB creates a fresh temporary file-based database for benchmarking.
 // Helper function to reduce code duplication across benchmarks.
 // NOTE: Run benchmarks with -benchmem to see allocation statistics.
 func setupBenchmarkDB(b *testing.B) storage.Store {
 	b.Helper()
 
+	// Create temporary database file
+	tempFile, err := os.CreateTemp("", "benchmark_*.db")
+	if err != nil {
+		b.Fatalf("failed to create temp database file: %v", err)
+	}
+	tempFile.Close()
+	dbPath := tempFile.Name()
+
 	cfg := storage.Config{
-		DSN: ":memory:",
+		DSN: dbPath,
 	}
 
 	store, err := storage.New(context.Background(), cfg)
@@ -32,6 +41,9 @@ func setupBenchmarkDB(b *testing.B) storage.Store {
 		if err := store.Close(); err != nil {
 			b.Logf("failed to close benchmark database: %v", err)
 		}
+		os.Remove(dbPath)
+		os.Remove(dbPath + "-shm")
+		os.Remove(dbPath + "-wal")
 	})
 
 	return store
@@ -515,4 +527,128 @@ func BenchmarkGetStats(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		_, _ = store.GetStats(ctx)
 	}
+}
+
+// BenchmarkListPosts_WithScoreFilter measures performance of score-based filtering using MinScore.
+// Tests database query optimization with indexed score filtering.
+// Setup: Insert 1000 posts with varied scores (0 to 9990).
+// Benchmark: Query with MinScore=5000, which should match 500 posts.
+// Expected: 10x improvement with score index (500µs → 50µs).
+// NOTE: Run with -benchmem to see allocations
+func BenchmarkListPosts_WithScoreFilter(b *testing.B) {
+	store := setupBenchmarkDB(b)
+	ctx := context.Background()
+
+	// Setup: Insert 1000 posts with varied scores
+	batchSize := 100
+	for batch := 0; batch < 10; batch++ {
+		posts := make([]*types.Post, batchSize)
+		for j := 0; j < batchSize; j++ {
+			scoreIndex := batch*batchSize + j
+			score := scoreIndex * 10 // Scores: 0, 10, 20, ..., 9990
+			posts[j] = testutil.BuildPost(
+				fmt.Sprintf("score_%d", scoreIndex),
+				"golang",
+				testutil.WithScore(score),
+			)
+		}
+		_ = store.UpsertPosts(ctx, posts)
+	}
+
+	b.ResetTimer()
+
+	// Query with MinScore=5000, should match approximately 500 posts
+	opts := &storage.ListPostsOptions{
+		MinScore: 5000,
+	}
+
+	for i := 0; i < b.N; i++ {
+		posts, err := store.ListPosts(ctx, opts)
+		if err != nil {
+			b.Fatalf("benchmark operation failed: %v", err)
+		}
+		_ = posts
+	}
+}
+
+// BenchmarkListPosts_SubredditAndScore measures composite query performance
+// with subreddit filtering, score filtering, and sorting by score.
+// Tests the benefits of composite indexes on frequently-used filter combinations.
+// Setup: Insert 1000 posts across 10 subreddits with varied scores.
+// Benchmark: Query specific subreddit with MinScore filter, sorted by score DESC.
+// Expected: 8x improvement with composite index (400µs → 50µs).
+// NOTE: Run with -benchmem to see allocations
+func BenchmarkListPosts_SubredditAndScore(b *testing.B) {
+	store := setupBenchmarkDB(b)
+	ctx := context.Background()
+
+	// Setup: Insert 1000 posts across 10 subreddits with varied scores
+	numSubreddits := 10
+	postsPerSubreddit := 100
+
+	for sr := 0; sr < numSubreddits; sr++ {
+		subreddit := fmt.Sprintf("subreddit%d", sr)
+		posts := make([]*types.Post, postsPerSubreddit)
+		for j := 0; j < postsPerSubreddit; j++ {
+			postIndex := sr*postsPerSubreddit + j
+			score := postIndex * 10 // Varied scores for realistic filtering
+			posts[j] = testutil.BuildPost(
+				fmt.Sprintf("composite_%d", postIndex),
+				subreddit,
+				testutil.WithScore(score),
+			)
+		}
+		_ = store.UpsertPosts(ctx, posts)
+	}
+
+	b.ResetTimer()
+
+	// Query for posts in subreddit5 with MinScore=4000, sorted by score DESC
+	opts := &storage.ListPostsOptions{
+		Subreddit: "subreddit5",
+		MinScore:  4000,
+		SortBy:    "score",
+		SortDir:   "desc",
+	}
+
+	for i := 0; i < b.N; i++ {
+		posts, err := store.ListPosts(ctx, opts)
+		if err != nil {
+			b.Fatalf("benchmark operation failed: %v", err)
+		}
+		_ = posts
+	}
+}
+
+// BenchmarkConcurrentReads_10Goroutines measures connection pool performance
+// under concurrent read load using multiple goroutines (determined by GOMAXPROCS).
+// Tests the SQLite connection pool configuration with realistic concurrent access.
+// Setup: Insert 100 posts before parallel benchmark execution.
+// Benchmark: Use b.RunParallel to simulate concurrent goroutines reading posts.
+// Expected: Effective utilization of connection pool without contention (each goroutine <1ms per read).
+// NOTE: Run with -benchmem to see allocations
+func BenchmarkConcurrentReads_10Goroutines(b *testing.B) {
+	store := setupBenchmarkDB(b)
+	ctx := context.Background()
+
+	// Setup: Insert 100 posts before parallel benchmark execution
+	posts := testutil.BuildPostBatch(100, "golang")
+	_ = store.UpsertPosts(ctx, posts)
+
+	b.ResetTimer()
+
+	// RunParallel simulates concurrent readers (typically matches GOMAXPROCS)
+	b.RunParallel(func(pb *testing.PB) {
+		i := 0
+		for pb.Next() {
+			// Cycle through different post IDs to distribute load
+			postID := fmt.Sprintf("id%d", i%100)
+			post, err := store.GetPost(ctx, postID)
+			if err != nil {
+				b.Fatalf("benchmark operation failed: %v", err)
+			}
+			_ = post
+			i++
+		}
+	})
 }
