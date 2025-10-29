@@ -1,5 +1,5 @@
-// Package internal provides internal implementation details for sentiment analysis.
-package internal
+// Package lexicon provides internal implementation details for sentiment analysis.
+package lexicon
 
 // positiveWords maps positive sentiment words to their scores.
 // Scores range from 1.0 to 2.0, with higher values indicating stronger positive sentiment.

@@ -1,13 +1,17 @@
-package internal
+package analyzer
 
 import (
 	"math"
+
+	"github.com/jamesprial/go-reddit-api-wrapper/sentiment/internal/lexicon"
+	"github.com/jamesprial/go-reddit-api-wrapper/sentiment/internal/modifier"
+	"github.com/jamesprial/go-reddit-api-wrapper/sentiment/internal/preprocessor"
 )
 
 // Analyzer performs sentiment analysis on text using a lexicon-based approach
 // with additional modifiers for negation, punctuation emphasis, and capitalization.
 type Analyzer struct {
-	preprocessor    *Preprocessor
+	preprocessor    *preprocessor.Preprocessor
 	minWordCount    int
 	enableEmoticons bool
 }
@@ -21,7 +25,7 @@ type Analyzer struct {
 // Returns a new Analyzer ready for sentiment analysis.
 func NewAnalyzer(minWordCount int, enableEmoticons bool) *Analyzer {
 	return &Analyzer{
-		preprocessor:    NewPreprocessor(),
+		preprocessor:    preprocessor.NewPreprocessor(),
 		minWordCount:    minWordCount,
 		enableEmoticons: enableEmoticons,
 	}
@@ -75,9 +79,9 @@ func (a *Analyzer) AnalyzeText(text string) (sentiment int, score float64, confi
 	}
 
 	// Get lexicons
-	positiveWords := GetPositiveWords()
-	negativeWords := GetNegativeWords()
-	emoticonsMap := GetEmoticons()
+	positiveWords := lexicon.GetPositiveWords()
+	negativeWords := lexicon.GetNegativeWords()
+	emoticonsMap := lexicon.GetEmoticons()
 
 	// Calculate base sentiment score
 	var totalScore float64
@@ -96,7 +100,7 @@ func (a *Analyzer) AnalyzeText(text string) (sentiment int, score float64, confi
 		}
 
 		// Apply negation if this word is negated
-		if tokenScore != 0 && DetectNegation(tokens, i) {
+		if tokenScore != 0 && modifier.DetectNegation(tokens, i) {
 			tokenScore = -tokenScore
 		}
 
@@ -124,7 +128,7 @@ func (a *Analyzer) AnalyzeText(text string) (sentiment int, score float64, confi
 	}
 
 	// Apply modifiers (negation, punctuation, caps)
-	score = ApplyModifiers(score, text, tokens)
+	score = modifier.ApplyModifiers(score, text, tokens)
 
 	// Calculate confidence metric
 	// Confidence is based on the ratio of matched words to total words

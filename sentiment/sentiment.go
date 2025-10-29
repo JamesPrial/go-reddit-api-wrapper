@@ -5,7 +5,7 @@ import (
 	"log/slog"
 
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
-	"github.com/jamesprial/go-reddit-api-wrapper/sentiment/internal"
+	"github.com/jamesprial/go-reddit-api-wrapper/sentiment/internal/analyzer"
 )
 
 // Analyzer performs sentiment analysis on Reddit posts and comments.
@@ -136,16 +136,16 @@ func (a *Analyzer) analyzePostInternal(ctx context.Context, post *types.Post) *P
 	}
 
 	// Create internal analyzer with config settings
-	analyzer := internal.NewAnalyzer(a.config.MinWordCount, a.config.EnableEmoticons)
+	internalAnalyzer := analyzer.NewAnalyzer(a.config.MinWordCount, a.config.EnableEmoticons)
 
-	// Analyze title
-	_, titleScore, _ := analyzer.AnalyzeText(post.Title)
+	// Analyze title and capture score and confidence
+	_, titleScore, titleConf := internalAnalyzer.AnalyzeText(post.Title)
 
-	// Analyze body
-	_, bodyScore, _ := analyzer.AnalyzeText(post.SelfText)
+	// Analyze body and capture score and confidence
+	_, bodyScore, bodyConf := internalAnalyzer.AnalyzeText(post.SelfText)
 
 	// Combine scores using internal analyzer
-	combinedScore := analyzer.CombineScores(titleScore, bodyScore)
+	combinedScore := internalAnalyzer.CombineScores(titleScore, bodyScore)
 
 	// Convert combined score to sentiment classification
 	var sentiment Sentiment
@@ -167,17 +167,13 @@ func (a *Analyzer) analyzePostInternal(ctx context.Context, post *types.Post) *P
 	var confidence float64
 	if post.Title != "" && post.SelfText != "" {
 		// Both title and body have content - average their confidence scores
-		_, _, titleConf := analyzer.AnalyzeText(post.Title)
-		_, _, bodyConf := analyzer.AnalyzeText(post.SelfText)
 		confidence = (titleConf + bodyConf) / 2.0
 	} else if post.Title != "" {
 		// Only title has content
-		_, _, conf := analyzer.AnalyzeText(post.Title)
-		confidence = conf
+		confidence = titleConf
 	} else if post.SelfText != "" {
 		// Only body has content
-		_, _, conf := analyzer.AnalyzeText(post.SelfText)
-		confidence = conf
+		confidence = bodyConf
 	} else {
 		// No content to analyze
 		confidence = 0.0
@@ -205,10 +201,10 @@ func (a *Analyzer) analyzeCommentInternal(ctx context.Context, comment *types.Co
 	}
 
 	// Create internal analyzer with config settings
-	analyzer := internal.NewAnalyzer(a.config.MinWordCount, a.config.EnableEmoticons)
+	internalAnalyzer := analyzer.NewAnalyzer(a.config.MinWordCount, a.config.EnableEmoticons)
 
 	// Analyze comment body
-	_, score, confidence := analyzer.AnalyzeText(comment.Body)
+	_, score, confidence := internalAnalyzer.AnalyzeText(comment.Body)
 
 	// Convert score to sentiment classification
 	var sentiment Sentiment

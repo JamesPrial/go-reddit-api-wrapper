@@ -1,9 +1,11 @@
-package internal
+package preprocessor
 
 import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/jamesprial/go-reddit-api-wrapper/sentiment/internal/lexicon"
 )
 
 // Preprocessor handles text preprocessing for sentiment analysis.
@@ -71,7 +73,7 @@ func (p *Preprocessor) ExtractEmoticons(text string) []string {
 		return nil
 	}
 
-	emoticonsMap := GetEmoticons()
+	emoticonsMap := lexicon.GetEmoticons()
 	found := make([]string, 0)
 	seen := make(map[string]bool)
 
