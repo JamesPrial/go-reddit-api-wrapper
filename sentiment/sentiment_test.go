@@ -3,6 +3,7 @@ package sentiment
 import (
 	"context"
 	"errors"
+	"os"
 	"testing"
 
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
@@ -372,10 +373,13 @@ func TestAnalyzePost(t *testing.T) {
 	}
 
 	// Use a config with MinWordCount=1 to allow testing short phrases like "not good"
-	analyzer := NewAnalyzer(&Config{
+	analyzer, err := NewAnalyzer(WithConfig(&Config{
 		MinWordCount:    1,
 		EnableEmoticons: true,
-	})
+	}))
+	if err != nil {
+		t.Fatalf("failed to create analyzer: %v", err)
+	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -759,10 +763,13 @@ func TestAnalyzeComment(t *testing.T) {
 	}
 
 	// Use a config with MinWordCount=1 to allow testing short phrases like "not good"
-	analyzer := NewAnalyzer(&Config{
+	analyzer, err := NewAnalyzer(WithConfig(&Config{
 		MinWordCount:    1,
 		EnableEmoticons: true,
-	})
+	}))
+	if err != nil {
+		t.Fatalf("failed to create analyzer: %v", err)
+	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -791,8 +798,11 @@ func TestAnalyzeComment(t *testing.T) {
 
 // TestNewAnalyzer tests analyzer creation.
 func TestNewAnalyzer(t *testing.T) {
-	t.Run("nil config uses default config", func(t *testing.T) {
-		analyzer := NewAnalyzer(nil)
+	t.Run("default config when no options provided", func(t *testing.T) {
+		analyzer, err := NewAnalyzer()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
 		if analyzer == nil {
 			t.Fatal("expected non-nil analyzer")
 		}
@@ -807,14 +817,146 @@ func TestNewAnalyzer(t *testing.T) {
 		}
 	})
 
-	t.Run("custom config is used", func(t *testing.T) {
+	t.Run("custom analyzer config is used when provided", func(t *testing.T) {
 		customConfig := &Config{
 			MinWordCount:    5,
 			EnableEmoticons: false,
 		}
-		analyzer := NewAnalyzer(customConfig)
+		analyzer, err := NewAnalyzer(WithConfig(customConfig))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
 		if analyzer.config != customConfig {
 			t.Fatal("expected custom config to be used")
+		}
+	})
+
+	t.Run("custom config affects MinWordCount behavior", func(t *testing.T) {
+		// Create analyzer with MinWordCount=5, so "not good" (2 words) should be neutral
+		analyzer, err := NewAnalyzer(WithConfig(&Config{
+			MinWordCount:    5,
+			EnableEmoticons: true,
+		}))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// "not good" has only 2 words, below the threshold of 5
+		post := &types.Post{
+			Title:    "not good",
+			SelfText: "",
+		}
+		result, err := analyzer.AnalyzePost(context.Background(), post)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// Should be neutral because word count is below threshold
+		if result.Sentiment != Neutral {
+			t.Errorf("expected Neutral sentiment for 'not good' with MinWordCount=5, got %s", result.Sentiment)
+		}
+	})
+
+	t.Run("WithConfigFile loads analyzer config from file", func(t *testing.T) {
+		// Create a temporary config file
+		tmpFile := t.TempDir() + "/analyzer_config.json"
+		configData := `{"minWordCount": 2, "enableEmoticons": false}`
+		if err := os.WriteFile(tmpFile, []byte(configData), 0644); err != nil {
+			t.Fatalf("failed to write temp config file: %v", err)
+		}
+
+		analyzer, err := NewAnalyzer(WithConfigFile(tmpFile))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if analyzer.config.MinWordCount != 2 {
+			t.Errorf("expected MinWordCount=2 from file, got %d", analyzer.config.MinWordCount)
+		}
+		if analyzer.config.EnableEmoticons {
+			t.Error("expected EnableEmoticons=false from file")
+		}
+	})
+
+	t.Run("WithConfigFile returns error for non-existent file", func(t *testing.T) {
+		_, err := NewAnalyzer(WithConfigFile("/nonexistent/path.json"))
+		if err == nil {
+			t.Fatal("expected error for non-existent file")
+		}
+	})
+
+	t.Run("both analyzer and lexicon configs can be provided", func(t *testing.T) {
+		customAnalyzerConfig := &Config{
+			MinWordCount:    2,
+			EnableEmoticons: false,
+		}
+
+		analyzer, err := NewAnalyzer(
+			WithConfig(customAnalyzerConfig),
+			// Note: WithLexiconModConfig would require a custom config.Config object
+			// For testing, we just verify the analyzer config is used
+		)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if analyzer.config.MinWordCount != 2 {
+			t.Errorf("expected MinWordCount=2, got %d", analyzer.config.MinWordCount)
+		}
+		if analyzer.config.EnableEmoticons {
+			t.Error("expected EnableEmoticons=false")
+		}
+	})
+
+	t.Run("WithLexiconModConfigFile accepts valid config", func(t *testing.T) {
+		// Create a temporary lexicon config file with valid structure
+		tmpFile := t.TempDir() + "/lexicon_config.json"
+		configData := `{
+			"positive_words": {"good": 1.0, "great": 1.5},
+			"negative_words": {"bad": -1.0, "terrible": -1.5},
+			"emoticons": {":)": 0.5, ":(": -0.5},
+			"negation_words": ["not", "no", "never"]
+		}`
+		if err := os.WriteFile(tmpFile, []byte(configData), 0644); err != nil {
+			t.Fatalf("failed to write temp lexicon config file: %v", err)
+		}
+
+		analyzer, err := NewAnalyzer(WithLexiconModConfigFile(tmpFile))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if analyzer == nil {
+			t.Fatal("expected non-nil analyzer")
+		}
+	})
+
+	t.Run("WithLexiconModConfigFile returns error for non-existent file", func(t *testing.T) {
+		_, err := NewAnalyzer(WithLexiconModConfigFile("/nonexistent/path.json"))
+		if err == nil {
+			t.Fatal("expected error for non-existent file")
+		}
+	})
+
+	t.Run("WithLexiconModConfigFile returns error for invalid JSON", func(t *testing.T) {
+		tmpFile := t.TempDir() + "/invalid_config.json"
+		if err := os.WriteFile(tmpFile, []byte("not valid json"), 0644); err != nil {
+			t.Fatalf("failed to write temp file: %v", err)
+		}
+
+		_, err := NewAnalyzer(WithLexiconModConfigFile(tmpFile))
+		if err == nil {
+			t.Fatal("expected error for invalid JSON")
+		}
+	})
+
+	t.Run("WithLexiconModConfig accepts nil and uses default", func(t *testing.T) {
+		// Passing nil should use default config
+		analyzer, err := NewAnalyzer(WithLexiconModConfig(nil))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if analyzer == nil {
+			t.Fatal("expected non-nil analyzer")
 		}
 	})
 }

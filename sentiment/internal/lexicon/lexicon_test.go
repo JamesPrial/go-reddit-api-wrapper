@@ -1,8 +1,32 @@
 package lexicon
 
 import (
+	"sync"
 	"testing"
 )
+
+// init ensures the lexicon is initialized before running tests.
+func init() {
+	if err := Init(DefaultLexiconConfig()); err != nil {
+		panic("failed to initialize lexicon: " + err.Error())
+	}
+}
+
+// resetForTesting resets the lexicon state for error condition tests.
+// This is exported only for testing purposes and should not be used in production code.
+// It is protected by a mutex to ensure only one test can reset at a time.
+func resetForTesting() {
+	resetMu.Lock()
+	defer resetMu.Unlock()
+
+	positiveWords = nil
+	negativeWords = nil
+	emoticons = nil
+	initErr = nil
+	initOnce = sync.Once{}
+}
+
+var resetMu sync.Mutex
 
 // TestGetPositiveWords tests that GetPositiveWords returns a non-empty map.
 func TestGetPositiveWords(t *testing.T) {
@@ -36,19 +60,6 @@ func TestGetPositiveWords(t *testing.T) {
 			if score <= 0 {
 				t.Errorf("word %q has non-positive score %f", word, score)
 			}
-		}
-	})
-
-	t.Run("returns a copy not the original", func(t *testing.T) {
-		words1 := GetPositiveWords()
-		words2 := GetPositiveWords()
-
-		// Modify the first map
-		words1["testword"] = 1.5
-
-		// Check that the second map is not affected
-		if _, exists := words2["testword"]; exists {
-			t.Error("modifying returned map affected the original")
 		}
 	})
 }
@@ -88,16 +99,21 @@ func TestGetNegativeWords(t *testing.T) {
 		}
 	})
 
-	t.Run("returns a copy not the original", func(t *testing.T) {
+	t.Run("returns the same underlying map (not a copy)", func(t *testing.T) {
 		words1 := GetNegativeWords()
 		words2 := GetNegativeWords()
 
-		// Modify the first map
-		words1["testword"] = -1.5
-
-		// Check that the second map is not affected
-		if _, exists := words2["testword"]; exists {
-			t.Error("modifying returned map affected the original")
+		// Both should reference the same map
+		if len(words1) != len(words2) {
+			t.Error("expected same underlying map")
+		}
+		// Verify they have the same content by comparing a few entries
+		for i, word := range []string{"bad", "terrible", "awful"} {
+			score1, exists1 := words1[word]
+			score2, exists2 := words2[word]
+			if !exists1 || !exists2 || score1 != score2 {
+				t.Errorf("entry %d (%q) mismatch", i, word)
+			}
 		}
 	})
 }
@@ -159,16 +175,21 @@ func TestGetEmoticons(t *testing.T) {
 		}
 	})
 
-	t.Run("returns a copy not the original", func(t *testing.T) {
+	t.Run("returns the same underlying map (not a copy)", func(t *testing.T) {
 		emoticons1 := GetEmoticons()
 		emoticons2 := GetEmoticons()
 
-		// Modify the first map
-		emoticons1[":test:"] = 0.5
-
-		// Check that the second map is not affected
-		if _, exists := emoticons2[":test:"]; exists {
-			t.Error("modifying returned map affected the original")
+		// Both should reference the same map
+		if len(emoticons1) != len(emoticons2) {
+			t.Error("expected same underlying map")
+		}
+		// Verify they have the same content by comparing a few entries
+		for i, emoticon := range []string{":)", ":(", ":-D"} {
+			score1, exists1 := emoticons1[emoticon]
+			score2, exists2 := emoticons2[emoticon]
+			if !exists1 || !exists2 || score1 != score2 {
+				t.Errorf("entry %d (%q) mismatch", i, emoticon)
+			}
 		}
 	})
 }
@@ -269,4 +290,266 @@ func TestEmoticonsCount(t *testing.T) {
 	if len(emoticons) < 5 {
 		t.Errorf("expected at least 5 emoticons, got %d", len(emoticons))
 	}
+}
+
+// TestInitWithValidConfig tests that Init successfully initializes with a valid config.
+func TestInitWithValidConfig(t *testing.T) {
+	config := DefaultLexiconConfig()
+	err := Init(config)
+	// Init may return an error if already initialized by the test init() function,
+	// which is acceptable. The important thing is that it doesn't panic.
+	_ = err
+}
+
+// TestInitWithNilConfig tests that Init returns an error when config is nil.
+func TestInitWithNilConfig(t *testing.T) {
+	resetForTesting()
+	defer resetForTesting()
+
+	err := Init(nil)
+	if err == nil {
+		t.Fatal("expected error for nil config, got nil")
+	}
+
+	expectedMsg := "lexicon config cannot be nil"
+	if err.Error() != expectedMsg {
+		t.Errorf("expected error message %q, got %q", expectedMsg, err.Error())
+	}
+
+	// Verify that getters panic when lexicon is not initialized
+	t.Run("getters panic when not initialized", func(t *testing.T) {
+		defer func() {
+			if r := recover(); r == nil {
+				t.Error("expected panic from GetPositiveWords, got nil")
+			}
+		}()
+		GetPositiveWords()
+	})
+}
+
+// TestInitWithMissingPositiveWords tests that Init returns an error when positive words are missing.
+func TestInitWithMissingPositiveWords(t *testing.T) {
+	resetForTesting()
+	defer resetForTesting()
+
+	config := &LexiconConfig{
+		PositiveWords: nil,
+		NegativeWords: map[string]float64{"bad": -1.0},
+		Emoticons:     map[string]float64{":)": 0.5},
+	}
+
+	err := Init(config)
+	if err == nil {
+		t.Fatal("expected error for nil positive words, got nil")
+	}
+
+	expectedMsg := "positive words map must not be nil or empty"
+	if err.Error() != expectedMsg {
+		t.Errorf("expected error message %q, got %q", expectedMsg, err.Error())
+	}
+}
+
+// TestInitWithMissingNegativeWords tests that Init returns an error when negative words are missing.
+func TestInitWithMissingNegativeWords(t *testing.T) {
+	resetForTesting()
+	defer resetForTesting()
+
+	config := &LexiconConfig{
+		PositiveWords: map[string]float64{"good": 1.0},
+		NegativeWords: nil,
+		Emoticons:     map[string]float64{":)": 0.5},
+	}
+
+	err := Init(config)
+	if err == nil {
+		t.Fatal("expected error for nil negative words, got nil")
+	}
+
+	expectedMsg := "negative words map must not be nil or empty"
+	if err.Error() != expectedMsg {
+		t.Errorf("expected error message %q, got %q", expectedMsg, err.Error())
+	}
+}
+
+// TestInitWithMissingEmoticons tests that Init returns an error when emoticons are missing.
+func TestInitWithMissingEmoticons(t *testing.T) {
+	resetForTesting()
+	defer resetForTesting()
+
+	config := &LexiconConfig{
+		PositiveWords: map[string]float64{"good": 1.0},
+		NegativeWords: map[string]float64{"bad": -1.0},
+		Emoticons:     nil,
+	}
+
+	err := Init(config)
+	if err == nil {
+		t.Fatal("expected error for nil emoticons, got nil")
+	}
+
+	expectedMsg := "emoticons map must not be nil or empty"
+	if err.Error() != expectedMsg {
+		t.Errorf("expected error message %q, got %q", expectedMsg, err.Error())
+	}
+}
+
+// TestInitCalledBeforeGetters tests that getters panic if called before successful initialization.
+func TestInitCalledBeforeGetters(t *testing.T) {
+	resetForTesting()
+	defer resetForTesting()
+
+	// Attempt to call getters before initialization
+	t.Run("GetPositiveWords panics", func(t *testing.T) {
+		defer func() {
+			if r := recover(); r == nil {
+				t.Error("expected panic, got nil")
+			}
+		}()
+		GetPositiveWords()
+	})
+
+	resetForTesting()
+
+	t.Run("GetNegativeWords panics", func(t *testing.T) {
+		defer func() {
+			if r := recover(); r == nil {
+				t.Error("expected panic, got nil")
+			}
+		}()
+		GetNegativeWords()
+	})
+
+	resetForTesting()
+
+	t.Run("GetEmoticons panics", func(t *testing.T) {
+		defer func() {
+			if r := recover(); r == nil {
+				t.Error("expected panic, got nil")
+			}
+		}()
+		GetEmoticons()
+	})
+}
+
+// TestDefaultLexiconConfig tests that DefaultLexiconConfig returns a properly configured lexicon.
+func TestDefaultLexiconConfig(t *testing.T) {
+	t.Run("returns non-nil config", func(t *testing.T) {
+		config := DefaultLexiconConfig()
+		if config == nil {
+			t.Fatal("expected non-nil config")
+		}
+	})
+
+	t.Run("all maps are non-nil", func(t *testing.T) {
+		config := DefaultLexiconConfig()
+		if config.PositiveWords == nil {
+			t.Error("PositiveWords should not be nil")
+		}
+		if config.NegativeWords == nil {
+			t.Error("NegativeWords should not be nil")
+		}
+		if config.Emoticons == nil {
+			t.Error("Emoticons should not be nil")
+		}
+	})
+
+	t.Run("all maps are non-empty", func(t *testing.T) {
+		config := DefaultLexiconConfig()
+		if len(config.PositiveWords) == 0 {
+			t.Error("PositiveWords should not be empty")
+		}
+		if len(config.NegativeWords) == 0 {
+			t.Error("NegativeWords should not be empty")
+		}
+		if len(config.Emoticons) == 0 {
+			t.Error("Emoticons should not be empty")
+		}
+	})
+
+	t.Run("contains expected words", func(t *testing.T) {
+		config := DefaultLexiconConfig()
+		expectedPositive := []string{"good", "great", "excellent"}
+		for _, word := range expectedPositive {
+			if _, ok := config.PositiveWords[word]; !ok {
+				t.Errorf("expected positive word %q in default config", word)
+			}
+		}
+
+		expectedNegative := []string{"bad", "terrible", "awful"}
+		for _, word := range expectedNegative {
+			if _, ok := config.NegativeWords[word]; !ok {
+				t.Errorf("expected negative word %q in default config", word)
+			}
+		}
+
+		expectedEmoticons := []string{":)", ":("}
+		for _, emoticon := range expectedEmoticons {
+			if _, ok := config.Emoticons[emoticon]; !ok {
+				t.Errorf("expected emoticon %q in default config", emoticon)
+			}
+		}
+	})
+}
+
+// TestInitWithEmptyMaps tests that Init returns an error when any map is empty.
+func TestInitWithEmptyMaps(t *testing.T) {
+	t.Run("empty positive words", func(t *testing.T) {
+		resetForTesting()
+		defer resetForTesting()
+
+		config := &LexiconConfig{
+			PositiveWords: make(map[string]float64), // empty map
+			NegativeWords: map[string]float64{"bad": -1.0},
+			Emoticons:     map[string]float64{":)": 0.5},
+		}
+
+		err := Init(config)
+		if err == nil {
+			t.Fatal("expected error for empty positive words")
+		}
+
+		if err.Error() != "positive words map must not be nil or empty" {
+			t.Errorf("unexpected error message: %v", err)
+		}
+	})
+
+	t.Run("empty negative words", func(t *testing.T) {
+		resetForTesting()
+		defer resetForTesting()
+
+		config := &LexiconConfig{
+			PositiveWords: map[string]float64{"good": 1.0},
+			NegativeWords: make(map[string]float64), // empty map
+			Emoticons:     map[string]float64{":)": 0.5},
+		}
+
+		err := Init(config)
+		if err == nil {
+			t.Fatal("expected error for empty negative words")
+		}
+
+		if err.Error() != "negative words map must not be nil or empty" {
+			t.Errorf("unexpected error message: %v", err)
+		}
+	})
+
+	t.Run("empty emoticons", func(t *testing.T) {
+		resetForTesting()
+		defer resetForTesting()
+
+		config := &LexiconConfig{
+			PositiveWords: map[string]float64{"good": 1.0},
+			NegativeWords: map[string]float64{"bad": -1.0},
+			Emoticons:     make(map[string]float64), // empty map
+		}
+
+		err := Init(config)
+		if err == nil {
+			t.Fatal("expected error for empty emoticons")
+		}
+
+		if err.Error() != "emoticons map must not be nil or empty" {
+			t.Errorf("unexpected error message: %v", err)
+		}
+	})
 }

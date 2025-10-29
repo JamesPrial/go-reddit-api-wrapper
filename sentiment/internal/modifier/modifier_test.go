@@ -5,6 +5,25 @@ import (
 	"testing"
 )
 
+// init initializes the modifier package with default negation words for testing.
+func init() {
+	defaultConfig := &ModifierConfig{
+		NegationWords: []string{
+			"not", "no", "never", "neither",
+			"nobody", "nothing", "nowhere",
+			"don't", "doesn't", "didn't",
+			"won't", "can't", "shouldn't",
+			"couldn't", "wouldn't",
+			"isnt", "isn't", "wasnt", "wasn't",
+			"havent", "haven't", "hasnt", "hasn't",
+			"cant", "wont", "shouldnt", "couldnt", "wouldnt",
+		},
+	}
+	if err := Init(defaultConfig); err != nil {
+		panic(err)
+	}
+}
+
 // TestDetectNegation tests the DetectNegation function.
 func TestDetectNegation(t *testing.T) {
 	tests := []struct {
@@ -320,8 +339,9 @@ func TestCalculateCapsBoost(t *testing.T) {
 // HISTORICAL CONTEXT: In a previous buggy implementation, ApplyModifiers
 // would flip the entire score if ANY negation word existed in the tokens.
 // This caused "not good" to be classified as Positive because:
-//   1. Per-token: "good" (+0.7) was correctly negated to -0.7
-//   2. ApplyModifiers: -0.7 was incorrectly flipped AGAIN to +0.7 (BUG!)
+//  1. Per-token: "good" (+0.7) was correctly negated to -0.7
+//  2. ApplyModifiers: -0.7 was incorrectly flipped AGAIN to +0.7 (BUG!)
+//
 // The tests "positive/negative score with negation - score NOT flipped"
 // prevent regression of this bug.
 func TestApplyModifiers(t *testing.T) {
@@ -555,9 +575,105 @@ func almostEqual(a, b float64) bool {
 	return math.Abs(a-b) < epsilon
 }
 
+// TestInit tests the Init function with various configuration scenarios.
+func TestInit(t *testing.T) {
+	tests := []struct {
+		name      string
+		config    *ModifierConfig
+		expectErr bool
+		errMsg    string
+	}{
+		{
+			name:      "nil config",
+			config:    nil,
+			expectErr: true,
+			errMsg:    "config cannot be nil",
+		},
+		{
+			name:      "nil negation words slice",
+			config:    &ModifierConfig{NegationWords: nil},
+			expectErr: true,
+			errMsg:    "NegationWords slice cannot be nil",
+		},
+		{
+			name:      "empty negation words slice",
+			config:    &ModifierConfig{NegationWords: []string{}},
+			expectErr: true,
+			errMsg:    "NegationWords slice cannot be empty",
+		},
+		{
+			name: "valid single negation word",
+			config: &ModifierConfig{
+				NegationWords: []string{"not"},
+			},
+			expectErr: false,
+		},
+		{
+			name: "valid multiple negation words",
+			config: &ModifierConfig{
+				NegationWords: []string{"not", "no", "never", "neither"},
+			},
+			expectErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := Init(tt.config)
+			if (err != nil) != tt.expectErr {
+				t.Errorf("Init() error = %v, expectErr %v", err, tt.expectErr)
+				return
+			}
+			if tt.expectErr && err.Error() != tt.errMsg {
+				t.Errorf("Init() error message = %v, want %v", err.Error(), tt.errMsg)
+			}
+		})
+	}
+}
+
+// TestInitUpdatesNegationWords verifies that Init properly initializes the negation words.
+func TestInitUpdatesNegationWords(t *testing.T) {
+	// Initialize with a simple set of negation words
+	config := &ModifierConfig{
+		NegationWords: []string{"not", "no"},
+	}
+	err := Init(config)
+	if err != nil {
+		t.Fatalf("Init() failed: %v", err)
+	}
+
+	// Verify detection works with initialized words
+	if !DetectNegation([]string{"not", "good"}, 1) {
+		t.Errorf("expected 'not' to be detected as negation word")
+	}
+
+	if !DetectNegation([]string{"no", "good"}, 1) {
+		t.Errorf("expected 'no' to be detected as negation word")
+	}
+
+	// Reinitialize with different words
+	config2 := &ModifierConfig{
+		NegationWords: []string{"never"},
+	}
+	err = Init(config2)
+	if err != nil {
+		t.Fatalf("Init() failed: %v", err)
+	}
+
+	// Verify the new word is detected
+	if !DetectNegation([]string{"never", "good"}, 1) {
+		t.Errorf("expected 'never' to be detected as negation word after reinitialization")
+	}
+
+	// Verify old words are no longer in the map
+	if DetectNegation([]string{"not", "good"}, 1) {
+		t.Errorf("expected 'not' to NOT be detected after reinitialization with different words")
+	}
+}
+
 // TestNegationWordsList tests that all expected negation words are recognized.
 func TestNegationWordsList(t *testing.T) {
-	negationWords := []string{
+	negationWordsList := []string{
 		"not", "no", "never", "neither",
 		"don't", "doesn't", "didn't",
 		"won't", "can't", "shouldn't",
@@ -565,7 +681,15 @@ func TestNegationWordsList(t *testing.T) {
 		"isn't", "wasn't", "haven't", "hasn't",
 	}
 
-	for _, word := range negationWords {
+	// Reinitialize with the expected words to ensure consistent state
+	config := &ModifierConfig{
+		NegationWords: negationWordsList,
+	}
+	if err := Init(config); err != nil {
+		t.Fatalf("Init() failed: %v", err)
+	}
+
+	for _, word := range negationWordsList {
 		tokens := []string{word, "good"}
 		if !DetectNegation(tokens, 1) {
 			t.Errorf("expected negation word %q to be detected", word)

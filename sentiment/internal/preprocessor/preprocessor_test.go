@@ -4,7 +4,16 @@ import (
 	"strings"
 	"testing"
 	"unicode/utf8"
+
+	"github.com/jamesprial/go-reddit-api-wrapper/sentiment/internal/lexicon"
 )
+
+// init ensures the lexicon is initialized before running tests.
+func init() {
+	if err := lexicon.Init(lexicon.DefaultLexiconConfig()); err != nil {
+		panic("failed to initialize lexicon: " + err.Error())
+	}
+}
 
 // TestTokenize tests the Tokenize method with various inputs.
 func TestTokenize(t *testing.T) {

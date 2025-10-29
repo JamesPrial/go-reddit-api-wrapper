@@ -1,42 +1,74 @@
+// Package modifier provides sentiment score modification functions including
+// negation detection, punctuation emphasis, and capitalization emphasis.
+//
+// IMPORTANT: This package requires initialization before use.
+// Call Init() with a ModifierConfig containing negation words before calling
+// any functions that use negation detection (like DetectNegation).
+// Failure to initialize will result in DetectNegation returning false for all inputs.
+//
+// Thread-Safety: Init() and DetectNegation() are thread-safe. Multiple goroutines
+// can safely call these functions concurrently. Init() can be called multiple times
+// to update the configuration, though this should only be done during initialization.
 package modifier
 
 import (
+	"errors"
 	"math"
 	"strings"
+	"sync"
 	"unicode"
 )
 
-// negationWords contains words that typically negate or invert the sentiment
-// of the word that follows them.
-var negationWords = map[string]bool{
-	"not":       true,
-	"no":        true,
-	"never":     true,
-	"neither":   true,
-	"nobody":    true,
-	"nothing":   true,
-	"nowhere":   true,
-	"don't":     true,
-	"doesn't":   true,
-	"didn't":    true,
-	"won't":     true,
-	"can't":     true,
-	"shouldn't": true,
-	"couldn't":  true,
-	"wouldn't":  true,
-	"isnt":      true,
-	"isn't":     true,
-	"wasnt":     true,
-	"wasn't":    true,
-	"havent":    true,
-	"haven't":   true,
-	"hasnt":     true,
-	"hasn't":    true,
-	"cant":      true,
-	"wont":      true,
-	"shouldnt":  true,
-	"couldnt":   true,
-	"wouldnt":   true,
+// negationWords is a package-level variable containing words that typically negate
+// or invert the sentiment of the word that follows them.
+// This is initialized by calling Init() with a ModifierConfig.
+var negationWords map[string]bool
+var negationWordsMu sync.RWMutex
+
+// ModifierConfig contains configuration options for sentiment modifiers.
+type ModifierConfig struct {
+	// NegationWords is a slice of words that negate or invert sentiment.
+	// Must not be nil or empty.
+	NegationWords []string
+}
+
+// Init initializes the modifier package with configuration.
+// It must be called before using DetectNegation or other functions that depend on
+// negation word detection. Calling Init multiple times is thread-safe and will
+// replace the previous configuration.
+//
+// Parameters:
+//   - config: ModifierConfig containing the list of negation words
+//
+// Returns an error if:
+//   - config is nil
+//   - NegationWords slice is nil
+//   - NegationWords slice is empty
+func Init(config *ModifierConfig) error {
+	if config == nil {
+		return errors.New("config cannot be nil")
+	}
+
+	if config.NegationWords == nil {
+		return errors.New("NegationWords slice cannot be nil")
+	}
+
+	if len(config.NegationWords) == 0 {
+		return errors.New("NegationWords slice cannot be empty")
+	}
+
+	// Convert slice to map for O(1) lookups
+	newNegationWords := make(map[string]bool, len(config.NegationWords))
+	for _, word := range config.NegationWords {
+		newNegationWords[word] = true
+	}
+
+	// Update the package-level variable with thread safety
+	negationWordsMu.Lock()
+	defer negationWordsMu.Unlock()
+	negationWords = newNegationWords
+
+	return nil
 }
 
 // DetectNegation checks if a word at the given index is negated by preceding words.
@@ -51,9 +83,15 @@ func DetectNegation(tokens []string, index int) bool {
 	}
 
 	// Look back up to 3 tokens
-	lookbackStart := index - 3
-	if lookbackStart < 0 {
-		lookbackStart = 0
+	lookbackStart := max(0, index-3)
+
+	// Thread-safe read of negation words
+	negationWordsMu.RLock()
+	defer negationWordsMu.RUnlock()
+
+	// Check if negation words have been initialized
+	if negationWords == nil {
+		return false
 	}
 
 	// Check preceding tokens for negation words
@@ -197,9 +235,10 @@ func isUpper(r rune) bool {
 // This avoids double negation which would incorrectly invert the sentiment.
 //
 // Example of the bug this design prevents:
-//   Text: "not good"
-//   - Per-token analysis: "good" (+0.7) → negated to -0.7 ✓
-//   - If we flipped here again: -0.7 → +0.7 ✗ (WRONG - classified as Positive!)
+//
+//	Text: "not good"
+//	- Per-token analysis: "good" (+0.7) → negated to -0.7 ✓
+//	- If we flipped here again: -0.7 → +0.7 ✗ (WRONG - classified as Positive!)
 //
 // By not flipping here, we preserve the correct per-token negation result.
 //

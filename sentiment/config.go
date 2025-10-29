@@ -1,6 +1,11 @@
 package sentiment
 
-import "log/slog"
+import (
+	"encoding/json"
+	"fmt"
+	"log/slog"
+	"os"
+)
 
 // Config contains configuration options for the sentiment Analyzer.
 // All fields are optional and sensible defaults will be used if not provided.
@@ -29,4 +34,30 @@ func DefaultConfig() *Config {
 		MinWordCount:    3,
 		EnableEmoticons: true,
 	}
+}
+
+// LoadAnalyzerConfigFromFile loads analyzer configuration from a JSON file.
+// This function loads analyzer-specific settings only (MinWordCount, EnableEmoticons).
+// The file should contain a JSON object with optional fields:
+//   - "minWordCount": integer (default: 3)
+//   - "enableEmoticons": boolean (default: true)
+//
+// Logger is not configurable via file and will always be nil.
+// Unknown fields in the JSON are ignored.
+//
+// For loading lexicon and modifier data, use config.LoadLexiconConfigFromFile.
+//
+// Returns an error if the file cannot be read or if the JSON is invalid.
+func LoadAnalyzerConfigFromFile(path string) (*Config, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read config file: %w", err)
+	}
+
+	var cfg Config
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("failed to parse config file as JSON: %w", err)
+	}
+
+	return &cfg, nil
 }

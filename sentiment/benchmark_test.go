@@ -9,7 +9,10 @@ import (
 
 // BenchmarkAnalyzePost benchmarks the AnalyzePost method.
 func BenchmarkAnalyzePost(b *testing.B) {
-	analyzer := NewAnalyzer(nil)
+	analyzer, err := NewAnalyzer()
+	if err != nil {
+		b.Fatalf("failed to create analyzer: %v", err)
+	}
 	ctx := context.Background()
 
 	// Realistic Reddit post with varied content
@@ -30,7 +33,10 @@ func BenchmarkAnalyzePost(b *testing.B) {
 
 // BenchmarkAnalyzePostNegative benchmarks AnalyzePost with negative content.
 func BenchmarkAnalyzePostNegative(b *testing.B) {
-	analyzer := NewAnalyzer(nil)
+	analyzer, err := NewAnalyzer()
+	if err != nil {
+		b.Fatalf("failed to create analyzer: %v", err)
+	}
 	ctx := context.Background()
 
 	post := &types.Post{
@@ -50,7 +56,10 @@ func BenchmarkAnalyzePostNegative(b *testing.B) {
 
 // BenchmarkAnalyzePostNeutral benchmarks AnalyzePost with neutral content.
 func BenchmarkAnalyzePostNeutral(b *testing.B) {
-	analyzer := NewAnalyzer(nil)
+	analyzer, err := NewAnalyzer()
+	if err != nil {
+		b.Fatalf("failed to create analyzer: %v", err)
+	}
 	ctx := context.Background()
 
 	post := &types.Post{
@@ -70,7 +79,10 @@ func BenchmarkAnalyzePostNeutral(b *testing.B) {
 
 // BenchmarkAnalyzePostLong benchmarks AnalyzePost with very long content.
 func BenchmarkAnalyzePostLong(b *testing.B) {
-	analyzer := NewAnalyzer(nil)
+	analyzer, err := NewAnalyzer()
+	if err != nil {
+		b.Fatalf("failed to create analyzer: %v", err)
+	}
 	ctx := context.Background()
 
 	// Generate a long post with realistic content
@@ -117,7 +129,10 @@ func BenchmarkAnalyzePostLong(b *testing.B) {
 
 // BenchmarkAnalyzeComment benchmarks the AnalyzeComment method.
 func BenchmarkAnalyzeComment(b *testing.B) {
-	analyzer := NewAnalyzer(nil)
+	analyzer, err := NewAnalyzer()
+	if err != nil {
+		b.Fatalf("failed to create analyzer: %v", err)
+	}
 	ctx := context.Background()
 
 	comment := &types.Comment{
@@ -136,7 +151,10 @@ func BenchmarkAnalyzeComment(b *testing.B) {
 
 // BenchmarkAnalyzeCommentNegative benchmarks AnalyzeComment with negative content.
 func BenchmarkAnalyzeCommentNegative(b *testing.B) {
-	analyzer := NewAnalyzer(nil)
+	analyzer, err := NewAnalyzer()
+	if err != nil {
+		b.Fatalf("failed to create analyzer: %v", err)
+	}
 	ctx := context.Background()
 
 	comment := &types.Comment{
@@ -155,7 +173,10 @@ func BenchmarkAnalyzeCommentNegative(b *testing.B) {
 
 // BenchmarkAnalyzeCommentWithEmojis benchmarks AnalyzeComment with emoji emoticons.
 func BenchmarkAnalyzeCommentWithEmojis(b *testing.B) {
-	analyzer := NewAnalyzer(nil)
+	analyzer, err := NewAnalyzer()
+	if err != nil {
+		b.Fatalf("failed to create analyzer: %v", err)
+	}
 	ctx := context.Background()
 
 	comment := &types.Comment{
@@ -174,7 +195,10 @@ func BenchmarkAnalyzeCommentWithEmojis(b *testing.B) {
 
 // BenchmarkAnalyzeCommentWithCapsAndPunctuation benchmarks with emphasis markers.
 func BenchmarkAnalyzeCommentWithCapsAndPunctuation(b *testing.B) {
-	analyzer := NewAnalyzer(nil)
+	analyzer, err := NewAnalyzer()
+	if err != nil {
+		b.Fatalf("failed to create analyzer: %v", err)
+	}
 	ctx := context.Background()
 
 	comment := &types.Comment{
@@ -193,7 +217,10 @@ func BenchmarkAnalyzeCommentWithCapsAndPunctuation(b *testing.B) {
 
 // BenchmarkAnalyzeCommentLong benchmarks AnalyzeComment with long content.
 func BenchmarkAnalyzeCommentLong(b *testing.B) {
-	analyzer := NewAnalyzer(nil)
+	analyzer, err := NewAnalyzer()
+	if err != nil {
+		b.Fatalf("failed to create analyzer: %v", err)
+	}
 	ctx := context.Background()
 
 	comment := &types.Comment{
@@ -225,7 +252,10 @@ func BenchmarkAnalyzeCommentLong(b *testing.B) {
 
 // BenchmarkAnalyzeCommentNeutral benchmarks AnalyzeComment with neutral content.
 func BenchmarkAnalyzeCommentNeutral(b *testing.B) {
-	analyzer := NewAnalyzer(nil)
+	analyzer, err := NewAnalyzer()
+	if err != nil {
+		b.Fatalf("failed to create analyzer: %v", err)
+	}
 	ctx := context.Background()
 
 	comment := &types.Comment{
@@ -244,7 +274,10 @@ func BenchmarkAnalyzeCommentNeutral(b *testing.B) {
 
 // BenchmarkAnalyzeCommentShort benchmarks AnalyzeComment with short content.
 func BenchmarkAnalyzeCommentShort(b *testing.B) {
-	analyzer := NewAnalyzer(nil)
+	analyzer, err := NewAnalyzer()
+	if err != nil {
+		b.Fatalf("failed to create analyzer: %v", err)
+	}
 	ctx := context.Background()
 
 	comment := &types.Comment{
@@ -263,28 +296,36 @@ func BenchmarkAnalyzeCommentShort(b *testing.B) {
 
 // BenchmarkNewAnalyzer benchmarks Analyzer creation.
 func BenchmarkNewAnalyzer(b *testing.B) {
-	b.Run("with nil config", func(b *testing.B) {
+	b.Run("with default config", func(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			_ = NewAnalyzer(nil)
+			_, err := NewAnalyzer()
+			if err != nil {
+				b.Fatalf("unexpected error: %v", err)
+			}
 		}
 	})
 
 	b.Run("with custom config", func(b *testing.B) {
-		config := &Config{
-			MinWordCount:    5,
-			EnableEmoticons: true,
-		}
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			_ = NewAnalyzer(config)
+			_, err := NewAnalyzer(WithConfig(&Config{
+				MinWordCount:    5,
+				EnableEmoticons: true,
+			}))
+			if err != nil {
+				b.Fatalf("unexpected error: %v", err)
+			}
 		}
 	})
 }
 
 // BenchmarkAnalyzeMixedSentiment benchmarks posts/comments with mixed sentiment.
 func BenchmarkAnalyzeMixedSentiment(b *testing.B) {
-	analyzer := NewAnalyzer(nil)
+	analyzer, err := NewAnalyzer()
+	if err != nil {
+		b.Fatalf("failed to create analyzer: %v", err)
+	}
 	ctx := context.Background()
 
 	comment := &types.Comment{
@@ -305,7 +346,10 @@ func BenchmarkAnalyzeMixedSentiment(b *testing.B) {
 
 // BenchmarkAnalyzeNegatedSentiment benchmarks content with negation.
 func BenchmarkAnalyzeNegatedSentiment(b *testing.B) {
-	analyzer := NewAnalyzer(nil)
+	analyzer, err := NewAnalyzer()
+	if err != nil {
+		b.Fatalf("failed to create analyzer: %v", err)
+	}
 	ctx := context.Background()
 
 	comment := &types.Comment{
@@ -325,7 +369,10 @@ func BenchmarkAnalyzeNegatedSentiment(b *testing.B) {
 
 // BenchmarkAnalyzeDeletedAuthor benchmarks posts with deleted authors.
 func BenchmarkAnalyzeDeletedAuthor(b *testing.B) {
-	analyzer := NewAnalyzer(nil)
+	analyzer, err := NewAnalyzer()
+	if err != nil {
+		b.Fatalf("failed to create analyzer: %v", err)
+	}
 	ctx := context.Background()
 
 	post := &types.Post{
@@ -353,8 +400,11 @@ func BenchmarkMultipleAnalyzers(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		analyzer := NewAnalyzer(nil)
-		_, err := analyzer.AnalyzeComment(ctx, comment)
+		analyzer, err := NewAnalyzer()
+		if err != nil {
+			b.Fatalf("failed to create analyzer: %v", err)
+		}
+		_, err = analyzer.AnalyzeComment(ctx, comment)
 		if err != nil {
 			b.Fatalf("unexpected error: %v", err)
 		}
@@ -363,7 +413,10 @@ func BenchmarkMultipleAnalyzers(b *testing.B) {
 
 // BenchmarkAnalyzePostTitleAndBody benchmarks the separate title and body analysis.
 func BenchmarkAnalyzePostTitleAndBody(b *testing.B) {
-	analyzer := NewAnalyzer(nil)
+	analyzer, err := NewAnalyzer()
+	if err != nil {
+		b.Fatalf("failed to create analyzer: %v", err)
+	}
 	ctx := context.Background()
 
 	post := &types.Post{
