@@ -71,19 +71,6 @@ jobs:
         path: benchmark-unit.txt
         retention-days: 30
 
-    - name: Store benchmark result
-      uses: benchmark-action/github-action-benchmark@v1
-      with:
-        tool: 'go'
-        output-file-path: benchmark-unit.txt
-        github-token: ${{ secrets.GITHUB_TOKEN }}
-        auto-push: false
-        save-data-file: false
-        alert-threshold: '110%'
-        comment-on-alert: true
-        fail-on-alert: false
-        benchmark-data-dir-path: 'benchmarks/unit'
-
   benchmark-e2e:
     name: E2E Scenario Benchmarks
     needs: test
@@ -113,16 +100,3 @@ jobs:
         name: benchmark-e2e-results
         path: benchmark-e2e.txt
         retention-days: 30
-
-    - name: Store benchmark result
-      uses: benchmark-action/github-action-benchmark@v1
-      with:
-        tool: 'go'
-        output-file-path: benchmark-e2e.txt
-        github-token: ${{ secrets.GITHUB_TOKEN }}
-        auto-push: false
-        save-data-file: false
-        alert-threshold: '115%'
-        comment-on-alert: true
-        fail-on-alert: false
-        benchmark-data-dir-path: 'benchmarks/e2e'
