@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
-	"sync"
 
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/validation"
@@ -17,7 +16,6 @@ const MaxCommentDepth = 50
 // Parser handles parsing of Reddit API responses with context support and optimized performance
 type Parser struct {
 	logger *slog.Logger
-	pool   sync.Pool // Reuse parsing structures for better performance
 }
 
 // NewParser creates a new parser instance with an optional logger.
@@ -30,13 +28,6 @@ func NewParser(logger ...*slog.Logger) *Parser {
 
 	return &Parser{
 		logger: log,
-		pool: sync.Pool{
-			New: func() interface{} {
-				return &parseContext{
-					seenIDs: make(map[string]bool),
-				}
-			},
-		},
 	}
 }
 
@@ -52,12 +43,7 @@ func (p *Parser) ParseThing(ctx context.Context, thing *types.Thing) (any, error
 		return nil, &KindError{Operation: "parse_thing", Expected: "non-nil", Actual: "nil"}
 	}
 
-	pc := p.pool.Get().(*parseContext)
-	defer p.pool.Put(pc)
-
-	// Reset parse context
-	pc.depth = 0
-	clear(pc.seenIDs)
+	pc := &parseContext{seenIDs: make(map[string]bool)}
 
 	return p.parseThingWithContext(ctx, thing, pc)
 }
@@ -426,10 +412,7 @@ func (p *Parser) ExtractComments(ctx context.Context, thing *types.Thing) ([]*ty
 
 	// Handle both single comments and listings
 	if thing.Kind == "t1" {
-		pc := p.pool.Get().(*parseContext)
-		defer p.pool.Put(pc)
-		pc.depth = 0
-		clear(pc.seenIDs)
+		pc := &parseContext{seenIDs: make(map[string]bool)}
 
 		comment, err := p.ParseComment(ctx, thing, pc)
 		if err != nil {
@@ -451,10 +434,7 @@ func (p *Parser) ExtractComments(ctx context.Context, thing *types.Thing) ([]*ty
 		return nil, nil, err
 	}
 
-	pc := p.pool.Get().(*parseContext)
-	defer p.pool.Put(pc)
-	pc.depth = 0
-	clear(pc.seenIDs)
+	pc := &parseContext{seenIDs: make(map[string]bool)}
 
 	for _, child := range listingData.Children {
 		switch child.Kind {
