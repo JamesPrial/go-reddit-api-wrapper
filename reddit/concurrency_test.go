@@ -961,7 +961,7 @@ func TestSequentialSameServer(t *testing.T) {
 // TestSequentialWithoutSubreddit tests if removing WithSubreddit fixes the issue
 func TestSequentialWithoutSubreddit(t *testing.T) {
 	// Setup test data - WITHOUT WithSubreddit like TestConcurrentClientUsage
-	subreddit := testutil.NewSubreddit("sequential_test_no_sub").
+	subreddit := testutil.NewSubreddit("sequential_no_sub").
 		WithTitle("Sequential Test Subreddit").
 		WithSubscribers(100000).
 		Build()
@@ -976,8 +976,8 @@ func TestSequentialWithoutSubreddit(t *testing.T) {
 
 	// Use MockServer for reliable testing
 	server := testutil.NewMockServer().
-		WithSubreddit("sequential_test_no_sub", subreddit).
-		WithPosts("sequential_test_no_sub", "hot", post).
+		WithSubreddit("sequential_no_sub", subreddit).
+		WithPosts("sequential_no_sub", "hot", post).
 		Start()
 	defer server.Close()
 
@@ -997,7 +997,7 @@ func TestSequentialWithoutSubreddit(t *testing.T) {
 
 	// Make 1 request
 	posts, err := redditClient.GetHot(context.Background(), &types.PostsRequest{
-		Subreddit: "sequential_test_no_sub",
+		Subreddit: "sequential_no_sub",
 		Pagination: types.Pagination{
 			Limit: 5,
 		},
