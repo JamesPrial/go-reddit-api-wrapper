@@ -62,31 +62,38 @@ func NewOptimizedTransport(config *TransportConfig) (*http.Transport, *Transport
 
 	metrics := &TransportMetrics{}
 
-	// Set Reddit-optimized defaults
-	maxIdleConns := config.MaxIdleConns
-	if maxIdleConns == 0 {
-		maxIdleConns = 100
+	// Clone http.DefaultTransport to preserve critical defaults like:
+	// - Proxy (respects HTTP_PROXY, HTTPS_PROXY, NO_PROXY environment variables)
+	// - TLSHandshakeTimeout (10s)
+	// - ExpectContinueTimeout (1s)
+	// - Other connection and TLS settings
+	defaultTransport := http.DefaultTransport.(*http.Transport)
+	transport := defaultTransport.Clone()
+
+	// Set Reddit-optimized connection pool settings
+	if config.MaxIdleConns != 0 {
+		transport.MaxIdleConns = config.MaxIdleConns
+	} else {
+		transport.MaxIdleConns = 100
 	}
 
-	maxIdleConnsPerHost := config.MaxIdleConnsPerHost
-	if maxIdleConnsPerHost == 0 {
-		maxIdleConnsPerHost = 10
+	if config.MaxIdleConnsPerHost != 0 {
+		transport.MaxIdleConnsPerHost = config.MaxIdleConnsPerHost
+	} else {
+		transport.MaxIdleConnsPerHost = 10
 	}
 
-	idleConnTimeout := config.IdleConnTimeout
-	if idleConnTimeout == 0 {
-		idleConnTimeout = 90 * time.Second
+	if config.IdleConnTimeout != 0 {
+		transport.IdleConnTimeout = config.IdleConnTimeout
+	} else {
+		transport.IdleConnTimeout = 90 * time.Second
 	}
 
-	// Create the base transport with optimized settings
-	// Default ForceAttemptHTTP2 to true for HTTP/2 support
-	transport := &http.Transport{
-		MaxIdleConns:        maxIdleConns,
-		MaxIdleConnsPerHost: maxIdleConnsPerHost,
-		IdleConnTimeout:     idleConnTimeout,
-		DisableKeepAlives:   config.DisableKeepAlives,
-		ForceAttemptHTTP2:   true,
-	}
+	// Override DisableKeepAlives if specified
+	transport.DisableKeepAlives = config.DisableKeepAlives
+
+	// Always enable HTTP/2 support
+	transport.ForceAttemptHTTP2 = true
 
 	// Configure custom dialer with DNS cache if provided
 	if config.DNSCache != nil {
