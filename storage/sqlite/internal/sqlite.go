@@ -20,10 +20,11 @@ import (
 var migrationsFS embed.FS
 
 const (
-	DEFAULT_DB_PATH        = "reddit.db"
-	DEFAULT_MAX_OPEN_CONNS = 10
-	DEFAULT_MAX_IDLE_CONNS = 5
-	DEFAULT_CONN_MAX_LIFE  = 0
+	DEFAULT_DB_PATH            = "reddit.db"
+	DEFAULT_MAX_OPEN_CONNS     = 10
+	DEFAULT_MAX_IDLE_CONNS     = 10
+	DEFAULT_CONN_MAX_LIFE      = 0
+	DEFAULT_CONN_MAX_IDLE_TIME = 5 * time.Minute
 )
 
 // Config holds configuration options for SQLiteStore.
@@ -48,12 +49,16 @@ type Config struct {
 	MaxOpenConns int
 
 	// MaxIdleConns sets the maximum number of idle connections.
-	// If <= 0, defaults to 5.
+	// If <= 0, defaults to 10.
 	MaxIdleConns int
 
 	// ConnMaxLife sets the maximum amount of time a connection may be reused.
 	// If <= 0, connections are not closed due to age (unlimited lifetime).
 	ConnMaxLife time.Duration
+
+	// ConnMaxIdleTime sets the maximum amount of time a connection may sit idle.
+	// If <= 0, defaults to 5 minutes.
+	ConnMaxIdleTime time.Duration
 
 	// Logger is used for structured logging.
 	// If nil, uses slog.Default().
@@ -107,6 +112,11 @@ func NewSQLiteStore(cfg *Config) (*SQLiteStore, error) {
 	maxIdleConns := cfg.MaxIdleConns
 	if maxIdleConns <= 0 {
 		maxIdleConns = DEFAULT_MAX_IDLE_CONNS
+	}
+
+	connMaxIdleTime := cfg.ConnMaxIdleTime
+	if connMaxIdleTime <= 0 {
+		connMaxIdleTime = DEFAULT_CONN_MAX_IDLE_TIME
 	}
 
 	logger := cfg.Logger
@@ -166,12 +176,25 @@ func NewSQLiteStore(cfg *Config) (*SQLiteStore, error) {
 	db.SetMaxIdleConns(maxIdleConns)
 	db.SetConnMaxLifetime(cfg.ConnMaxLife)
 
-	logger.Info("database connection opened",
+	// SetConnMaxIdleTime closes idle connections after the specified duration to free resources.
+	// Matching MaxIdleConns to MaxOpenConns with an idle timeout reduces connection churn
+	// and improves performance under high-traffic scenarios.
+	// However, for in-memory databases, we skip this to keep the single connection alive indefinitely,
+	// since in-memory databases disappear when the connection closes.
+	if !isMemory {
+		db.SetConnMaxIdleTime(connMaxIdleTime)
+	}
+
+	logAttrs := []any{
 		"db_path", dbPath,
 		"max_open_conns", maxOpenConns,
 		"max_idle_conns", maxIdleConns,
 		"conn_max_life", cfg.ConnMaxLife,
-	)
+	}
+	if !isMemory {
+		logAttrs = append(logAttrs, "conn_max_idle_time", connMaxIdleTime)
+	}
+	logger.Info("database connection opened", logAttrs...)
 
 	// Create store instance
 	store := &SQLiteStore{
