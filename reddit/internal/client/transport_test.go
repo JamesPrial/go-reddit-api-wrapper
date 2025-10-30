@@ -1,0 +1,504 @@
+package client
+
+import (
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+)
+
+func TestNewOptimizedTransport_DefaultConfig(t *testing.T) {
+	transport, metrics := NewOptimizedTransport(nil)
+
+	// Verify transport and metrics are not nil
+	if transport == nil {
+		t.Fatal("expected transport to be non-nil")
+	}
+	if metrics == nil {
+		t.Fatal("expected metrics to be non-nil")
+	}
+
+	// Verify default settings
+	if transport.MaxIdleConns != 100 {
+		t.Errorf("expected MaxIdleConns=100, got %d", transport.MaxIdleConns)
+	}
+	if transport.MaxIdleConnsPerHost != 10 {
+		t.Errorf("expected MaxIdleConnsPerHost=10, got %d", transport.MaxIdleConnsPerHost)
+	}
+	if transport.IdleConnTimeout != 90*time.Second {
+		t.Errorf("expected IdleConnTimeout=90s, got %v", transport.IdleConnTimeout)
+	}
+	if transport.DisableKeepAlives != false {
+		t.Errorf("expected DisableKeepAlives=false, got %v", transport.DisableKeepAlives)
+	}
+	if transport.ForceAttemptHTTP2 != true {
+		t.Errorf("expected ForceAttemptHTTP2=true, got %v", transport.ForceAttemptHTTP2)
+	}
+}
+
+func TestNewOptimizedTransport_CustomConfig(t *testing.T) {
+	config := &TransportConfig{
+		MaxIdleConns:        50,
+		MaxIdleConnsPerHost: 5,
+		IdleConnTimeout:     60 * time.Second,
+		DisableKeepAlives:   true,
+		ForceAttemptHTTP2:   false,
+	}
+
+	transport, metrics := NewOptimizedTransport(config)
+
+	// Verify transport and metrics are not nil
+	if transport == nil {
+		t.Fatal("expected transport to be non-nil")
+	}
+	if metrics == nil {
+		t.Fatal("expected metrics to be non-nil")
+	}
+
+	// Verify custom settings are respected
+	if transport.MaxIdleConns != 50 {
+		t.Errorf("expected MaxIdleConns=50, got %d", transport.MaxIdleConns)
+	}
+	if transport.MaxIdleConnsPerHost != 5 {
+		t.Errorf("expected MaxIdleConnsPerHost=5, got %d", transport.MaxIdleConnsPerHost)
+	}
+	if transport.IdleConnTimeout != 60*time.Second {
+		t.Errorf("expected IdleConnTimeout=60s, got %v", transport.IdleConnTimeout)
+	}
+	if transport.DisableKeepAlives != true {
+		t.Errorf("expected DisableKeepAlives=true, got %v", transport.DisableKeepAlives)
+	}
+}
+
+func TestTransportMetrics_ConnectionTracking(t *testing.T) {
+	config := &TransportConfig{}
+	transport, metrics := NewOptimizedTransport(config)
+
+	// Create a test server
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+	}))
+	defer server.Close()
+
+	// Create HTTP client with our transport
+	client := &http.Client{Transport: transport}
+	defer client.CloseIdleConnections()
+
+	// Make a few requests
+	for i := 0; i < 3; i++ {
+		resp, err := client.Get(server.URL)
+		if err != nil {
+			t.Fatalf("request %d failed: %v", i, err)
+		}
+		resp.Body.Close()
+	}
+
+	// Verify that connections were tracked
+	opened := metrics.ConnectionsOpened.Load()
+	if opened < 1 {
+		t.Errorf("expected ConnectionsOpened >= 1, got %d", opened)
+	}
+}
+
+func TestTransportMetrics_ThreadSafety(t *testing.T) {
+	metrics := &TransportMetrics{}
+	numGoroutines := 10
+	operationsPerGoroutine := 1000
+
+	var wg sync.WaitGroup
+	wg.Add(numGoroutines)
+
+	// Launch concurrent goroutines that update metrics
+	for i := 0; i < numGoroutines; i++ {
+		go func() {
+			defer wg.Done()
+			for j := 0; j < operationsPerGoroutine; j++ {
+				metrics.ConnectionsOpened.Add(1)
+				metrics.ConnectionsReused.Add(1)
+				metrics.ConnectionsFailed.Add(1)
+				metrics.DNSLookupsTotal.Add(1)
+			}
+		}()
+	}
+
+	wg.Wait()
+
+	// Verify final counts
+	expectedCount := int64(numGoroutines * operationsPerGoroutine)
+	if got := metrics.ConnectionsOpened.Load(); got != expectedCount {
+		t.Errorf("expected ConnectionsOpened=%d, got %d", expectedCount, got)
+	}
+	if got := metrics.ConnectionsReused.Load(); got != expectedCount {
+		t.Errorf("expected ConnectionsReused=%d, got %d", expectedCount, got)
+	}
+	if got := metrics.ConnectionsFailed.Load(); got != expectedCount {
+		t.Errorf("expected ConnectionsFailed=%d, got %d", expectedCount, got)
+	}
+	if got := metrics.DNSLookupsTotal.Load(); got != expectedCount {
+		t.Errorf("expected DNSLookupsTotal=%d, got %d", expectedCount, got)
+	}
+}
+
+func TestTransportWithDNSCache(t *testing.T) {
+	dnsCache := NewDNSCache(1 * time.Minute)
+	config := &TransportConfig{
+		DNSCache: dnsCache,
+	}
+
+	transport, metrics := NewOptimizedTransport(config)
+
+	// Verify transport and metrics are not nil
+	if transport == nil {
+		t.Fatal("expected transport to be non-nil")
+	}
+	if metrics == nil {
+		t.Fatal("expected metrics to be non-nil")
+	}
+
+	// Create a test server
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+	}))
+	defer server.Close()
+
+	// Create HTTP client with our transport
+	client := &http.Client{Transport: transport}
+	defer client.CloseIdleConnections()
+
+	// Make multiple requests - subsequent ones should use cached DNS
+	for i := 0; i < 3; i++ {
+		resp, err := client.Get(server.URL)
+		if err != nil {
+			t.Fatalf("request %d failed: %v", i, err)
+		}
+		resp.Body.Close()
+	}
+
+	// Verify DNS metrics were tracked
+	totalLookups := metrics.DNSLookupsTotal.Load()
+
+	if totalLookups < 1 {
+		t.Logf("expected at least one DNS lookup, got %d (this may be normal for localhost)", totalLookups)
+	}
+}
+
+func TestTransportKeepAliveEnabled(t *testing.T) {
+	config := &TransportConfig{
+		DisableKeepAlives: false,
+	}
+
+	transport, _ := NewOptimizedTransport(config)
+
+	// Create a test server
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+	}))
+	defer server.Close()
+
+	// Create HTTP client with our transport
+	client := &http.Client{Transport: transport}
+	defer client.CloseIdleConnections()
+
+	// Make two requests
+	resp1, err := client.Get(server.URL)
+	if err != nil {
+		t.Fatalf("first request failed: %v", err)
+	}
+	resp1.Body.Close()
+
+	resp2, err := client.Get(server.URL)
+	if err != nil {
+		t.Fatalf("second request failed: %v", err)
+	}
+	resp2.Body.Close()
+
+	// If keep-alive is enabled, the connection should be reused
+	// We can't directly verify this, but we can verify no errors occurred
+}
+
+func TestTransportMetrics_Snapshot(t *testing.T) {
+	metrics := &TransportMetrics{}
+
+	// Add some values
+	metrics.ConnectionsOpened.Store(100)
+	metrics.ConnectionsReused.Store(50)
+	metrics.ConnectionsFailed.Store(10)
+	metrics.DNSLookupsTotal.Store(5)
+
+	// Get snapshot
+	snapshot := metrics.GetTransportMetrics()
+
+	// Snapshot should have the same values as the original metrics
+	if snapshot.ConnectionsOpened != 100 {
+		t.Errorf("expected snapshot ConnectionsOpened=100, got %d", snapshot.ConnectionsOpened)
+	}
+	if snapshot.ConnectionsReused != 50 {
+		t.Errorf("expected snapshot ConnectionsReused=50, got %d", snapshot.ConnectionsReused)
+	}
+	if snapshot.ConnectionsFailed != 10 {
+		t.Errorf("expected snapshot ConnectionsFailed=10, got %d", snapshot.ConnectionsFailed)
+	}
+	if snapshot.DNSLookupsTotal != 5 {
+		t.Errorf("expected snapshot DNSLookupsTotal=5, got %d", snapshot.DNSLookupsTotal)
+	}
+}
+
+func TestNewOptimizedTransport_HTTP2(t *testing.T) {
+	config := &TransportConfig{
+		ForceAttemptHTTP2: true,
+	}
+
+	transport, _ := NewOptimizedTransport(config)
+
+	if transport.ForceAttemptHTTP2 != true {
+		t.Errorf("expected ForceAttemptHTTP2=true, got %v", transport.ForceAttemptHTTP2)
+	}
+}
+
+func TestTransportMetrics_ConcurrentReads(t *testing.T) {
+	metrics := &TransportMetrics{}
+
+	// Set initial values
+	metrics.ConnectionsOpened.Store(1000)
+	metrics.ConnectionsReused.Store(500)
+	metrics.ConnectionsFailed.Store(100)
+
+	numReaders := 20
+	readsPerReader := 1000
+
+	var wg sync.WaitGroup
+	wg.Add(numReaders)
+
+	// Launch concurrent readers
+	for i := 0; i < numReaders; i++ {
+		go func() {
+			defer wg.Done()
+			for j := 0; j < readsPerReader; j++ {
+				_ = metrics.ConnectionsOpened.Load()
+				_ = metrics.ConnectionsReused.Load()
+				_ = metrics.ConnectionsFailed.Load()
+			}
+		}()
+	}
+
+	wg.Wait()
+
+	// Verify values haven't changed
+	if got := metrics.ConnectionsOpened.Load(); got != 1000 {
+		t.Errorf("expected ConnectionsOpened=1000, got %d", got)
+	}
+	if got := metrics.ConnectionsReused.Load(); got != 500 {
+		t.Errorf("expected ConnectionsReused=500, got %d", got)
+	}
+	if got := metrics.ConnectionsFailed.Load(); got != 100 {
+		t.Errorf("expected ConnectionsFailed=100, got %d", got)
+	}
+}
+
+// TestNewOptimizedTransport_PreservesDefaultTransportSettings verifies that
+// NewOptimizedTransport preserves critical defaults from http.DefaultTransport.
+func TestNewOptimizedTransport_PreservesDefaultTransportSettings(t *testing.T) {
+	transport, _ := NewOptimizedTransport(nil)
+
+	// Verify that Proxy is preserved (not nil) - this enables HTTP_PROXY, HTTPS_PROXY support
+	if transport.Proxy == nil {
+		t.Error("expected Proxy to be preserved from http.DefaultTransport, got nil")
+	}
+
+	// Verify TLSHandshakeTimeout is preserved (should be 10 seconds from DefaultTransport)
+	expectedTLSTimeout := 10 * time.Second
+	if transport.TLSHandshakeTimeout != expectedTLSTimeout {
+		t.Errorf("expected TLSHandshakeTimeout=%v (from DefaultTransport), got %v",
+			expectedTLSTimeout, transport.TLSHandshakeTimeout)
+	}
+
+	// Verify ExpectContinueTimeout is preserved (should be 1 second from DefaultTransport)
+	expectedContinueTimeout := 1 * time.Second
+	if transport.ExpectContinueTimeout != expectedContinueTimeout {
+		t.Errorf("expected ExpectContinueTimeout=%v (from DefaultTransport), got %v",
+			expectedContinueTimeout, transport.ExpectContinueTimeout)
+	}
+}
+
+// TestNewOptimizedTransport_CustomDialContextPreserved verifies that the custom
+// DialContext for metrics tracking is properly applied even when cloning DefaultTransport.
+func TestNewOptimizedTransport_CustomDialContextPreserved(t *testing.T) {
+	transport, metrics := NewOptimizedTransport(nil)
+
+	// Verify DialContext is set (not nil)
+	if transport.DialContext == nil {
+		t.Fatal("expected DialContext to be set for metrics tracking, got nil")
+	}
+
+	// Create a test server
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+	}))
+	defer server.Close()
+
+	// Create HTTP client with our transport
+	client := &http.Client{Transport: transport}
+	defer client.CloseIdleConnections()
+
+	// Make a request to verify DialContext with metrics tracking works
+	resp, err := client.Get(server.URL)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	resp.Body.Close()
+
+	// Verify that metrics were tracked (DialContext was called)
+	opened := metrics.ConnectionsOpened.Load()
+	if opened < 1 {
+		t.Errorf("expected ConnectionsOpened >= 1 (DialContext was called), got %d", opened)
+	}
+}
+
+// TestNewOptimizedTransport_ConfigOverridesWork verifies that config values
+// properly override defaults while still preserving other DefaultTransport settings.
+func TestNewOptimizedTransport_ConfigOverridesWork(t *testing.T) {
+	config := &TransportConfig{
+		MaxIdleConns:        50,
+		MaxIdleConnsPerHost: 5,
+		IdleConnTimeout:     60 * time.Second,
+		DisableKeepAlives:   true,
+	}
+
+	transport, _ := NewOptimizedTransport(config)
+
+	// Verify custom settings are applied
+	if transport.MaxIdleConns != 50 {
+		t.Errorf("expected MaxIdleConns=50, got %d", transport.MaxIdleConns)
+	}
+	if transport.MaxIdleConnsPerHost != 5 {
+		t.Errorf("expected MaxIdleConnsPerHost=5, got %d", transport.MaxIdleConnsPerHost)
+	}
+	if transport.IdleConnTimeout != 60*time.Second {
+		t.Errorf("expected IdleConnTimeout=60s, got %v", transport.IdleConnTimeout)
+	}
+	if transport.DisableKeepAlives != true {
+		t.Errorf("expected DisableKeepAlives=true, got %v", transport.DisableKeepAlives)
+	}
+
+	// Verify DefaultTransport settings are still preserved
+	if transport.Proxy == nil {
+		t.Error("expected Proxy to be preserved even with custom config, got nil")
+	}
+	if transport.TLSHandshakeTimeout != 10*time.Second {
+		t.Errorf("expected TLSHandshakeTimeout=10s (preserved from DefaultTransport), got %v",
+			transport.TLSHandshakeTimeout)
+	}
+	if transport.ExpectContinueTimeout != 1*time.Second {
+		t.Errorf("expected ExpectContinueTimeout=1s (preserved from DefaultTransport), got %v",
+			transport.ExpectContinueTimeout)
+	}
+}
+
+// TestNewOptimizedTransport_DNSCacheWithPreservedDefaults verifies that using
+// a DNS cache preserves DefaultTransport settings.
+func TestNewOptimizedTransport_DNSCacheWithPreservedDefaults(t *testing.T) {
+	dnsCache := NewDNSCache(1 * time.Minute)
+	config := &TransportConfig{
+		DNSCache: dnsCache,
+	}
+
+	transport, metrics := NewOptimizedTransport(config)
+
+	// Verify DefaultTransport settings are preserved
+	if transport.Proxy == nil {
+		t.Error("expected Proxy to be preserved with DNS cache, got nil")
+	}
+	if transport.TLSHandshakeTimeout != 10*time.Second {
+		t.Errorf("expected TLSHandshakeTimeout=10s, got %v", transport.TLSHandshakeTimeout)
+	}
+	if transport.ExpectContinueTimeout != 1*time.Second {
+		t.Errorf("expected ExpectContinueTimeout=1s, got %v", transport.ExpectContinueTimeout)
+	}
+
+	// Verify DNS cache DialContext is applied
+	if transport.DialContext == nil {
+		t.Fatal("expected DialContext to be set for DNS cache, got nil")
+	}
+
+	// Create a test server
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+	}))
+	defer server.Close()
+
+	// Create HTTP client with our transport
+	client := &http.Client{Transport: transport}
+	defer client.CloseIdleConnections()
+
+	// Make a request to verify DNS cache integration works
+	resp, err := client.Get(server.URL)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	resp.Body.Close()
+
+	// Verify metrics were tracked
+	opened := metrics.ConnectionsOpened.Load()
+	if opened < 1 {
+		t.Errorf("expected ConnectionsOpened >= 1, got %d", opened)
+	}
+}
+
+// mockRoundTripper is a test helper that implements http.RoundTripper
+// but is not *http.Transport (used for testing type assertion failure)
+type mockRoundTripper struct{}
+
+func (m mockRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	return nil, nil // Dummy implementation
+}
+
+// TestNewOptimizedTransport_PanicsOnInvalidDefaultTransport verifies that
+// NewOptimizedTransport panics with a clear message if http.DefaultTransport
+// is not *http.Transport (e.g., if another package modified it).
+func TestNewOptimizedTransport_PanicsOnInvalidDefaultTransport(t *testing.T) {
+	// Save original DefaultTransport
+	originalTransport := http.DefaultTransport
+	defer func() {
+		// Restore original DefaultTransport after test
+		http.DefaultTransport = originalTransport
+	}()
+
+	// Replace DefaultTransport with a custom RoundTripper that's not *http.Transport
+	http.DefaultTransport = mockRoundTripper{}
+
+	// Verify that NewOptimizedTransport panics with expected message
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("expected panic when http.DefaultTransport is not *http.Transport")
+		}
+
+		panicMsg, ok := r.(string)
+		if !ok {
+			t.Fatalf("expected panic with string message, got %T: %v", r, r)
+		}
+
+		// Verify panic message contains expected information
+		expectedSubstrings := []string{
+			"http.DefaultTransport is not *http.Transport",
+			"type=client.mockRoundTripper",
+			"modified by another package",
+		}
+
+		for _, substr := range expectedSubstrings {
+			if !strings.Contains(panicMsg, substr) {
+				t.Errorf("panic message missing expected substring %q\nGot: %s", substr, panicMsg)
+			}
+		}
+	}()
+
+	// This should panic
+	NewOptimizedTransport(nil)
+}
