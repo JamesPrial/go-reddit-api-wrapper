@@ -175,18 +175,26 @@ func NewSQLiteStore(cfg *Config) (*SQLiteStore, error) {
 	db.SetMaxOpenConns(maxOpenConns)
 	db.SetMaxIdleConns(maxIdleConns)
 	db.SetConnMaxLifetime(cfg.ConnMaxLife)
+
 	// SetConnMaxIdleTime closes idle connections after the specified duration to free resources.
 	// Matching MaxIdleConns to MaxOpenConns with an idle timeout reduces connection churn
 	// and improves performance under high-traffic scenarios.
-	db.SetConnMaxIdleTime(connMaxIdleTime)
+	// However, for in-memory databases, we skip this to keep the single connection alive indefinitely,
+	// since in-memory databases disappear when the connection closes.
+	if !isMemory {
+		db.SetConnMaxIdleTime(connMaxIdleTime)
+	}
 
-	logger.Info("database connection opened",
+	logAttrs := []any{
 		"db_path", dbPath,
 		"max_open_conns", maxOpenConns,
 		"max_idle_conns", maxIdleConns,
 		"conn_max_life", cfg.ConnMaxLife,
-		"conn_max_idle_time", connMaxIdleTime,
-	)
+	}
+	if !isMemory {
+		logAttrs = append(logAttrs, "conn_max_idle_time", connMaxIdleTime)
+	}
+	logger.Info("database connection opened", logAttrs...)
 
 	// Create store instance
 	store := &SQLiteStore{
