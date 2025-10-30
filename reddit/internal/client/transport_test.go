@@ -3,6 +3,7 @@ package client
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -448,4 +449,56 @@ func TestNewOptimizedTransport_DNSCacheWithPreservedDefaults(t *testing.T) {
 	if opened < 1 {
 		t.Errorf("expected ConnectionsOpened >= 1, got %d", opened)
 	}
+}
+
+// mockRoundTripper is a test helper that implements http.RoundTripper
+// but is not *http.Transport (used for testing type assertion failure)
+type mockRoundTripper struct{}
+
+func (m mockRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	return nil, nil // Dummy implementation
+}
+
+// TestNewOptimizedTransport_PanicsOnInvalidDefaultTransport verifies that
+// NewOptimizedTransport panics with a clear message if http.DefaultTransport
+// is not *http.Transport (e.g., if another package modified it).
+func TestNewOptimizedTransport_PanicsOnInvalidDefaultTransport(t *testing.T) {
+	// Save original DefaultTransport
+	originalTransport := http.DefaultTransport
+	defer func() {
+		// Restore original DefaultTransport after test
+		http.DefaultTransport = originalTransport
+	}()
+
+	// Replace DefaultTransport with a custom RoundTripper that's not *http.Transport
+	http.DefaultTransport = mockRoundTripper{}
+
+	// Verify that NewOptimizedTransport panics with expected message
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("expected panic when http.DefaultTransport is not *http.Transport")
+		}
+
+		panicMsg, ok := r.(string)
+		if !ok {
+			t.Fatalf("expected panic with string message, got %T: %v", r, r)
+		}
+
+		// Verify panic message contains expected information
+		expectedSubstrings := []string{
+			"http.DefaultTransport is not *http.Transport",
+			"type=client.mockRoundTripper",
+			"modified by another package",
+		}
+
+		for _, substr := range expectedSubstrings {
+			if !strings.Contains(panicMsg, substr) {
+				t.Errorf("panic message missing expected substring %q\nGot: %s", substr, panicMsg)
+			}
+		}
+	}()
+
+	// This should panic
+	NewOptimizedTransport(nil)
 }

@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"net/http"
 	"sync/atomic"
@@ -67,7 +68,16 @@ func NewOptimizedTransport(config *TransportConfig) (*http.Transport, *Transport
 	// - TLSHandshakeTimeout (10s)
 	// - ExpectContinueTimeout (1s)
 	// - Other connection and TLS settings
-	defaultTransport := http.DefaultTransport.(*http.Transport)
+	//
+	// Use defensive type assertion to prevent panics if http.DefaultTransport
+	// has been modified to a different type (unlikely but possible in tests or
+	// if another package modifies it globally).
+	defaultTransport, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		panic(fmt.Sprintf("http.DefaultTransport is not *http.Transport (type=%T); "+
+			"it may have been modified by another package. This is required for proper "+
+			"proxy support and timeout configuration.", http.DefaultTransport))
+	}
 	transport := defaultTransport.Clone()
 
 	// Set Reddit-optimized connection pool settings
