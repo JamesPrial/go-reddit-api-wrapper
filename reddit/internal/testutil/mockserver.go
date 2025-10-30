@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
@@ -117,8 +116,6 @@ import (
 //
 //	// Now test your Reddit client against server.URL()
 type MockServer struct {
-	mu         sync.RWMutex // Protects all configuration maps and fields
-	started    bool         // Set to true after Start() is called
 	server     *httptest.Server
 	posts      map[string]map[string][]*types.Post // [subreddit][sort]posts
 	comments   map[string]map[string]*CommentData  // [subreddit][postID]
@@ -161,15 +158,7 @@ func NewMockServer() *MockServer {
 // WithPosts configures posts for a specific subreddit and sort order.
 // The sort parameter should be "hot", "new", "top", etc.
 // Returns the MockServer for method chaining.
-// Panics if called after Start() is called.
 func (m *MockServer) WithPosts(subreddit, sort string, posts ...*types.Post) *MockServer {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if m.started {
-		panic("cannot configure MockServer after Start() is called")
-	}
-
 	if m.posts[subreddit] == nil {
 		m.posts[subreddit] = make(map[string][]*types.Post)
 	}
@@ -180,15 +169,7 @@ func (m *MockServer) WithPosts(subreddit, sort string, posts ...*types.Post) *Mo
 // WithComments configures comments for a specific subreddit and post ID.
 // The post parameter is the post that the comments belong to.
 // Returns the MockServer for method chaining.
-// Panics if called after Start() is called.
 func (m *MockServer) WithComments(subreddit, postID string, post *types.Post, comments ...*types.Comment) *MockServer {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if m.started {
-		panic("cannot configure MockServer after Start() is called")
-	}
-
 	if m.comments[subreddit] == nil {
 		m.comments[subreddit] = make(map[string]*CommentData)
 	}
@@ -201,30 +182,14 @@ func (m *MockServer) WithComments(subreddit, postID string, post *types.Post, co
 
 // WithSubreddit configures subreddit information for a specific subreddit.
 // Returns the MockServer for method chaining.
-// Panics if called after Start() is called.
 func (m *MockServer) WithSubreddit(name string, sub *types.SubredditData) *MockServer {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if m.started {
-		panic("cannot configure MockServer after Start() is called")
-	}
-
 	m.subreddits[name] = sub
 	return m
 }
 
 // WithAccount configures account information for the /api/v1/me endpoint.
 // Returns the MockServer for method chaining.
-// Panics if called after Start() is called.
 func (m *MockServer) WithAccount(account *types.AccountData) *MockServer {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if m.started {
-		panic("cannot configure MockServer after Start() is called")
-	}
-
 	m.account = account
 	return m
 }
@@ -232,15 +197,7 @@ func (m *MockServer) WithAccount(account *types.AccountData) *MockServer {
 // WithError configures an error response for a specific path pattern.
 // The pathPattern is a substring that will be matched against the request path.
 // Returns the MockServer for method chaining.
-// Panics if called after Start() is called.
 func (m *MockServer) WithError(pathPattern string, statusCode int, message string) *MockServer {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if m.started {
-		panic("cannot configure MockServer after Start() is called")
-	}
-
 	m.errors[pathPattern] = &ErrorConfig{
 		StatusCode: statusCode,
 		Message:    message,
@@ -252,7 +209,6 @@ func (m *MockServer) WithError(pathPattern string, statusCode int, message strin
 // This is useful for testing error handling and edge cases.
 // Pass 0 to disable the status code override.
 // Returns the MockServer for method chaining.
-// Panics if called after Start() is called.
 //
 // Example:
 //
@@ -262,13 +218,6 @@ func (m *MockServer) WithError(pathPattern string, statusCode int, message strin
 //	defer server.Close()
 //	// All requests will return 503 Service Unavailable
 func (m *MockServer) WithStatusCode(code int) *MockServer {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if m.started {
-		panic("cannot configure MockServer after Start() is called")
-	}
-
 	m.statusCode = code
 	return m
 }
@@ -277,7 +226,6 @@ func (m *MockServer) WithStatusCode(code int) *MockServer {
 // This is useful for testing timeout handling and network latency scenarios.
 // Pass 0 to disable the timeout.
 // Returns the MockServer for method chaining.
-// Panics if called after Start() is called.
 //
 // Example:
 //
@@ -287,13 +235,6 @@ func (m *MockServer) WithStatusCode(code int) *MockServer {
 //	defer server.Close()
 //	// All requests will be delayed by 2 seconds before responding
 func (m *MockServer) WithTimeout(duration time.Duration) *MockServer {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if m.started {
-		panic("cannot configure MockServer after Start() is called")
-	}
-
 	m.timeout = duration
 	return m
 }
@@ -301,7 +242,6 @@ func (m *MockServer) WithTimeout(duration time.Duration) *MockServer {
 // WithMalformedJSON configures the mock server to return malformed JSON in responses.
 // This is useful for testing JSON parsing error handling.
 // Returns the MockServer for method chaining.
-// Panics if called after Start() is called.
 //
 // Example:
 //
@@ -311,13 +251,6 @@ func (m *MockServer) WithTimeout(duration time.Duration) *MockServer {
 //	defer server.Close()
 //	// All requests will return invalid JSON
 func (m *MockServer) WithMalformedJSON() *MockServer {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if m.started {
-		panic("cannot configure MockServer after Start() is called")
-	}
-
 	m.malformedJSON = true
 	return m
 }
@@ -326,7 +259,6 @@ func (m *MockServer) WithMalformedJSON() *MockServer {
 // This is useful for testing handling of unexpected empty responses.
 // The server will still return a 200 OK status code with standard headers.
 // Returns the MockServer for method chaining.
-// Panics if called after Start() is called.
 //
 // Example:
 //
@@ -336,13 +268,6 @@ func (m *MockServer) WithMalformedJSON() *MockServer {
 //	defer server.Close()
 //	// All requests will return 200 OK with an empty body
 func (m *MockServer) WithEmptyResponse() *MockServer {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if m.started {
-		panic("cannot configure MockServer after Start() is called")
-	}
-
 	m.emptyResponse = true
 	return m
 }
@@ -352,7 +277,6 @@ func (m *MockServer) WithEmptyResponse() *MockServer {
 // Each page should contain the posts to return for that pagination state.
 // The server will automatically set the "after" field in the response to the fullname of the last post.
 // Returns the MockServer for method chaining.
-// Panics if called after Start() is called.
 //
 // Example:
 //
@@ -371,13 +295,6 @@ func (m *MockServer) WithEmptyResponse() *MockServer {
 //	    Start()
 //	defer server.Close()
 func (m *MockServer) WithPaginatedPosts(subreddit, sort string, pages map[string][]*types.Post) *MockServer {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if m.started {
-		panic("cannot configure MockServer after Start() is called")
-	}
-
 	if m.paginatedPosts[subreddit] == nil {
 		m.paginatedPosts[subreddit] = make(map[string]map[string][]*types.Post)
 	}
@@ -391,10 +308,6 @@ func (m *MockServer) WithPaginatedPosts(subreddit, sort string, pages map[string
 // Start creates and starts the mock HTTP server.
 // Returns the MockServer itself for convenience in chaining and accessing the URL.
 func (m *MockServer) Start() *MockServer {
-	m.mu.Lock()
-	m.started = true
-	m.mu.Unlock()
-
 	m.server = httptest.NewServer(http.HandlerFunc(m.handler))
 	return m
 }
@@ -425,22 +338,9 @@ func (m *MockServer) Server() *httptest.Server {
 
 // handler routes incoming requests to the appropriate mock endpoint.
 func (m *MockServer) handler(w http.ResponseWriter, r *http.Request) {
-	// Take a quick snapshot of configuration under read lock.
-	// Configuration is immutable after Start(), so this is safe.
-	m.mu.RLock()
-	timeout := m.timeout
-	statusCode := m.statusCode
-	malformedJSON := m.malformedJSON
-	emptyResponse := m.emptyResponse
-	errorsMap := m.errors
-	account := m.account
-	m.mu.RUnlock()
-
-	// All I/O operations happen without holding the lock
-
-	// Apply configured timeout
-	if timeout > 0 {
-		time.Sleep(timeout)
+	// Apply timeout if configured
+	if m.timeout > 0 {
+		time.Sleep(m.timeout)
 	}
 
 	// Set standard Reddit API headers
@@ -449,10 +349,10 @@ func (m *MockServer) handler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Ratelimit-Reset", "60")
 
 	// Handle global status code override
-	if statusCode != 0 {
-		w.WriteHeader(statusCode)
+	if m.statusCode != 0 {
+		w.WriteHeader(m.statusCode)
 		errorData := map[string]interface{}{
-			"error":   http.StatusText(statusCode),
+			"error":   http.StatusText(m.statusCode),
 			"message": "Configured error response",
 		}
 		json.NewEncoder(w).Encode(errorData)
@@ -460,14 +360,14 @@ func (m *MockServer) handler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Handle malformed JSON
-	if malformedJSON {
+	if m.malformedJSON {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"kind": "Listing", "data": {"children": [`))
 		return
 	}
 
 	// Handle empty response
-	if emptyResponse {
+	if m.emptyResponse {
 		w.WriteHeader(http.StatusOK)
 		return
 	}
@@ -475,7 +375,7 @@ func (m *MockServer) handler(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 
 	// Check for configured errors for specific paths
-	for pattern, errCfg := range errorsMap {
+	for pattern, errCfg := range m.errors {
 		if strings.Contains(path, pattern) {
 			w.WriteHeader(errCfg.StatusCode)
 			errorData := map[string]interface{}{
@@ -490,7 +390,7 @@ func (m *MockServer) handler(w http.ResponseWriter, r *http.Request) {
 	// Route to appropriate handler
 	switch {
 	case path == "/api/v1/me":
-		m.handleAccount(w, r, account)
+		m.handleAccount(w, r)
 	case strings.HasSuffix(path, "/about"):
 		m.handleSubreddit(w, r)
 	case strings.Contains(path, "/comments/"):
@@ -508,15 +408,15 @@ func (m *MockServer) handler(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleAccount handles GET /api/v1/me
-func (m *MockServer) handleAccount(w http.ResponseWriter, r *http.Request, account *types.AccountData) {
-	if account == nil {
+func (m *MockServer) handleAccount(w http.ResponseWriter, r *http.Request) {
+	if m.account == nil {
 		http.Error(w, "Account not configured", http.StatusNotFound)
 		return
 	}
 
 	thing := map[string]interface{}{
 		"kind": "t2",
-		"data": account,
+		"data": m.account,
 	}
 	json.NewEncoder(w).Encode(thing)
 }
@@ -529,11 +429,7 @@ func (m *MockServer) handleSubreddit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Acquire lock only to read from the map
-	m.mu.RLock()
 	sub, ok := m.subreddits[subreddit]
-	m.mu.RUnlock()
-
 	if !ok {
 		http.Error(w, "Subreddit not found", http.StatusNotFound)
 		return
@@ -554,44 +450,18 @@ func (m *MockServer) handlePosts(w http.ResponseWriter, r *http.Request, sort st
 		return
 	}
 
-	after := r.URL.Query().Get("after")
-
-	// Acquire lock only to read from maps
-	m.mu.RLock()
-
-	// Check paginated posts for this subreddit/sort combination
-	var paginatedPagesCopy map[string][]*types.Post
-	var paginatedPostsExists bool
-	if paginatedSortMap, ok := m.paginatedPosts[subreddit]; ok {
-		if paginatedPages, ok := paginatedSortMap[sort]; ok {
-			paginatedPagesCopy = paginatedPages
-			paginatedPostsExists = true
-		}
-	}
-
-	// Check regular posts for this subreddit/sort combination
-	var regularPostsCopy []*types.Post
-	var hasRegularPosts bool
-	if postSortMap, ok := m.posts[subreddit]; ok {
-		if posts, ok := postSortMap[sort]; ok {
-			regularPostsCopy = posts
-			hasRegularPosts = true
-		}
-	}
-
-	m.mu.RUnlock()
-
 	// Check if pagination is configured for this subreddit/sort
-	if paginatedPostsExists {
-		paginatedPosts, pageExists := paginatedPagesCopy[after]
+	after := r.URL.Query().Get("after")
+	if paginatedPages, hasPagination := m.paginatedPosts[subreddit][sort]; hasPagination {
+		posts, pageExists := paginatedPages[after]
 		if !pageExists {
 			m.writeEmptyListing(w)
 			return
 		}
 
 		// Convert posts to Things
-		children := make([]interface{}, len(paginatedPosts))
-		for i, post := range paginatedPosts {
+		children := make([]interface{}, len(posts))
+		for i, post := range posts {
 			children[i] = map[string]interface{}{
 				"kind": "t3",
 				"data": post,
@@ -600,11 +470,11 @@ func (m *MockServer) handlePosts(w http.ResponseWriter, r *http.Request, sort st
 
 		// Determine the "after" value for the next page
 		var nextAfter string
-		if len(paginatedPosts) > 0 {
-			lastPost := paginatedPosts[len(paginatedPosts)-1]
+		if len(posts) > 0 {
+			lastPost := posts[len(posts)-1]
 			nextAfter = "t3_" + lastPost.ID
 			// Check if there's actually a next page configured
-			if _, hasNext := paginatedPagesCopy[nextAfter]; !hasNext {
+			if _, hasNext := paginatedPages[nextAfter]; !hasNext {
 				nextAfter = "" // No next page
 			}
 		}
@@ -622,14 +492,15 @@ func (m *MockServer) handlePosts(w http.ResponseWriter, r *http.Request, sort st
 	}
 
 	// Fall back to non-paginated posts
-	if !hasRegularPosts {
+	posts, ok := m.posts[subreddit][sort]
+	if !ok {
 		m.writeEmptyListing(w)
 		return
 	}
 
 	// Convert posts to Things
-	children := make([]interface{}, len(regularPostsCopy))
-	for i, post := range regularPostsCopy {
+	children := make([]interface{}, len(posts))
+	for i, post := range posts {
 		children[i] = map[string]interface{}{
 			"kind": "t3",
 			"data": post,
@@ -657,11 +528,7 @@ func (m *MockServer) handleComments(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Acquire lock only to read from the map
-	m.mu.RLock()
 	commentData, ok := m.comments[subreddit][postID]
-	m.mu.RUnlock()
-
 	if !ok {
 		// Return empty listings
 		response := []interface{}{
