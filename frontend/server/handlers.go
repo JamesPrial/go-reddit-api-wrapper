@@ -1534,6 +1534,11 @@ func (h *Handler) performBulkSave(jobID string, job *bulkSaveJob, redditClient *
 	var allPosts []*types.Post
 	afterCursor := ""
 
+	// Update status to indicate fetching posts
+	job.mu.Lock()
+	job.status = "fetching_posts"
+	job.mu.Unlock()
+
 	// Fetch posts page by page
 	for page := 0; page < pagesNeeded; page++ {
 		// Check if context is cancelled
@@ -1622,6 +1627,11 @@ func (h *Handler) performBulkSave(jobID string, job *bulkSaveJob, redditClient *
 		job.mu.Unlock()
 	}
 
+	// Update status to indicate saving posts
+	job.mu.Lock()
+	job.status = "saving"
+	job.mu.Unlock()
+
 	// Save posts in batches
 	for i := 0; i < len(allPosts); i += bulkSaveBatchSize {
 		// Check if context is cancelled
@@ -1671,6 +1681,11 @@ func (h *Handler) performBulkSave(jobID string, job *bulkSaveJob, redditClient *
 			h.logger.Error("bulk save timed out before fetching comments", "job_id", jobID)
 			return
 		}
+
+		// Update status to indicate fetching comments
+		job.mu.Lock()
+		job.status = "fetching_comments"
+		job.mu.Unlock()
 
 		// Collect post IDs
 		postIDs := make([]string, len(allPosts))
