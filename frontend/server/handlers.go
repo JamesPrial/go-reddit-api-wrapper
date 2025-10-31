@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jamesprial/go-reddit-api-wrapper/pkg/reqid"
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/validation"
 	graw "github.com/jamesprial/go-reddit-api-wrapper/reddit"
@@ -223,16 +224,21 @@ func extractBearerToken(r *http.Request) (string, error) {
 // It authenticates a user with Reddit and creates a session.
 // Implements rate limiting to prevent brute force attacks.
 func (h *Handler) LoginHandler(w http.ResponseWriter, r *http.Request) {
+	// Ensure request ID exists in context
+	ctx := reqid.Ensure(r.Context())
+	requestID := reqid.FromContext(ctx)
+	r = r.WithContext(ctx)
+
 	if r.Method != http.MethodPost {
-		sendErrorResponse(w, http.StatusMethodNotAllowed, "method not allowed")
+		sendErrorResponse(w, http.StatusMethodNotAllowed, "method not allowed", requestID)
 		return
 	}
 
 	// Check rate limit (5 requests per second global limit)
 	// TODO: Consider implementing per-IP rate limiting for production
 	if !h.loginLimiter.Allow() {
-		h.logger.Warn("login rate limit exceeded")
-		sendErrorResponse(w, http.StatusTooManyRequests, "too many login attempts, please try again later")
+		h.logger.Warn("login rate limit exceeded", slog.String("request_id", requestID))
+		sendErrorResponse(w, http.StatusTooManyRequests, "too many login attempts, please try again later", requestID)
 		return
 	}
 
@@ -241,22 +247,22 @@ func (h *Handler) LoginHandler(w http.ResponseWriter, r *http.Request) {
 	limitedBody := io.LimitReader(r.Body, maxRequestBodySize)
 	body, err := io.ReadAll(limitedBody)
 	if err != nil {
-		h.logger.Error("failed to read request body", "error", err)
-		sendErrorResponse(w, http.StatusBadRequest, "failed to read request body")
+		h.logger.Error("failed to read request body", "error", err, slog.String("request_id", requestID))
+		sendErrorResponse(w, http.StatusBadRequest, "failed to read request body", requestID)
 		return
 	}
 	defer r.Body.Close()
 
 	// Check if body size limit was exceeded
 	if len(body) >= maxRequestBodySize {
-		h.logger.Warn("request body size limit exceeded")
-		sendErrorResponse(w, http.StatusRequestEntityTooLarge, "request body too large")
+		h.logger.Warn("request body size limit exceeded", slog.String("request_id", requestID))
+		sendErrorResponse(w, http.StatusRequestEntityTooLarge, "request body too large", requestID)
 		return
 	}
 
 	if err := json.Unmarshal(body, &req); err != nil {
-		h.logger.Error("failed to unmarshal request", "error", err)
-		sendErrorResponse(w, http.StatusBadRequest, "invalid request format")
+		h.logger.Error("failed to unmarshal request", "error", err, slog.String("request_id", requestID))
+		sendErrorResponse(w, http.StatusBadRequest, "invalid request format", requestID)
 		return
 	}
 
@@ -265,8 +271,8 @@ func (h *Handler) LoginHandler(w http.ResponseWriter, r *http.Request) {
 	clientSecret := os.Getenv("REDDIT_CLIENT_SECRET")
 
 	if clientID == "" || clientSecret == "" {
-		h.logger.Error("missing Reddit credentials in environment")
-		sendErrorResponse(w, http.StatusInternalServerError, "server configuration error")
+		h.logger.Error("missing Reddit credentials in environment", slog.String("request_id", requestID))
+		sendErrorResponse(w, http.StatusInternalServerError, "server configuration error", requestID)
 		return
 	}
 
@@ -293,27 +299,27 @@ func (h *Handler) LoginHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Authenticate with Reddit
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	authCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	h.logger.Info("authenticating with Reddit", "auth_mode", authMode)
+	h.logger.Info("authenticating with Reddit", "auth_mode", authMode, slog.String("request_id", requestID))
 
-	client, err := graw.NewClientWithContext(ctx, config)
+	client, err := graw.NewClientWithContext(authCtx, config)
 	if err != nil {
-		h.logger.Error("failed to authenticate with Reddit", "auth_mode", authMode, "error", err)
-		sendErrorResponse(w, http.StatusUnauthorized, "invalid credentials")
+		h.logger.Error("failed to authenticate with Reddit", "auth_mode", authMode, "error", err, slog.String("request_id", requestID))
+		sendErrorResponse(w, http.StatusUnauthorized, "invalid credentials", requestID)
 		return
 	}
 
 	// Create session
 	sessionID, token, err := h.sessionManager.CreateSession(sessionUsername, client)
 	if err != nil {
-		h.logger.Error("failed to create session", "error", err)
-		sendErrorResponse(w, http.StatusInternalServerError, "failed to create session")
+		h.logger.Error("failed to create session", "error", err, slog.String("request_id", requestID))
+		sendErrorResponse(w, http.StatusInternalServerError, "failed to create session", requestID)
 		return
 	}
 
-	h.logger.Info("user logged in", "auth_mode", authMode, "username", sessionUsername, "session_id", sessionID)
+	h.logger.Info("user logged in", "auth_mode", authMode, "username", sessionUsername, "session_id", sessionID, slog.String("request_id", requestID))
 
 	// Send response
 	w.Header().Set("Content-Type", "application/json")
@@ -330,22 +336,27 @@ func (h *Handler) LoginHandler(w http.ResponseWriter, r *http.Request) {
 // StatusHandler handles the GET /api/auth/status endpoint.
 // It returns the authenticated user's information.
 func (h *Handler) StatusHandler(w http.ResponseWriter, r *http.Request) {
+	// Ensure request ID exists in context
+	ctx := reqid.Ensure(r.Context())
+	requestID := reqid.FromContext(ctx)
+	r = r.WithContext(ctx)
+
 	if r.Method != http.MethodGet {
-		sendErrorResponse(w, http.StatusMethodNotAllowed, "method not allowed")
+		sendErrorResponse(w, http.StatusMethodNotAllowed, "method not allowed", requestID)
 		return
 	}
 
 	// Extract JWT from Authorization header using helper
 	tokenString, err := extractBearerToken(r)
 	if err != nil {
-		h.logger.Warn("authorization header error", "error", err)
+		h.logger.Warn("authorization header error", "error", err, slog.String("request_id", requestID))
 		switch err {
 		case ErrMissingAuthHeader:
-			sendErrorResponse(w, http.StatusUnauthorized, "missing authorization header")
+			sendErrorResponse(w, http.StatusUnauthorized, "missing authorization header", requestID)
 		case ErrInvalidAuthHeaderFormat:
-			sendErrorResponse(w, http.StatusUnauthorized, "invalid authorization header format")
+			sendErrorResponse(w, http.StatusUnauthorized, "invalid authorization header format", requestID)
 		default:
-			sendErrorResponse(w, http.StatusUnauthorized, "authorization error")
+			sendErrorResponse(w, http.StatusUnauthorized, "authorization error", requestID)
 		}
 		return
 	}
@@ -353,22 +364,23 @@ func (h *Handler) StatusHandler(w http.ResponseWriter, r *http.Request) {
 	// Validate JWT
 	sessionID, err := h.sessionManager.ValidateJWT(tokenString)
 	if err != nil {
-		h.logger.Error("invalid JWT token", "error", err)
-		sendErrorResponse(w, http.StatusUnauthorized, "invalid or expired token")
+		h.logger.Error("invalid JWT token", "error", err, slog.String("request_id", requestID))
+		sendErrorResponse(w, http.StatusUnauthorized, "invalid or expired token", requestID)
 		return
 	}
 
 	// Get session
 	session, err := h.sessionManager.GetSession(sessionID)
 	if err != nil {
-		h.logger.Error("session not found", "error", err)
-		sendErrorResponse(w, http.StatusUnauthorized, "session not found")
+		h.logger.Error("session not found", "error", err, slog.String("request_id", requestID))
+		sendErrorResponse(w, http.StatusUnauthorized, "session not found", requestID)
 		return
 	}
 
 	// For app-only sessions, skip user info fetch
 	if session.Username == "app-only" {
 		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Request-ID", requestID)
 		w.WriteHeader(http.StatusOK)
 		if err := json.NewEncoder(w).Encode(StatusResponse{
 			Authenticated: true,
@@ -376,24 +388,25 @@ func (h *Handler) StatusHandler(w http.ResponseWriter, r *http.Request) {
 			LinkKarma:     0,
 			CommentKarma:  0,
 		}); err != nil {
-			h.logger.Error("failed to encode status response", "error", err)
+			h.logger.Error("failed to encode status response", "error", err, slog.String("request_id", requestID))
 		}
 		return
 	}
 
 	// Get user info from Reddit for user-authenticated sessions
-	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	userCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	accountData, err := session.RedditClient.Me(ctx)
+	accountData, err := session.RedditClient.Me(userCtx)
 	if err != nil {
-		h.logger.Error("failed to fetch user info", "error", err)
-		sendErrorResponse(w, http.StatusInternalServerError, "failed to fetch user info")
+		h.logger.Error("failed to fetch user info", "error", err, slog.String("request_id", requestID))
+		sendErrorResponse(w, http.StatusInternalServerError, "failed to fetch user info", requestID)
 		return
 	}
 
 	// Send response
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-ID", requestID)
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(StatusResponse{
 		Authenticated: true,
@@ -401,15 +414,20 @@ func (h *Handler) StatusHandler(w http.ResponseWriter, r *http.Request) {
 		LinkKarma:     accountData.LinkKarma,
 		CommentKarma:  accountData.CommentKarma,
 	}); err != nil {
-		h.logger.Error("failed to encode status response", "error", err)
+		h.logger.Error("failed to encode status response", "error", err, slog.String("request_id", requestID))
 	}
 }
 
 // LogoutHandler handles the POST /api/auth/logout endpoint.
 // It invalidates the user's session.
 func (h *Handler) LogoutHandler(w http.ResponseWriter, r *http.Request) {
+	// Ensure request ID exists in context
+	ctx := reqid.Ensure(r.Context())
+	requestID := reqid.FromContext(ctx)
+	r = r.WithContext(ctx)
+
 	if r.Method != http.MethodPost {
-		sendErrorResponse(w, http.StatusMethodNotAllowed, "method not allowed")
+		sendErrorResponse(w, http.StatusMethodNotAllowed, "method not allowed", requestID)
 		return
 	}
 
@@ -417,8 +435,8 @@ func (h *Handler) LogoutHandler(w http.ResponseWriter, r *http.Request) {
 	limitedBody := io.LimitReader(r.Body, maxRequestBodySize)
 	_, err := io.ReadAll(limitedBody)
 	if err != nil {
-		h.logger.Error("failed to read request body", "error", err)
-		sendErrorResponse(w, http.StatusBadRequest, "failed to read request body")
+		h.logger.Error("failed to read request body", "error", err, slog.String("request_id", requestID))
+		sendErrorResponse(w, http.StatusBadRequest, "failed to read request body", requestID)
 		return
 	}
 	defer r.Body.Close()
@@ -426,14 +444,14 @@ func (h *Handler) LogoutHandler(w http.ResponseWriter, r *http.Request) {
 	// Extract JWT from Authorization header using helper
 	tokenString, err := extractBearerToken(r)
 	if err != nil {
-		h.logger.Warn("authorization header error", "error", err)
+		h.logger.Warn("authorization header error", "error", err, slog.String("request_id", requestID))
 		switch err {
 		case ErrMissingAuthHeader:
-			sendErrorResponse(w, http.StatusUnauthorized, "missing authorization header")
+			sendErrorResponse(w, http.StatusUnauthorized, "missing authorization header", requestID)
 		case ErrInvalidAuthHeaderFormat:
-			sendErrorResponse(w, http.StatusUnauthorized, "invalid authorization header format")
+			sendErrorResponse(w, http.StatusUnauthorized, "invalid authorization header format", requestID)
 		default:
-			sendErrorResponse(w, http.StatusUnauthorized, "authorization error")
+			sendErrorResponse(w, http.StatusUnauthorized, "authorization error", requestID)
 		}
 		return
 	}
@@ -441,20 +459,21 @@ func (h *Handler) LogoutHandler(w http.ResponseWriter, r *http.Request) {
 	// Validate JWT
 	sessionID, err := h.sessionManager.ValidateJWT(tokenString)
 	if err != nil {
-		h.logger.Error("invalid JWT token", "error", err)
-		sendErrorResponse(w, http.StatusUnauthorized, "invalid or expired token")
+		h.logger.Error("invalid JWT token", "error", err, slog.String("request_id", requestID))
+		sendErrorResponse(w, http.StatusUnauthorized, "invalid or expired token", requestID)
 		return
 	}
 
 	// Delete session
 	h.sessionManager.DeleteSession(sessionID)
-	h.logger.Info("user logged out", "session_id", sessionID)
+	h.logger.Info("user logged out", "session_id", sessionID, slog.String("request_id", requestID))
 
 	// Send response
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-ID", requestID)
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(SuccessResponse{Success: true}); err != nil {
-		h.logger.Error("failed to encode logout response", "error", err)
+		h.logger.Error("failed to encode logout response", "error", err, slog.String("request_id", requestID))
 	}
 }
 
@@ -462,29 +481,34 @@ func (h *Handler) LogoutHandler(w http.ResponseWriter, r *http.Request) {
 // It retrieves hot, new, or other posts from a subreddit.
 // Query parameters: subreddit (required), limit (optional, default 25), after (optional for pagination).
 func (h *Handler) PostsHandler(w http.ResponseWriter, r *http.Request) {
+	// Ensure request ID exists in context
+	ctx := reqid.Ensure(r.Context())
+	requestID := reqid.FromContext(ctx)
+	r = r.WithContext(ctx)
+
 	if r.Method != http.MethodGet {
-		sendErrorResponse(w, http.StatusMethodNotAllowed, "method not allowed")
+		sendErrorResponse(w, http.StatusMethodNotAllowed, "method not allowed", requestID)
 		return
 	}
 
 	// Check rate limit for API endpoint (10 requests/sec with burst of 5)
 	if !h.apiLimiter.Allow() {
-		h.logger.Warn("API rate limit exceeded")
-		sendErrorResponse(w, http.StatusTooManyRequests, "rate limit exceeded, please try again later")
+		h.logger.Warn("API rate limit exceeded", slog.String("request_id", requestID))
+		sendErrorResponse(w, http.StatusTooManyRequests, "rate limit exceeded, please try again later", requestID)
 		return
 	}
 
 	// Extract JWT from Authorization header
 	tokenString, err := extractBearerToken(r)
 	if err != nil {
-		h.logger.Warn("authorization header error", "error", err)
+		h.logger.Warn("authorization header error", "error", err, slog.String("request_id", requestID))
 		switch err {
 		case ErrMissingAuthHeader:
-			sendErrorResponse(w, http.StatusUnauthorized, "missing authorization header")
+			sendErrorResponse(w, http.StatusUnauthorized, "missing authorization header", requestID)
 		case ErrInvalidAuthHeaderFormat:
-			sendErrorResponse(w, http.StatusUnauthorized, "invalid authorization header format")
+			sendErrorResponse(w, http.StatusUnauthorized, "invalid authorization header format", requestID)
 		default:
-			sendErrorResponse(w, http.StatusUnauthorized, "authorization error")
+			sendErrorResponse(w, http.StatusUnauthorized, "authorization error", requestID)
 		}
 		return
 	}
@@ -492,31 +516,31 @@ func (h *Handler) PostsHandler(w http.ResponseWriter, r *http.Request) {
 	// Validate JWT
 	sessionID, err := h.sessionManager.ValidateJWT(tokenString)
 	if err != nil {
-		h.logger.Error("invalid JWT token", "error", err)
-		sendErrorResponse(w, http.StatusUnauthorized, "invalid or expired token")
+		h.logger.Error("invalid JWT token", "error", err, slog.String("request_id", requestID))
+		sendErrorResponse(w, http.StatusUnauthorized, "invalid or expired token", requestID)
 		return
 	}
 
 	// Get session
 	session, err := h.sessionManager.GetSession(sessionID)
 	if err != nil {
-		h.logger.Error("session not found", "error", err)
-		sendErrorResponse(w, http.StatusUnauthorized, "session not found")
+		h.logger.Error("session not found", "error", err, slog.String("request_id", requestID))
+		sendErrorResponse(w, http.StatusUnauthorized, "session not found", requestID)
 		return
 	}
 
 	// Parse and validate query parameters
 	subreddit := r.URL.Query().Get("subreddit")
 	if subreddit == "" {
-		h.logger.Warn("missing subreddit parameter")
-		sendErrorResponse(w, http.StatusBadRequest, "subreddit parameter is required")
+		h.logger.Warn("missing subreddit parameter", slog.String("request_id", requestID))
+		sendErrorResponse(w, http.StatusBadRequest, "subreddit parameter is required", requestID)
 		return
 	}
 
 	// Validate subreddit name using validation package
 	if !validation.IsValidSubreddit(subreddit) {
-		h.logger.Warn("invalid subreddit parameter", "subreddit", subreddit)
-		sendErrorResponse(w, http.StatusBadRequest, "invalid subreddit name")
+		h.logger.Warn("invalid subreddit parameter", "subreddit", subreddit, slog.String("request_id", requestID))
+		sendErrorResponse(w, http.StatusBadRequest, "invalid subreddit name", requestID)
 		return
 	}
 
@@ -525,8 +549,8 @@ func (h *Handler) PostsHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Validate pagination cursor if provided
 	if after != "" && !validatePaginationCursor(after) {
-		h.logger.Warn("invalid after pagination parameter", "after", after)
-		sendErrorResponse(w, http.StatusBadRequest, "invalid pagination cursor format")
+		h.logger.Warn("invalid after pagination parameter", "after", after, slog.String("request_id", requestID))
+		sendErrorResponse(w, http.StatusBadRequest, "invalid pagination cursor format", requestID)
 		return
 	}
 
@@ -537,8 +561,8 @@ func (h *Handler) PostsHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Validate sort parameter - only allow specific values
 	if !isValidSortParam(sortBy) {
-		h.logger.Warn("invalid sort parameter", "sort", sortBy)
-		sendErrorResponse(w, http.StatusBadRequest, "invalid sort parameter, must be 'hot' or 'new'")
+		h.logger.Warn("invalid sort parameter", "sort", sortBy, slog.String("request_id", requestID))
+		sendErrorResponse(w, http.StatusBadRequest, "invalid sort parameter, must be 'hot' or 'new'", requestID)
 		return
 	}
 
@@ -566,8 +590,8 @@ func (h *Handler) PostsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err != nil {
-		h.logger.Error("failed to fetch posts", "subreddit", subreddit, "sort", sortBy, "error", err)
-		sendErrorResponse(w, http.StatusInternalServerError, "failed to fetch posts from Reddit")
+		h.logger.Error("failed to fetch posts", "subreddit", subreddit, "sort", sortBy, "error", err, slog.String("request_id", requestID))
+		sendErrorResponse(w, http.StatusInternalServerError, "failed to fetch posts from Reddit", requestID)
 		return
 	}
 
@@ -593,25 +617,28 @@ func (h *Handler) PostsHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	h.logger.Info("fetched posts", "subreddit", subreddit, "sort", sortBy, "count", len(postDataList))
+	h.logger.Info("fetched posts", "subreddit", subreddit, "sort", sortBy, "count", len(postDataList), slog.String("request_id", requestID))
 
 	// Auto-cache posts in background if storage is available
 	if h.store != nil && len(resp.Posts) > 0 {
-		go func() {
+		// Capture requestID before spawning goroutine
+		go func(bgRequestID string) {
 			// Use Background context since cache operation should continue even if request is cancelled
-			ctx, cancel := context.WithTimeout(context.Background(), cacheOperationTimeout)
+			bgCtx := reqid.WithRequestID(context.Background(), bgRequestID)
+			ctx, cancel := context.WithTimeout(bgCtx, cacheOperationTimeout)
 			defer cancel()
 
 			if err := h.store.UpsertPosts(ctx, resp.Posts); err != nil {
-				h.logger.Error("failed to cache posts", "subreddit", subreddit, "error", err)
+				h.logger.Error("failed to cache posts", "subreddit", subreddit, "error", err, slog.String("request_id", bgRequestID))
 			} else {
-				h.logger.Info("posts cached successfully", "subreddit", subreddit, "count", len(resp.Posts))
+				h.logger.Info("posts cached successfully", "subreddit", subreddit, "count", len(resp.Posts), slog.String("request_id", bgRequestID))
 			}
-		}()
+		}(requestID)
 	}
 
 	// Send response
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-ID", requestID)
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(PostsResponse{
 		Posts:          postDataList,
@@ -619,7 +646,7 @@ func (h *Handler) PostsHandler(w http.ResponseWriter, r *http.Request) {
 		BeforeFullname: resp.BeforeFullname,
 		Total:          0, // Not applicable for cursor-based pagination
 	}); err != nil {
-		h.logger.Error("failed to encode posts response", "error", err)
+		h.logger.Error("failed to encode posts response", "error", err, slog.String("request_id", requestID))
 	}
 }
 
@@ -627,29 +654,34 @@ func (h *Handler) PostsHandler(w http.ResponseWriter, r *http.Request) {
 // It retrieves comments for a specific post.
 // Query parameters: subreddit (required), post_id (required), limit (optional, default 25), after (optional for pagination).
 func (h *Handler) CommentsHandler(w http.ResponseWriter, r *http.Request) {
+	// Ensure request ID exists in context
+	ctx := reqid.Ensure(r.Context())
+	requestID := reqid.FromContext(ctx)
+	r = r.WithContext(ctx)
+
 	if r.Method != http.MethodGet {
-		sendErrorResponse(w, http.StatusMethodNotAllowed, "method not allowed")
+		sendErrorResponse(w, http.StatusMethodNotAllowed, "method not allowed", requestID)
 		return
 	}
 
 	// Check rate limit for API endpoint (10 requests/sec with burst of 5)
 	if !h.apiLimiter.Allow() {
-		h.logger.Warn("API rate limit exceeded")
-		sendErrorResponse(w, http.StatusTooManyRequests, "rate limit exceeded, please try again later")
+		h.logger.Warn("API rate limit exceeded", slog.String("request_id", requestID))
+		sendErrorResponse(w, http.StatusTooManyRequests, "rate limit exceeded, please try again later", requestID)
 		return
 	}
 
 	// Extract JWT from Authorization header
 	tokenString, err := extractBearerToken(r)
 	if err != nil {
-		h.logger.Warn("authorization header error", "error", err)
+		h.logger.Warn("authorization header error", "error", err, slog.String("request_id", requestID))
 		switch err {
 		case ErrMissingAuthHeader:
-			sendErrorResponse(w, http.StatusUnauthorized, "missing authorization header")
+			sendErrorResponse(w, http.StatusUnauthorized, "missing authorization header", requestID)
 		case ErrInvalidAuthHeaderFormat:
-			sendErrorResponse(w, http.StatusUnauthorized, "invalid authorization header format")
+			sendErrorResponse(w, http.StatusUnauthorized, "invalid authorization header format", requestID)
 		default:
-			sendErrorResponse(w, http.StatusUnauthorized, "authorization error")
+			sendErrorResponse(w, http.StatusUnauthorized, "authorization error", requestID)
 		}
 		return
 	}
@@ -657,45 +689,45 @@ func (h *Handler) CommentsHandler(w http.ResponseWriter, r *http.Request) {
 	// Validate JWT
 	sessionID, err := h.sessionManager.ValidateJWT(tokenString)
 	if err != nil {
-		h.logger.Error("invalid JWT token", "error", err)
-		sendErrorResponse(w, http.StatusUnauthorized, "invalid or expired token")
+		h.logger.Error("invalid JWT token", "error", err, slog.String("request_id", requestID))
+		sendErrorResponse(w, http.StatusUnauthorized, "invalid or expired token", requestID)
 		return
 	}
 
 	// Get session
 	session, err := h.sessionManager.GetSession(sessionID)
 	if err != nil {
-		h.logger.Error("session not found", "error", err)
-		sendErrorResponse(w, http.StatusUnauthorized, "session not found")
+		h.logger.Error("session not found", "error", err, slog.String("request_id", requestID))
+		sendErrorResponse(w, http.StatusUnauthorized, "session not found", requestID)
 		return
 	}
 
 	// Parse and validate query parameters
 	subreddit := r.URL.Query().Get("subreddit")
 	if subreddit == "" {
-		h.logger.Warn("missing subreddit parameter")
-		sendErrorResponse(w, http.StatusBadRequest, "subreddit parameter is required")
+		h.logger.Warn("missing subreddit parameter", slog.String("request_id", requestID))
+		sendErrorResponse(w, http.StatusBadRequest, "subreddit parameter is required", requestID)
 		return
 	}
 
 	// Validate subreddit name using validation package
 	if !validation.IsValidSubreddit(subreddit) {
-		h.logger.Warn("invalid subreddit parameter", "subreddit", subreddit)
-		sendErrorResponse(w, http.StatusBadRequest, "invalid subreddit name")
+		h.logger.Warn("invalid subreddit parameter", "subreddit", subreddit, slog.String("request_id", requestID))
+		sendErrorResponse(w, http.StatusBadRequest, "invalid subreddit name", requestID)
 		return
 	}
 
 	postID := r.URL.Query().Get("post_id")
 	if postID == "" {
-		h.logger.Warn("missing post_id parameter")
-		sendErrorResponse(w, http.StatusBadRequest, "post_id parameter is required")
+		h.logger.Warn("missing post_id parameter", slog.String("request_id", requestID))
+		sendErrorResponse(w, http.StatusBadRequest, "post_id parameter is required", requestID)
 		return
 	}
 
 	// Validate post ID format
 	if !validatePostID(postID) {
-		h.logger.Warn("invalid post_id parameter", "post_id", postID)
-		sendErrorResponse(w, http.StatusBadRequest, "invalid post_id format")
+		h.logger.Warn("invalid post_id parameter", "post_id", postID, slog.String("request_id", requestID))
+		sendErrorResponse(w, http.StatusBadRequest, "invalid post_id format", requestID)
 		return
 	}
 
@@ -704,8 +736,8 @@ func (h *Handler) CommentsHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Validate pagination cursor if provided
 	if after != "" && !validatePaginationCursor(after) {
-		h.logger.Warn("invalid after pagination parameter", "after", after)
-		sendErrorResponse(w, http.StatusBadRequest, "invalid pagination cursor format")
+		h.logger.Warn("invalid after pagination parameter", "after", after, slog.String("request_id", requestID))
+		sendErrorResponse(w, http.StatusBadRequest, "invalid pagination cursor format", requestID)
 		return
 	}
 
@@ -725,8 +757,8 @@ func (h *Handler) CommentsHandler(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := session.RedditClient.GetComments(ctx, commentsReq)
 	if err != nil {
-		h.logger.Error("failed to fetch comments", "subreddit", subreddit, "post_id", postID, "error", err)
-		sendErrorResponse(w, http.StatusInternalServerError, "failed to fetch comments from Reddit")
+		h.logger.Error("failed to fetch comments", "subreddit", subreddit, "post_id", postID, "error", err, slog.String("request_id", requestID))
+		sendErrorResponse(w, http.StatusInternalServerError, "failed to fetch comments from Reddit", requestID)
 		return
 	}
 
@@ -767,33 +799,36 @@ func (h *Handler) CommentsHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	h.logger.Info("fetched comments", "subreddit", subreddit, "post_id", postID, "count", len(commentDataList))
+	h.logger.Info("fetched comments", "subreddit", subreddit, "post_id", postID, "count", len(commentDataList), slog.String("request_id", requestID))
 
 	// Auto-cache post and comments in background if storage is available
 	if h.store != nil {
-		go func() {
+		// Capture requestID before spawning goroutine
+		go func(bgRequestID string) {
 			// Use Background context since cache operation should continue even if request is cancelled
-			ctx, cancel := context.WithTimeout(context.Background(), cacheOperationTimeout)
+			bgCtx := reqid.WithRequestID(context.Background(), bgRequestID)
+			ctx, cancel := context.WithTimeout(bgCtx, cacheOperationTimeout)
 			defer cancel()
 
 			// Save the post if present
 			if err := h.store.UpsertPost(ctx, resp.Post); err != nil {
-				h.logger.Error("failed to cache post", "post_id", postID, "error", err)
+				h.logger.Error("failed to cache post", "post_id", postID, "error", err, slog.String("request_id", bgRequestID))
 			}
 
 			// Save the comments
 			if len(resp.Comments) > 0 {
 				if err := h.store.UpsertComments(ctx, resp.Comments); err != nil {
-					h.logger.Error("failed to cache comments", "post_id", postID, "error", err)
+					h.logger.Error("failed to cache comments", "post_id", postID, "error", err, slog.String("request_id", bgRequestID))
 				} else {
-					h.logger.Info("comments cached successfully", "post_id", postID, "count", len(resp.Comments))
+					h.logger.Info("comments cached successfully", "post_id", postID, "count", len(resp.Comments), slog.String("request_id", bgRequestID))
 				}
 			}
-		}()
+		}(requestID)
 	}
 
 	// Send response
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-ID", requestID)
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(CommentsResponse{
 		Post:           postData,
@@ -802,7 +837,7 @@ func (h *Handler) CommentsHandler(w http.ResponseWriter, r *http.Request) {
 		AfterFullname:  resp.AfterFullname,
 		BeforeFullname: resp.BeforeFullname,
 	}); err != nil {
-		h.logger.Error("failed to encode comments response", "error", err)
+		h.logger.Error("failed to encode comments response", "error", err, slog.String("request_id", requestID))
 	}
 }
 
@@ -811,29 +846,34 @@ func (h *Handler) CommentsHandler(w http.ResponseWriter, r *http.Request) {
 // Query parameters: subreddit (optional), limit (optional, default 25, max 100),
 // offset (optional, default 0), sort (optional, default "created_utc").
 func (h *Handler) handleGetSavedPosts(w http.ResponseWriter, r *http.Request) {
+	// Ensure request ID exists in context
+	ctx := reqid.Ensure(r.Context())
+	requestID := reqid.FromContext(ctx)
+	r = r.WithContext(ctx)
+
 	if r.Method != http.MethodGet {
-		sendErrorResponse(w, http.StatusMethodNotAllowed, "method not allowed")
+		sendErrorResponse(w, http.StatusMethodNotAllowed, "method not allowed", requestID)
 		return
 	}
 
 	// Check rate limit for API endpoint
 	if !h.apiLimiter.Allow() {
-		h.logger.Warn("API rate limit exceeded")
-		sendErrorResponse(w, http.StatusTooManyRequests, "rate limit exceeded, please try again later")
+		h.logger.Warn("API rate limit exceeded", slog.String("request_id", requestID))
+		sendErrorResponse(w, http.StatusTooManyRequests, "rate limit exceeded, please try again later", requestID)
 		return
 	}
 
 	// Extract JWT from Authorization header
 	tokenString, err := extractBearerToken(r)
 	if err != nil {
-		h.logger.Warn("authorization header error", "error", err)
+		h.logger.Warn("authorization header error", "error", err, slog.String("request_id", requestID))
 		switch err {
 		case ErrMissingAuthHeader:
-			sendErrorResponse(w, http.StatusUnauthorized, "missing authorization header")
+			sendErrorResponse(w, http.StatusUnauthorized, "missing authorization header", requestID)
 		case ErrInvalidAuthHeaderFormat:
-			sendErrorResponse(w, http.StatusUnauthorized, "invalid authorization header format")
+			sendErrorResponse(w, http.StatusUnauthorized, "invalid authorization header format", requestID)
 		default:
-			sendErrorResponse(w, http.StatusUnauthorized, "authorization error")
+			sendErrorResponse(w, http.StatusUnauthorized, "authorization error", requestID)
 		}
 		return
 	}
@@ -841,31 +881,31 @@ func (h *Handler) handleGetSavedPosts(w http.ResponseWriter, r *http.Request) {
 	// Validate JWT
 	sessionID, err := h.sessionManager.ValidateJWT(tokenString)
 	if err != nil {
-		h.logger.Error("invalid JWT token", "error", err)
-		sendErrorResponse(w, http.StatusUnauthorized, "invalid or expired token")
+		h.logger.Error("invalid JWT token", "error", err, slog.String("request_id", requestID))
+		sendErrorResponse(w, http.StatusUnauthorized, "invalid or expired token", requestID)
 		return
 	}
 
 	// Get session to verify it exists
 	_, err = h.sessionManager.GetSession(sessionID)
 	if err != nil {
-		h.logger.Error("session not found", "error", err)
-		sendErrorResponse(w, http.StatusUnauthorized, "session not found")
+		h.logger.Error("session not found", "error", err, slog.String("request_id", requestID))
+		sendErrorResponse(w, http.StatusUnauthorized, "session not found", requestID)
 		return
 	}
 
 	// Check if storage is available
 	if h.store == nil {
-		h.logger.Warn("storage not available")
-		sendErrorResponse(w, http.StatusServiceUnavailable, "caching service not available")
+		h.logger.Warn("storage not available", slog.String("request_id", requestID))
+		sendErrorResponse(w, http.StatusServiceUnavailable, "caching service not available", requestID)
 		return
 	}
 
 	// Parse and validate query parameters
 	subreddit := r.URL.Query().Get("subreddit")
 	if subreddit != "" && !validation.IsValidSubreddit(subreddit) {
-		h.logger.Warn("invalid subreddit parameter", "subreddit", subreddit)
-		sendErrorResponse(w, http.StatusBadRequest, "invalid subreddit name")
+		h.logger.Warn("invalid subreddit parameter", "subreddit", subreddit, slog.String("request_id", requestID))
+		sendErrorResponse(w, http.StatusBadRequest, "invalid subreddit name", requestID)
 		return
 	}
 
@@ -878,8 +918,8 @@ func (h *Handler) handleGetSavedPosts(w http.ResponseWriter, r *http.Request) {
 
 	// Validate sort parameter for storage queries
 	if !isValidStorageSortParam(sortBy) {
-		h.logger.Warn("invalid sort parameter", "sort", sortBy)
-		sendErrorResponse(w, http.StatusBadRequest, "invalid sort parameter, must be 'created_utc', 'score', or 'num_comments'")
+		h.logger.Warn("invalid sort parameter", "sort", sortBy, slog.String("request_id", requestID))
+		sendErrorResponse(w, http.StatusBadRequest, "invalid sort parameter, must be 'created_utc', 'score', or 'num_comments'", requestID)
 		return
 	}
 
@@ -898,8 +938,8 @@ func (h *Handler) handleGetSavedPosts(w http.ResponseWriter, r *http.Request) {
 
 	posts, err := h.store.ListPosts(ctx, opts)
 	if err != nil {
-		h.logger.Error("failed to list cached posts", "subreddit", subreddit, "error", err)
-		sendErrorResponse(w, http.StatusInternalServerError, "failed to retrieve cached posts")
+		h.logger.Error("failed to list cached posts", "subreddit", subreddit, "error", err, slog.String("request_id", requestID))
+		sendErrorResponse(w, http.StatusInternalServerError, "failed to retrieve cached posts", requestID)
 		return
 	}
 
@@ -908,7 +948,7 @@ func (h *Handler) handleGetSavedPosts(w http.ResponseWriter, r *http.Request) {
 	// This allows the frontend to display posts even if pagination metadata is unavailable.
 	total, err := h.store.CountPosts(ctx, opts)
 	if err != nil {
-		h.logger.Warn("failed to count cached posts", "subreddit", subreddit, "error", err)
+		h.logger.Warn("failed to count cached posts", "subreddit", subreddit, "error", err, slog.String("request_id", requestID))
 		total = -1 // Signal to frontend that total count is unknown
 	}
 
@@ -934,10 +974,11 @@ func (h *Handler) handleGetSavedPosts(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	h.logger.Info("retrieved cached posts", "subreddit", subreddit, "count", len(postDataList), "offset", offset, "total", total)
+	h.logger.Info("retrieved cached posts", "subreddit", subreddit, "count", len(postDataList), "offset", offset, "total", total, slog.String("request_id", requestID))
 
 	// Send response
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-ID", requestID)
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(PostsResponse{
 		Posts:          postDataList,
@@ -945,7 +986,7 @@ func (h *Handler) handleGetSavedPosts(w http.ResponseWriter, r *http.Request) {
 		BeforeFullname: "", // Cached endpoints use offset-based pagination, not fullname cursors
 		Total:          total,
 	}); err != nil {
-		h.logger.Error("failed to encode saved posts response", "error", err)
+		h.logger.Error("failed to encode saved posts response", "error", err, slog.String("request_id", requestID))
 	}
 }
 
@@ -953,29 +994,34 @@ func (h *Handler) handleGetSavedPosts(w http.ResponseWriter, r *http.Request) {
 // It retrieves cached comments for a specific post from storage.
 // Query parameters: post_id (required), subreddit (optional).
 func (h *Handler) handleGetSavedComments(w http.ResponseWriter, r *http.Request) {
+	// Ensure request ID exists in context
+	ctx := reqid.Ensure(r.Context())
+	requestID := reqid.FromContext(ctx)
+	r = r.WithContext(ctx)
+
 	if r.Method != http.MethodGet {
-		sendErrorResponse(w, http.StatusMethodNotAllowed, "method not allowed")
+		sendErrorResponse(w, http.StatusMethodNotAllowed, "method not allowed", requestID)
 		return
 	}
 
 	// Check rate limit for API endpoint
 	if !h.apiLimiter.Allow() {
-		h.logger.Warn("API rate limit exceeded")
-		sendErrorResponse(w, http.StatusTooManyRequests, "rate limit exceeded, please try again later")
+		h.logger.Warn("API rate limit exceeded", slog.String("request_id", requestID))
+		sendErrorResponse(w, http.StatusTooManyRequests, "rate limit exceeded, please try again later", requestID)
 		return
 	}
 
 	// Extract JWT from Authorization header
 	tokenString, err := extractBearerToken(r)
 	if err != nil {
-		h.logger.Warn("authorization header error", "error", err)
+		h.logger.Warn("authorization header error", "error", err, slog.String("request_id", requestID))
 		switch err {
 		case ErrMissingAuthHeader:
-			sendErrorResponse(w, http.StatusUnauthorized, "missing authorization header")
+			sendErrorResponse(w, http.StatusUnauthorized, "missing authorization header", requestID)
 		case ErrInvalidAuthHeaderFormat:
-			sendErrorResponse(w, http.StatusUnauthorized, "invalid authorization header format")
+			sendErrorResponse(w, http.StatusUnauthorized, "invalid authorization header format", requestID)
 		default:
-			sendErrorResponse(w, http.StatusUnauthorized, "authorization error")
+			sendErrorResponse(w, http.StatusUnauthorized, "authorization error", requestID)
 		}
 		return
 	}
@@ -983,45 +1029,45 @@ func (h *Handler) handleGetSavedComments(w http.ResponseWriter, r *http.Request)
 	// Validate JWT
 	sessionID, err := h.sessionManager.ValidateJWT(tokenString)
 	if err != nil {
-		h.logger.Error("invalid JWT token", "error", err)
-		sendErrorResponse(w, http.StatusUnauthorized, "invalid or expired token")
+		h.logger.Error("invalid JWT token", "error", err, slog.String("request_id", requestID))
+		sendErrorResponse(w, http.StatusUnauthorized, "invalid or expired token", requestID)
 		return
 	}
 
 	// Get session to verify it exists
 	_, err = h.sessionManager.GetSession(sessionID)
 	if err != nil {
-		h.logger.Error("session not found", "error", err)
-		sendErrorResponse(w, http.StatusUnauthorized, "session not found")
+		h.logger.Error("session not found", "error", err, slog.String("request_id", requestID))
+		sendErrorResponse(w, http.StatusUnauthorized, "session not found", requestID)
 		return
 	}
 
 	// Check if storage is available
 	if h.store == nil {
-		h.logger.Warn("storage not available")
-		sendErrorResponse(w, http.StatusServiceUnavailable, "caching service not available")
+		h.logger.Warn("storage not available", slog.String("request_id", requestID))
+		sendErrorResponse(w, http.StatusServiceUnavailable, "caching service not available", requestID)
 		return
 	}
 
 	// Parse and validate query parameters
 	postID := r.URL.Query().Get("post_id")
 	if postID == "" {
-		h.logger.Warn("missing post_id parameter")
-		sendErrorResponse(w, http.StatusBadRequest, "post_id parameter is required")
+		h.logger.Warn("missing post_id parameter", slog.String("request_id", requestID))
+		sendErrorResponse(w, http.StatusBadRequest, "post_id parameter is required", requestID)
 		return
 	}
 
 	// Validate post ID format
 	if !validatePostID(postID) {
-		h.logger.Warn("invalid post_id parameter", "post_id", postID)
-		sendErrorResponse(w, http.StatusBadRequest, "invalid post_id format")
+		h.logger.Warn("invalid post_id parameter", "post_id", postID, slog.String("request_id", requestID))
+		sendErrorResponse(w, http.StatusBadRequest, "invalid post_id format", requestID)
 		return
 	}
 
 	subreddit := r.URL.Query().Get("subreddit")
 	if subreddit != "" && !validation.IsValidSubreddit(subreddit) {
-		h.logger.Warn("invalid subreddit parameter", "subreddit", subreddit)
-		sendErrorResponse(w, http.StatusBadRequest, "invalid subreddit name")
+		h.logger.Warn("invalid subreddit parameter", "subreddit", subreddit, slog.String("request_id", requestID))
+		sendErrorResponse(w, http.StatusBadRequest, "invalid subreddit name", requestID)
 		return
 	}
 
@@ -1037,8 +1083,8 @@ func (h *Handler) handleGetSavedComments(w http.ResponseWriter, r *http.Request)
 
 	comments, err := h.store.GetCommentTree(ctx, postID, opts)
 	if err != nil {
-		h.logger.Error("failed to get cached comment tree", "post_id", postID, "error", err)
-		sendErrorResponse(w, http.StatusInternalServerError, "failed to retrieve cached comments")
+		h.logger.Error("failed to get cached comment tree", "post_id", postID, "error", err, slog.String("request_id", requestID))
+		sendErrorResponse(w, http.StatusInternalServerError, "failed to retrieve cached comments", requestID)
 		return
 	}
 
@@ -1057,10 +1103,11 @@ func (h *Handler) handleGetSavedComments(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
-	h.logger.Info("retrieved cached comments", "post_id", postID, "count", len(commentDataList))
+	h.logger.Info("retrieved cached comments", "post_id", postID, "count", len(commentDataList), slog.String("request_id", requestID))
 
 	// Send response (without the post since we're only retrieving comments)
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-ID", requestID)
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(CommentsResponse{
 		Post:           nil,
@@ -1069,7 +1116,7 @@ func (h *Handler) handleGetSavedComments(w http.ResponseWriter, r *http.Request)
 		AfterFullname:  "", // Cached endpoints do not use pagination cursors
 		BeforeFullname: "", // Cached endpoints do not use pagination cursors
 	}); err != nil {
-		h.logger.Error("failed to encode saved comments response", "error", err)
+		h.logger.Error("failed to encode saved comments response", "error", err, slog.String("request_id", requestID))
 	}
 }
 
@@ -1098,9 +1145,12 @@ func parseIntParam(r *http.Request, paramName string, defaultValue, max int) int
 	return value
 }
 
-// sendErrorResponse sends a JSON error response.
-func sendErrorResponse(w http.ResponseWriter, statusCode int, message string) {
+// sendErrorResponse sends a JSON error response with the provided request ID.
+func sendErrorResponse(w http.ResponseWriter, statusCode int, message string, requestID string) {
 	w.Header().Set("Content-Type", "application/json")
+	if requestID != "" {
+		w.Header().Set("X-Request-ID", requestID)
+	}
 	w.WriteHeader(statusCode)
 	if err := json.NewEncoder(w).Encode(ErrorResponse{Error: message}); err != nil {
 		// If encoding fails, we can't send a proper response, just log it
@@ -1197,29 +1247,34 @@ func cleanupOldJobs(maxAge time.Duration, logger *slog.Logger) {
 // handleBulkSavePosts handles the POST /api/bulk-save/posts endpoint.
 // It initiates a background job to save posts (and optionally comments) from a subreddit.
 func (h *Handler) handleBulkSavePosts(w http.ResponseWriter, r *http.Request) {
+	// Ensure request ID exists in context
+	ctx := reqid.Ensure(r.Context())
+	requestID := reqid.FromContext(ctx)
+	r = r.WithContext(ctx)
+
 	if r.Method != http.MethodPost {
-		sendErrorResponse(w, http.StatusMethodNotAllowed, "method not allowed")
+		sendErrorResponse(w, http.StatusMethodNotAllowed, "method not allowed", requestID)
 		return
 	}
 
 	// Check rate limit for API endpoint
 	if !h.apiLimiter.Allow() {
-		h.logger.Warn("API rate limit exceeded")
-		sendErrorResponse(w, http.StatusTooManyRequests, "rate limit exceeded, please try again later")
+		h.logger.Warn("API rate limit exceeded", slog.String("request_id", requestID))
+		sendErrorResponse(w, http.StatusTooManyRequests, "rate limit exceeded, please try again later", requestID)
 		return
 	}
 
 	// Extract JWT from Authorization header
 	tokenString, err := extractBearerToken(r)
 	if err != nil {
-		h.logger.Warn("authorization header error", "error", err)
+		h.logger.Warn("authorization header error", "error", err, slog.String("request_id", requestID))
 		switch err {
 		case ErrMissingAuthHeader:
-			sendErrorResponse(w, http.StatusUnauthorized, "missing authorization header")
+			sendErrorResponse(w, http.StatusUnauthorized, "missing authorization header", requestID)
 		case ErrInvalidAuthHeaderFormat:
-			sendErrorResponse(w, http.StatusUnauthorized, "invalid authorization header format")
+			sendErrorResponse(w, http.StatusUnauthorized, "invalid authorization header format", requestID)
 		default:
-			sendErrorResponse(w, http.StatusUnauthorized, "authorization error")
+			sendErrorResponse(w, http.StatusUnauthorized, "authorization error", requestID)
 		}
 		return
 	}
@@ -1227,23 +1282,23 @@ func (h *Handler) handleBulkSavePosts(w http.ResponseWriter, r *http.Request) {
 	// Validate JWT
 	sessionID, err := h.sessionManager.ValidateJWT(tokenString)
 	if err != nil {
-		h.logger.Error("invalid JWT token", "error", err)
-		sendErrorResponse(w, http.StatusUnauthorized, "invalid or expired token")
+		h.logger.Error("invalid JWT token", "error", err, slog.String("request_id", requestID))
+		sendErrorResponse(w, http.StatusUnauthorized, "invalid or expired token", requestID)
 		return
 	}
 
 	// Get session
 	session, err := h.sessionManager.GetSession(sessionID)
 	if err != nil {
-		h.logger.Error("session not found", "error", err)
-		sendErrorResponse(w, http.StatusUnauthorized, "session not found")
+		h.logger.Error("session not found", "error", err, slog.String("request_id", requestID))
+		sendErrorResponse(w, http.StatusUnauthorized, "session not found", requestID)
 		return
 	}
 
 	// Check if storage is available
 	if h.store == nil {
-		h.logger.Warn("storage not available")
-		sendErrorResponse(w, http.StatusServiceUnavailable, "storage service not available")
+		h.logger.Warn("storage not available", slog.String("request_id", requestID))
+		sendErrorResponse(w, http.StatusServiceUnavailable, "storage service not available", requestID)
 		return
 	}
 
@@ -1252,35 +1307,35 @@ func (h *Handler) handleBulkSavePosts(w http.ResponseWriter, r *http.Request) {
 	limitedBody := io.LimitReader(r.Body, maxRequestBodySize)
 	body, err := io.ReadAll(limitedBody)
 	if err != nil {
-		h.logger.Error("failed to read request body", "error", err)
-		sendErrorResponse(w, http.StatusBadRequest, "failed to read request body")
+		h.logger.Error("failed to read request body", "error", err, slog.String("request_id", requestID))
+		sendErrorResponse(w, http.StatusBadRequest, "failed to read request body", requestID)
 		return
 	}
 	defer r.Body.Close()
 
 	// Check if body size limit was exceeded
 	if len(body) >= maxRequestBodySize {
-		h.logger.Warn("request body size limit exceeded")
-		sendErrorResponse(w, http.StatusRequestEntityTooLarge, "request body too large")
+		h.logger.Warn("request body size limit exceeded", slog.String("request_id", requestID))
+		sendErrorResponse(w, http.StatusRequestEntityTooLarge, "request body too large", requestID)
 		return
 	}
 
 	if err := json.Unmarshal(body, &req); err != nil {
-		h.logger.Error("failed to unmarshal request", "error", err)
-		sendErrorResponse(w, http.StatusBadRequest, "invalid request format")
+		h.logger.Error("failed to unmarshal request", "error", err, slog.String("request_id", requestID))
+		sendErrorResponse(w, http.StatusBadRequest, "invalid request format", requestID)
 		return
 	}
 
 	// Validate subreddit name
 	if req.Subreddit == "" {
-		h.logger.Warn("missing subreddit parameter")
-		sendErrorResponse(w, http.StatusBadRequest, "subreddit is required")
+		h.logger.Warn("missing subreddit parameter", slog.String("request_id", requestID))
+		sendErrorResponse(w, http.StatusBadRequest, "subreddit is required", requestID)
 		return
 	}
 
 	if !validation.IsValidSubreddit(req.Subreddit) {
-		h.logger.Warn("invalid subreddit parameter", "subreddit", req.Subreddit)
-		sendErrorResponse(w, http.StatusBadRequest, "invalid subreddit name")
+		h.logger.Warn("invalid subreddit parameter", "subreddit", req.Subreddit, slog.String("request_id", requestID))
+		sendErrorResponse(w, http.StatusBadRequest, "invalid subreddit name", requestID)
 		return
 	}
 
@@ -1290,15 +1345,15 @@ func (h *Handler) handleBulkSavePosts(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !isValidSortParam(req.Sort) {
-		h.logger.Warn("invalid sort parameter", "sort", req.Sort)
-		sendErrorResponse(w, http.StatusBadRequest, "sort must be 'hot' or 'new'")
+		h.logger.Warn("invalid sort parameter", "sort", req.Sort, slog.String("request_id", requestID))
+		sendErrorResponse(w, http.StatusBadRequest, "sort must be 'hot' or 'new'", requestID)
 		return
 	}
 
 	// Validate count parameter
 	if req.Count < minBulkSaveCount || req.Count > maxBulkSaveCount {
-		h.logger.Warn("invalid count parameter", "count", req.Count)
-		sendErrorResponse(w, http.StatusBadRequest, "count must be between 1 and 2000")
+		h.logger.Warn("invalid count parameter", "count", req.Count, slog.String("request_id", requestID))
+		sendErrorResponse(w, http.StatusBadRequest, "count must be between 1 and 2000", requestID)
 		return
 	}
 
@@ -1315,16 +1370,16 @@ func (h *Handler) handleBulkSavePosts(w http.ResponseWriter, r *http.Request) {
 	bulkSaveJobsMutex.RUnlock()
 
 	if activeJobsCount >= maxConcurrentJobs {
-		h.logger.Warn("max concurrent jobs limit reached", "active_jobs", activeJobsCount, "max", maxConcurrentJobs)
-		sendErrorResponse(w, http.StatusTooManyRequests, "maximum number of concurrent bulk save jobs reached, please try again later")
+		h.logger.Warn("max concurrent jobs limit reached", "active_jobs", activeJobsCount, "max", maxConcurrentJobs, slog.String("request_id", requestID))
+		sendErrorResponse(w, http.StatusTooManyRequests, "maximum number of concurrent bulk save jobs reached, please try again later", requestID)
 		return
 	}
 
 	// Generate unique job ID
 	jobID, err := generateJobID()
 	if err != nil {
-		h.logger.Error("failed to generate job ID", "error", err)
-		sendErrorResponse(w, http.StatusInternalServerError, "failed to create job")
+		h.logger.Error("failed to generate job ID", "error", err, slog.String("request_id", requestID))
+		sendErrorResponse(w, http.StatusInternalServerError, "failed to create job", requestID)
 		return
 	}
 
@@ -1345,6 +1400,7 @@ func (h *Handler) handleBulkSavePosts(w http.ResponseWriter, r *http.Request) {
 		"sort", req.Sort,
 		"count", req.Count,
 		"include_comments", req.IncludeComments,
+		slog.String("request_id", requestID),
 	)
 
 	// Start background goroutine to perform bulk save
@@ -1352,41 +1408,47 @@ func (h *Handler) handleBulkSavePosts(w http.ResponseWriter, r *http.Request) {
 
 	// Send immediate response with job ID
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-ID", requestID)
 	w.WriteHeader(http.StatusAccepted)
 	if err := json.NewEncoder(w).Encode(BulkSaveResponse{
 		JobID:   jobID,
 		Message: "Bulk save operation started successfully",
 	}); err != nil {
-		h.logger.Error("failed to encode bulk save response", "error", err)
+		h.logger.Error("failed to encode bulk save response", "error", err, slog.String("request_id", requestID))
 	}
 }
 
 // handleBulkSaveProgress handles the GET /api/bulk-save/progress/{jobId} endpoint.
 // It retrieves the current progress of a bulk save operation.
 func (h *Handler) handleBulkSaveProgress(w http.ResponseWriter, r *http.Request) {
+	// Ensure request ID exists in context
+	ctx := reqid.Ensure(r.Context())
+	requestID := reqid.FromContext(ctx)
+	r = r.WithContext(ctx)
+
 	if r.Method != http.MethodGet {
-		sendErrorResponse(w, http.StatusMethodNotAllowed, "method not allowed")
+		sendErrorResponse(w, http.StatusMethodNotAllowed, "method not allowed", requestID)
 		return
 	}
 
 	// Check rate limit for API endpoint
 	if !h.apiLimiter.Allow() {
-		h.logger.Warn("API rate limit exceeded")
-		sendErrorResponse(w, http.StatusTooManyRequests, "rate limit exceeded, please try again later")
+		h.logger.Warn("API rate limit exceeded", slog.String("request_id", requestID))
+		sendErrorResponse(w, http.StatusTooManyRequests, "rate limit exceeded, please try again later", requestID)
 		return
 	}
 
 	// Extract JWT from Authorization header
 	tokenString, err := extractBearerToken(r)
 	if err != nil {
-		h.logger.Warn("authorization header error", "error", err)
+		h.logger.Warn("authorization header error", "error", err, slog.String("request_id", requestID))
 		switch err {
 		case ErrMissingAuthHeader:
-			sendErrorResponse(w, http.StatusUnauthorized, "missing authorization header")
+			sendErrorResponse(w, http.StatusUnauthorized, "missing authorization header", requestID)
 		case ErrInvalidAuthHeaderFormat:
-			sendErrorResponse(w, http.StatusUnauthorized, "invalid authorization header format")
+			sendErrorResponse(w, http.StatusUnauthorized, "invalid authorization header format", requestID)
 		default:
-			sendErrorResponse(w, http.StatusUnauthorized, "authorization error")
+			sendErrorResponse(w, http.StatusUnauthorized, "authorization error", requestID)
 		}
 		return
 	}
@@ -1394,16 +1456,16 @@ func (h *Handler) handleBulkSaveProgress(w http.ResponseWriter, r *http.Request)
 	// Validate JWT
 	sessionID, err := h.sessionManager.ValidateJWT(tokenString)
 	if err != nil {
-		h.logger.Error("invalid JWT token", "error", err)
-		sendErrorResponse(w, http.StatusUnauthorized, "invalid or expired token")
+		h.logger.Error("invalid JWT token", "error", err, slog.String("request_id", requestID))
+		sendErrorResponse(w, http.StatusUnauthorized, "invalid or expired token", requestID)
 		return
 	}
 
 	// Get session to verify it exists
 	_, err = h.sessionManager.GetSession(sessionID)
 	if err != nil {
-		h.logger.Error("session not found", "error", err)
-		sendErrorResponse(w, http.StatusUnauthorized, "session not found")
+		h.logger.Error("session not found", "error", err, slog.String("request_id", requestID))
+		sendErrorResponse(w, http.StatusUnauthorized, "session not found", requestID)
 		return
 	}
 
@@ -1412,15 +1474,15 @@ func (h *Handler) handleBulkSaveProgress(w http.ResponseWriter, r *http.Request)
 	path := r.URL.Path
 	jobID := strings.TrimPrefix(path, "/api/bulk-save/progress/")
 	if jobID == "" || jobID == path {
-		h.logger.Warn("missing or invalid job ID in URL path", "path", path)
-		sendErrorResponse(w, http.StatusBadRequest, "job ID is required in URL path")
+		h.logger.Warn("missing or invalid job ID in URL path", "path", path, slog.String("request_id", requestID))
+		sendErrorResponse(w, http.StatusBadRequest, "job ID is required in URL path", requestID)
 		return
 	}
 
 	// Validate job ID format
 	if !validateJobID(jobID) {
-		h.logger.Warn("invalid job ID format", "job_id", jobID)
-		sendErrorResponse(w, http.StatusBadRequest, "invalid job ID format")
+		h.logger.Warn("invalid job ID format", "job_id", jobID, slog.String("request_id", requestID))
+		sendErrorResponse(w, http.StatusBadRequest, "invalid job ID format", requestID)
 		return
 	}
 
@@ -1430,21 +1492,22 @@ func (h *Handler) handleBulkSaveProgress(w http.ResponseWriter, r *http.Request)
 	bulkSaveJobsMutex.RUnlock()
 
 	if !exists {
-		h.logger.Warn("job not found", "job_id", jobID)
-		sendErrorResponse(w, http.StatusNotFound, "job not found")
+		h.logger.Warn("job not found", "job_id", jobID, slog.String("request_id", requestID))
+		sendErrorResponse(w, http.StatusNotFound, "job not found", requestID)
 		return
 	}
 
 	// Get current progress from the job
 	progress := job.getProgress()
 
-	h.logger.Info("bulk save progress retrieved", "job_id", jobID, "status", progress.Status)
+	h.logger.Info("bulk save progress retrieved", "job_id", jobID, "status", progress.Status, slog.String("request_id", requestID))
 
 	// Send response
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-ID", requestID)
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(progress); err != nil {
-		h.logger.Error("failed to encode bulk save progress response", "error", err)
+		h.logger.Error("failed to encode bulk save progress response", "error", err, slog.String("request_id", requestID))
 	}
 }
 

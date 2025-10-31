@@ -35,6 +35,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jamesprial/go-reddit-api-wrapper/pkg/reqid"
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/auth"
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/client"
@@ -396,6 +397,9 @@ func NewClientWithContext(ctx context.Context, config *Config) (*Reddit, error) 
 //
 // This method requires the client to have 'read' scope for the authenticated user.
 func (r *Reddit) Me(ctx context.Context) (*types.AccountData, error) {
+	ctx = reqid.Ensure(ctx)
+	requestID := reqid.FromContext(ctx)
+
 	req, err := r.httpClient.NewRequest(ctx, http.MethodGet, MeURL, nil)
 	if err != nil {
 		return nil, wrapDoError(err, "create request", MeURL)
@@ -403,7 +407,7 @@ func (r *Reddit) Me(ctx context.Context) (*types.AccountData, error) {
 
 	// Add authentication headers
 	if err := r.addAuthHeaders(ctx, req); err != nil {
-		return nil, &AuthError{Message: "failed to add auth headers", Err: err}
+		return nil, &AuthError{Message: "failed to add auth headers", Err: err, RequestID: requestID}
 	}
 
 	var result types.Thing
@@ -417,25 +421,25 @@ func (r *Reddit) Me(ctx context.Context) (*types.AccountData, error) {
 				return nil, wrapDoError(err, "create request", MeURL)
 			}
 			if err := r.addAuthHeaders(ctx, req); err != nil {
-				return nil, &AuthError{Message: "failed to add auth headers on retry", Err: err}
+				return nil, &AuthError{Message: "failed to add auth headers on retry", Err: err, RequestID: requestID}
 			}
 			// Retry the request
 			err = r.httpClient.Do(req, &result)
 		}
 		if err != nil {
-			return nil, wrapDoError(err, "get user info", MeURL)
+			return nil, translateClientErrorWithRequestID(wrapDoError(err, "get user info", MeURL), requestID)
 		}
 	}
 
 	// Parse the account data
 	parsed, err := r.parser.ParseThing(ctx, &result)
 	if err != nil {
-		return nil, &ParseError{Operation: "parse user info", Err: err}
+		return nil, &ParseError{Operation: "parse user info", Err: err, RequestID: requestID}
 	}
 
 	account, ok := parsed.(*types.AccountData)
 	if !ok {
-		return nil, &ParseError{Operation: "user info response", Err: fmt.Errorf("unexpected response type")}
+		return nil, &ParseError{Operation: "user info response", Err: fmt.Errorf("unexpected response type"), RequestID: requestID}
 	}
 
 	return account, nil
@@ -460,9 +464,12 @@ func (r *Reddit) Me(ctx context.Context) (*types.AccountData, error) {
 //
 // This method works with both application-only and user authentication.
 func (r *Reddit) GetSubreddit(ctx context.Context, name string) (*types.SubredditData, error) {
+	ctx = reqid.Ensure(ctx)
+	requestID := reqid.FromContext(ctx)
+
 	// Validate subreddit name
 	if err := r.validator.ValidateSubredditName(name); err != nil {
-		return nil, translateValidationError(err)
+		return nil, translateValidationErrorWithRequestID(err, requestID)
 	}
 
 	path := SubPrefixURL + name + "/about"
@@ -473,7 +480,7 @@ func (r *Reddit) GetSubreddit(ctx context.Context, name string) (*types.Subreddi
 
 	// Add authentication headers
 	if err := r.addAuthHeaders(ctx, req); err != nil {
-		return nil, &AuthError{Message: "failed to add auth headers", Err: err}
+		return nil, &AuthError{Message: "failed to add auth headers", Err: err, RequestID: requestID}
 	}
 
 	var result types.Thing
@@ -487,25 +494,25 @@ func (r *Reddit) GetSubreddit(ctx context.Context, name string) (*types.Subreddi
 				return nil, wrapDoError(err, "create request", path)
 			}
 			if err := r.addAuthHeaders(ctx, req); err != nil {
-				return nil, &AuthError{Message: "failed to add auth headers on retry", Err: err}
+				return nil, &AuthError{Message: "failed to add auth headers on retry", Err: err, RequestID: requestID}
 			}
 			// Retry the request
 			err = r.httpClient.Do(req, &result)
 		}
 		if err != nil {
-			return nil, wrapDoError(err, "get subreddit", SubPrefixURL+name+"/about")
+			return nil, translateClientErrorWithRequestID(wrapDoError(err, "get subreddit", SubPrefixURL+name+"/about"), requestID)
 		}
 	}
 
 	// Parse the subreddit data
 	parsed, err := r.parser.ParseThing(ctx, &result)
 	if err != nil {
-		return nil, &ParseError{Operation: "parse subreddit", Err: err}
+		return nil, &ParseError{Operation: "parse subreddit", Err: err, RequestID: requestID}
 	}
 
 	subreddit, ok := parsed.(*types.SubredditData)
 	if !ok {
-		return nil, &ParseError{Operation: "subreddit response", Err: fmt.Errorf("unexpected response type")}
+		return nil, &ParseError{Operation: "subreddit response", Err: fmt.Errorf("unexpected response type"), RequestID: requestID}
 	}
 
 	return subreddit, nil
@@ -544,6 +551,9 @@ func (r *Reddit) GetNew(ctx context.Context, request *types.PostsRequest) (*type
 
 // getPosts is the common implementation for fetching posts from different sort endpoints.
 func (r *Reddit) getPosts(ctx context.Context, request *types.PostsRequest, sort string) (*types.PostsResponse, error) {
+	ctx = reqid.Ensure(ctx)
+	requestID := reqid.FromContext(ctx)
+
 	subreddit := ""
 	var pagination *types.Pagination
 	if request != nil {
@@ -553,13 +563,13 @@ func (r *Reddit) getPosts(ctx context.Context, request *types.PostsRequest, sort
 		// Validate subreddit name if provided
 		if subreddit != "" {
 			if err := r.validator.ValidateSubredditName(subreddit); err != nil {
-				return nil, translateValidationError(err)
+				return nil, translateValidationErrorWithRequestID(err, requestID)
 			}
 		}
 
 		// Validate pagination parameters
 		if err := r.validator.ValidatePagination(pagination); err != nil {
-			return nil, translateValidationError(err)
+			return nil, translateValidationErrorWithRequestID(err, requestID)
 		}
 	}
 
@@ -578,7 +588,7 @@ func (r *Reddit) getPosts(ctx context.Context, request *types.PostsRequest, sort
 
 	// Add authentication headers
 	if err := r.addAuthHeaders(ctx, httpReq); err != nil {
-		return nil, &AuthError{Message: "failed to add auth headers", Err: err}
+		return nil, &AuthError{Message: "failed to add auth headers", Err: err, RequestID: requestID}
 	}
 
 	var result types.Thing
@@ -590,18 +600,18 @@ func (r *Reddit) getPosts(ctx context.Context, request *types.PostsRequest, sort
 				return nil, wrapDoError(reqErr, "create request", path)
 			}
 			if err := r.addAuthHeaders(ctx, httpReq); err != nil {
-				return nil, &AuthError{Message: "failed to add auth headers on retry", Err: err}
+				return nil, &AuthError{Message: "failed to add auth headers on retry", Err: err, RequestID: requestID}
 			}
 			err = r.httpClient.Do(httpReq, &result)
 		}
 		if err != nil {
-			return nil, wrapDoError(err, "get "+sort+" posts", path)
+			return nil, translateClientErrorWithRequestID(wrapDoError(err, "get "+sort+" posts", path), requestID)
 		}
 	}
 
 	posts, err := r.parser.ExtractPosts(ctx, &result)
 	if err != nil {
-		return nil, &ParseError{Operation: "parse posts", Err: err}
+		return nil, &ParseError{Operation: "parse posts", Err: err, RequestID: requestID}
 	}
 
 	var after, before string
@@ -641,26 +651,29 @@ func (r *Reddit) getPosts(ctx context.Context, request *types.PostsRequest, sort
 //   - The post doesn't exist or is in a private subreddit
 //   - The API request fails
 func (r *Reddit) GetComments(ctx context.Context, request *types.CommentsRequest) (*types.CommentsResponse, error) {
+	ctx = reqid.Ensure(ctx)
+	requestID := reqid.FromContext(ctx)
+
 	if request == nil {
-		return nil, &ConfigError{Message: "comments request cannot be nil"}
+		return nil, &ConfigError{Message: "comments request cannot be nil", RequestID: requestID}
 	}
 	if request.Subreddit == "" || request.PostID == "" {
-		return nil, &ConfigError{Message: "subreddit and postID are required"}
+		return nil, &ConfigError{Message: "subreddit and postID are required", RequestID: requestID}
 	}
 
 	// Validate subreddit name
 	if err := r.validator.ValidateSubredditName(request.Subreddit); err != nil {
-		return nil, translateValidationError(err)
+		return nil, translateValidationErrorWithRequestID(err, requestID)
 	}
 
 	// Validate post ID format
 	if err := r.validator.ValidatePostID(request.PostID); err != nil {
-		return nil, translateValidationError(err)
+		return nil, translateValidationErrorWithRequestID(err, requestID)
 	}
 
 	// Validate pagination parameters
 	if err := r.validator.ValidatePagination(&request.Pagination); err != nil {
-		return nil, translateValidationError(err)
+		return nil, translateValidationErrorWithRequestID(err, requestID)
 	}
 
 	path := SubPrefixURL + request.Subreddit + "/comments/" + request.PostID
@@ -674,7 +687,7 @@ func (r *Reddit) GetComments(ctx context.Context, request *types.CommentsRequest
 
 	// Add authentication headers
 	if err := r.addAuthHeaders(ctx, httpReq); err != nil {
-		return nil, &AuthError{Message: "failed to add auth headers", Err: err}
+		return nil, &AuthError{Message: "failed to add auth headers", Err: err, RequestID: requestID}
 	}
 
 	result, err := r.httpClient.DoThingArray(httpReq)
@@ -685,19 +698,19 @@ func (r *Reddit) GetComments(ctx context.Context, request *types.CommentsRequest
 				return nil, wrapDoError(reqErr, "create request", path)
 			}
 			if err := r.addAuthHeaders(ctx, httpReq); err != nil {
-				return nil, &AuthError{Message: "failed to add auth headers on retry", Err: err}
+				return nil, &AuthError{Message: "failed to add auth headers on retry", Err: err, RequestID: requestID}
 			}
 			result, err = r.httpClient.DoThingArray(httpReq)
 		}
 		if err != nil {
-			return nil, wrapDoError(err, "get comments", path)
+			return nil, translateClientErrorWithRequestID(wrapDoError(err, "get comments", path), requestID)
 		}
 	}
 
 	// Parse the post and comments
 	extractResult, err := r.parser.ExtractPostAndComments(ctx, result)
 	if err != nil {
-		return nil, &ParseError{Operation: "parse comments", Err: err}
+		return nil, &ParseError{Operation: "parse comments", Err: err, RequestID: requestID}
 	}
 
 	// Note: post may be nil if Reddit only returned comments without the post
@@ -721,6 +734,9 @@ func (r *Reddit) GetComments(ctx context.Context, request *types.CommentsRequest
 //
 // Returns an error if any individual request fails or if too many requests are provided.
 func (r *Reddit) GetCommentsMultiple(ctx context.Context, requests []*types.CommentsRequest) ([]*types.CommentsResponse, error) {
+	ctx = reqid.Ensure(ctx)
+	requestID := reqid.FromContext(ctx)
+
 	if len(requests) == 0 {
 		return []*types.CommentsResponse{}, nil
 	}
@@ -728,7 +744,8 @@ func (r *Reddit) GetCommentsMultiple(ctx context.Context, requests []*types.Comm
 	// Add overall limit check to prevent DoS
 	if len(requests) > MaxTotalCommentRequests {
 		return nil, &ConfigError{
-			Message: fmt.Sprintf("too many requests (%d), maximum is %d", len(requests), MaxTotalCommentRequests),
+			Message:   fmt.Sprintf("too many requests (%d), maximum is %d", len(requests), MaxTotalCommentRequests),
+			RequestID: requestID,
 		}
 	}
 
@@ -736,36 +753,41 @@ func (r *Reddit) GetCommentsMultiple(ctx context.Context, requests []*types.Comm
 	for i, req := range requests {
 		if req == nil {
 			return nil, &ConfigError{
-				Field:   fmt.Sprintf("requests[%d]", i),
-				Message: "request cannot be nil",
+				Field:     fmt.Sprintf("requests[%d]", i),
+				Message:   "request cannot be nil",
+				RequestID: requestID,
 			}
 		}
 		if req.Subreddit == "" {
 			return nil, &ConfigError{
-				Field:   fmt.Sprintf("requests[%d].Subreddit", i),
-				Message: "subreddit is required",
+				Field:     fmt.Sprintf("requests[%d].Subreddit", i),
+				Message:   "subreddit is required",
+				RequestID: requestID,
 			}
 		}
 		if req.PostID == "" {
 			return nil, &ConfigError{
-				Field:   fmt.Sprintf("requests[%d].PostID", i),
-				Message: "post ID is required",
+				Field:     fmt.Sprintf("requests[%d].PostID", i),
+				Message:   "post ID is required",
+				RequestID: requestID,
 			}
 		}
 		// Validate subreddit name format
 		if err := r.validator.ValidateSubredditName(req.Subreddit); err != nil {
 			translated := translateValidationError(err)
 			return nil, &ConfigError{
-				Field:   fmt.Sprintf("requests[%d].Subreddit", i),
-				Message: translated.Error(),
+				Field:     fmt.Sprintf("requests[%d].Subreddit", i),
+				Message:   translated.Error(),
+				RequestID: requestID,
 			}
 		}
 		// Validate post ID format
 		if err := r.validator.ValidatePostID(req.PostID); err != nil {
 			translated := translateValidationError(err)
 			return nil, &ConfigError{
-				Field:   fmt.Sprintf("requests[%d].PostID", i),
-				Message: translated.Error(),
+				Field:     fmt.Sprintf("requests[%d].PostID", i),
+				Message:   translated.Error(),
+				RequestID: requestID,
 			}
 		}
 	}
@@ -884,8 +906,11 @@ func (r *Reddit) GetCommentsMultiple(ctx context.Context, requests []*types.Comm
 //   - The comment IDs are invalid
 //   - The API request fails
 func (r *Reddit) GetMoreComments(ctx context.Context, request *types.MoreCommentsRequest) ([]*types.Comment, error) {
+	ctx = reqid.Ensure(ctx)
+	requestID := reqid.FromContext(ctx)
+
 	if request == nil {
-		return nil, &ConfigError{Message: "more comments request cannot be nil"}
+		return nil, &ConfigError{Message: "more comments request cannot be nil", RequestID: requestID}
 	}
 	if len(request.CommentIDs) == 0 {
 		return []*types.Comment{}, nil
@@ -893,13 +918,13 @@ func (r *Reddit) GetMoreComments(ctx context.Context, request *types.MoreComment
 
 	// Validate comment IDs count
 	if err := r.validator.ValidateCommentIDs(request.CommentIDs); err != nil {
-		return nil, translateValidationError(err)
+		return nil, translateValidationErrorWithRequestID(err, requestID)
 	}
 
 	// Validate and normalize link ID (adds t3_ prefix if needed)
 	linkID, err := r.validator.ValidateLinkID(request.LinkID)
 	if err != nil {
-		return nil, translateValidationError(err)
+		return nil, translateValidationErrorWithRequestID(err, requestID)
 	}
 
 	// Build form data for POST request
@@ -928,7 +953,7 @@ func (r *Reddit) GetMoreComments(ctx context.Context, request *types.MoreComment
 
 	// Add authentication headers
 	if err := r.addAuthHeaders(ctx, req); err != nil {
-		return nil, &AuthError{Message: "failed to add auth headers", Err: err}
+		return nil, &AuthError{Message: "failed to add auth headers", Err: err, RequestID: requestID}
 	}
 
 	// Set Content-Type header for form data
@@ -943,13 +968,13 @@ func (r *Reddit) GetMoreComments(ctx context.Context, request *types.MoreComment
 				return nil, wrapDoError(reqErr, "create request", MoreChildrenURL)
 			}
 			if err := r.addAuthHeaders(ctx, req); err != nil {
-				return nil, &AuthError{Message: "failed to add auth headers on retry", Err: err}
+				return nil, &AuthError{Message: "failed to add auth headers on retry", Err: err, RequestID: requestID}
 			}
 			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 			things, err = r.httpClient.DoMoreChildren(req)
 		}
 		if err != nil {
-			return nil, wrapDoError(err, "get more comments", MoreChildrenURL)
+			return nil, translateClientErrorWithRequestID(wrapDoError(err, "get more comments", MoreChildrenURL), requestID)
 		}
 	}
 
@@ -963,7 +988,8 @@ func (r *Reddit) GetMoreComments(ctx context.Context, request *types.MoreComment
 			if r.config != nil && r.config.Logger != nil {
 				r.config.Logger.LogAttrs(ctx, slog.LevelWarn, "failed to parse comment from morechildren",
 					slog.String("error", err.Error()),
-					slog.String("kind", thing.Kind))
+					slog.String("kind", thing.Kind),
+					slog.String("request_id", requestID))
 			}
 			continue // Skip if we can't parse
 		}
@@ -972,7 +998,8 @@ func (r *Reddit) GetMoreComments(ctx context.Context, request *types.MoreComment
 			// Log unexpected type if logger is available
 			if r.config != nil && r.config.Logger != nil {
 				r.config.Logger.LogAttrs(ctx, slog.LevelWarn, "unexpected type from morechildren",
-					slog.String("kind", thing.Kind))
+					slog.String("kind", thing.Kind),
+					slog.String("request_id", requestID))
 			}
 			continue // Skip if not a comment
 		}
@@ -1103,6 +1130,16 @@ func translateValidationError(err error) error {
 	}
 }
 
+// translateValidationErrorWithRequestID converts internal validator errors to public ValidationError
+// and sets the request ID if provided.
+func translateValidationErrorWithRequestID(err error, requestID string) error {
+	pubErr := translateValidationError(err)
+	if valErr, ok := pubErr.(*ValidationError); ok && requestID != "" {
+		valErr.RequestID = requestID
+	}
+	return pubErr
+}
+
 // translateClientError converts internal client errors to appropriate public error types.
 // Maps:
 //   - APIError → APIError (translated to public)
@@ -1117,7 +1154,7 @@ func translateClientError(err error) error {
 		return nil
 	}
 
-	// Check for APIError - translate to public
+	// Check for APIError - translate to public and preserve RequestID
 	var apiErr *client.APIError
 	if errors.As(err, &apiErr) {
 		return &APIError{
@@ -1125,58 +1162,129 @@ func translateClientError(err error) error {
 			ErrorCode:  apiErr.ErrorCode,
 			Message:    apiErr.Message,
 			Details:    apiErr.Details,
+			RequestID:  apiErr.RequestID,
 		}
 	}
 
-	// Check for RateLimitError - promote to public
+	// Check for RateLimitError - promote to public and preserve RequestID
 	var rateLimitErr *client.RateLimitError
 	if errors.As(err, &rateLimitErr) {
 		return &RateLimitError{
 			Reason:       rateLimitErr.Reason,
 			WaitDuration: rateLimitErr.WaitDuration,
 			Err:          rateLimitErr.Err,
+			RequestID:    rateLimitErr.RequestID,
 		}
 	}
 
-	// Check for TransportError - translate to NetworkError
+	// Check for TransportError - translate to NetworkError and preserve RequestID
 	var transportErr *client.TransportError
 	if errors.As(err, &transportErr) {
 		return &NetworkError{
-			Method:   transportErr.Method,
-			URL:      transportErr.URL,
-			Duration: transportErr.Duration,
-			Err:      transportErr.Err,
+			Method:    transportErr.Method,
+			URL:       transportErr.URL,
+			Duration:  transportErr.Duration,
+			Err:       transportErr.Err,
+			RequestID: transportErr.RequestID,
 		}
 	}
 
-	// Check for ResponseReadError - translate to NetworkError
+	// Check for ResponseReadError - translate to NetworkError and preserve RequestID
 	var readErr *client.ResponseReadError
 	if errors.As(err, &readErr) {
 		return &NetworkError{
-			Method: "READ",
-			URL:    readErr.URL,
-			Err:    readErr.Err,
+			Method:    "READ",
+			URL:       readErr.URL,
+			Err:       readErr.Err,
+			RequestID: readErr.RequestID,
 		}
 	}
 
-	// Check for DecodeError - translate to ParseError
+	// Check for DecodeError - translate to ParseError and preserve RequestID
 	var decodeErr *client.DecodeError
 	if errors.As(err, &decodeErr) {
 		return &ParseError{
 			Operation: decodeErr.Operation,
 			Err:       decodeErr.Err,
+			RequestID: decodeErr.RequestID,
 		}
 	}
 
-	// Check for RequestBuildError - translate to ConfigError
+	// Check for RequestBuildError - translate to ConfigError and preserve RequestID
 	var buildErr *client.RequestBuildError
 	if errors.As(err, &buildErr) {
 		return &ConfigError{
-			Field:   buildErr.Operation,
-			Message: fmt.Sprintf("request build failed for %s: %v", buildErr.URL, buildErr.Err),
+			Field:     buildErr.Operation,
+			Message:   fmt.Sprintf("request build failed for %s: %v", buildErr.URL, buildErr.Err),
+			RequestID: buildErr.RequestID,
 		}
 	}
 
 	// Default: return as-is (could be APIError or other)
 	return err
+}
+
+// translateClientErrorWithRequestID converts internal client errors to appropriate public error types
+// and sets the request ID if provided. Creates new instances to avoid race conditions.
+func translateClientErrorWithRequestID(err error, requestID string) error {
+	pubErr := translateClientError(err)
+	if pubErr == nil {
+		return nil
+	}
+
+	if requestID == "" {
+		return pubErr
+	}
+
+	// Create new instances with request ID set to avoid race conditions
+	switch e := pubErr.(type) {
+	case *APIError:
+		if e.RequestID == "" {
+			return &APIError{
+				StatusCode: e.StatusCode,
+				ErrorCode:  e.ErrorCode,
+				Message:    e.Message,
+				Details:    e.Details,
+				RequestID:  requestID,
+			}
+		}
+	case *RateLimitError:
+		if e.RequestID == "" {
+			return &RateLimitError{
+				Reason:       e.Reason,
+				WaitDuration: e.WaitDuration,
+				RequestID:    requestID,
+				Err:          e.Err,
+			}
+		}
+	case *NetworkError:
+		if e.RequestID == "" {
+			return &NetworkError{
+				Method:    e.Method,
+				URL:       e.URL,
+				Duration:  e.Duration,
+				RequestID: requestID,
+				Err:       e.Err,
+			}
+		}
+	case *ParseError:
+		if e.RequestID == "" {
+			return &ParseError{
+				Operation: e.Operation,
+				RequestID: requestID,
+				Message:   e.Message,
+				Err:       e.Err,
+			}
+		}
+	case *ConfigError:
+		if e.RequestID == "" {
+			return &ConfigError{
+				Field:     e.Field,
+				Message:   e.Message,
+				RequestID: requestID,
+			}
+		}
+	}
+
+	return pubErr
 }

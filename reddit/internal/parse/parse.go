@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"log/slog"
 
+	"github.com/jamesprial/go-reddit-api-wrapper/pkg/reqid"
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/validation"
 )
@@ -39,8 +40,10 @@ type parseContext struct {
 
 // ParseThing determines the type of a Thing and returns the appropriate typed struct.
 func (p *Parser) ParseThing(ctx context.Context, thing *types.Thing) (any, error) {
+	requestID := reqid.FromContext(ctx)
+
 	if thing == nil {
-		return nil, &KindError{Operation: "parse_thing", Expected: "non-nil", Actual: "nil"}
+		return nil, &KindError{Operation: "parse_thing", Expected: "non-nil", Actual: "nil", RequestID: requestID}
 	}
 
 	pc := &parseContext{seenIDs: make(map[string]bool)}
@@ -66,21 +69,24 @@ func (p *Parser) parseThingWithContext(ctx context.Context, thing *types.Thing, 
 	case "more":
 		return p.ParseMore(ctx, thing)
 	default:
+		requestID := reqid.FromContext(ctx)
 		if p.logger != nil {
 			p.logger.LogAttrs(ctx, slog.LevelWarn, "unknown thing kind",
 				slog.String("kind", thing.Kind))
 		}
-		return nil, &KindError{Operation: "parse_thing", Expected: "known kind", Actual: thing.Kind}
+		return nil, &KindError{Operation: "parse_thing", Expected: "known kind", Actual: thing.Kind, RequestID: requestID}
 	}
 }
 
 // ParseListing extracts a ListingData from a Thing of kind "Listing".
 func (p *Parser) ParseListing(ctx context.Context, thing *types.Thing) (*types.ListingData, error) {
+	requestID := reqid.FromContext(ctx)
+
 	if thing == nil {
-		return nil, &KindError{Operation: "parse_listing", Expected: "non-nil", Actual: "nil"}
+		return nil, &KindError{Operation: "parse_listing", Expected: "non-nil", Actual: "nil", RequestID: requestID}
 	}
 	if thing.Kind != "Listing" {
-		return nil, &KindError{Operation: "parse_listing", Expected: "Listing", Actual: thing.Kind}
+		return nil, &KindError{Operation: "parse_listing", Expected: "Listing", Actual: thing.Kind, RequestID: requestID}
 	}
 
 	var result types.ListingData
@@ -89,7 +95,7 @@ func (p *Parser) ParseListing(ctx context.Context, thing *types.Thing) (*types.L
 			p.logger.LogAttrs(ctx, slog.LevelWarn, "failed to parse listing data",
 				slog.String("error", err.Error()))
 		}
-		return nil, &UnmarshalError{ThingKind: "Listing", Operation: "unmarshal_listing", Err: err}
+		return nil, &UnmarshalError{ThingKind: "Listing", Operation: "unmarshal_listing", Err: err, RequestID: requestID}
 	}
 
 	// Validate pagination tokens
@@ -98,14 +104,14 @@ func (p *Parser) ParseListing(ctx context.Context, thing *types.Thing) (*types.L
 			p.logger.LogAttrs(ctx, slog.LevelWarn, "invalid AfterFullname from Reddit API",
 				slog.String("after", result.AfterFullname))
 		}
-		return nil, &ValidationError{ThingKind: "Listing", Field: "AfterFullname", Value: result.AfterFullname}
+		return nil, &ValidationError{ThingKind: "Listing", Field: "AfterFullname", Value: result.AfterFullname, RequestID: requestID}
 	}
 	if result.BeforeFullname != "" && !validation.IsValidFullname(result.BeforeFullname) {
 		if p.logger != nil {
 			p.logger.LogAttrs(ctx, slog.LevelWarn, "invalid BeforeFullname from Reddit API",
 				slog.String("before", result.BeforeFullname))
 		}
-		return nil, &ValidationError{ThingKind: "Listing", Field: "BeforeFullname", Value: result.BeforeFullname}
+		return nil, &ValidationError{ThingKind: "Listing", Field: "BeforeFullname", Value: result.BeforeFullname, RequestID: requestID}
 	}
 
 	return &result, nil
@@ -113,11 +119,13 @@ func (p *Parser) ParseListing(ctx context.Context, thing *types.Thing) (*types.L
 
 // ParsePost extracts a Post from a Thing of kind "t3".
 func (p *Parser) ParsePost(ctx context.Context, thing *types.Thing) (*types.Post, error) {
+	requestID := reqid.FromContext(ctx)
+
 	if thing == nil {
-		return nil, &KindError{Operation: "parse_post", Expected: "non-nil", Actual: "nil"}
+		return nil, &KindError{Operation: "parse_post", Expected: "non-nil", Actual: "nil", RequestID: requestID}
 	}
 	if thing.Kind != "t3" {
-		return nil, &KindError{Operation: "parse_post", Expected: "t3", Actual: thing.Kind}
+		return nil, &KindError{Operation: "parse_post", Expected: "t3", Actual: thing.Kind, RequestID: requestID}
 	}
 
 	var result types.Post
@@ -126,7 +134,7 @@ func (p *Parser) ParsePost(ctx context.Context, thing *types.Thing) (*types.Post
 			p.logger.LogAttrs(ctx, slog.LevelWarn, "failed to parse post data",
 				slog.String("error", err.Error()))
 		}
-		return nil, &UnmarshalError{ThingKind: "Post", Operation: "unmarshal_post", Err: err}
+		return nil, &UnmarshalError{ThingKind: "Post", Operation: "unmarshal_post", Err: err, RequestID: requestID}
 	}
 
 	// Validate the parsed post
@@ -135,7 +143,7 @@ func (p *Parser) ParsePost(ctx context.Context, thing *types.Thing) (*types.Post
 			p.logger.LogAttrs(ctx, slog.LevelWarn, "invalid post data from Reddit API",
 				slog.String("error", err.Error()))
 		}
-		return nil, &ValidationError{ThingKind: "Post", Field: "Post", Err: err}
+		return nil, &ValidationError{ThingKind: "Post", Field: "Post", Err: err, RequestID: requestID}
 	}
 
 	return &result, nil
@@ -144,11 +152,13 @@ func (p *Parser) ParsePost(ctx context.Context, thing *types.Thing) (*types.Post
 // ParseComment extracts a Comment from a Thing of kind "t1" and builds a proper tree structure.
 // The Replies field will contain only direct children, and each child will have its own Replies.
 func (p *Parser) ParseComment(ctx context.Context, thing *types.Thing, pc *parseContext) (*types.Comment, error) {
+	requestID := reqid.FromContext(ctx)
+
 	if thing == nil {
-		return nil, &KindError{Operation: "parse_comment", Expected: "non-nil", Actual: "nil"}
+		return nil, &KindError{Operation: "parse_comment", Expected: "non-nil", Actual: "nil", RequestID: requestID}
 	}
 	if thing.Kind != "t1" {
-		return nil, &KindError{Operation: "parse_comment", Expected: "t1", Actual: thing.Kind}
+		return nil, &KindError{Operation: "parse_comment", Expected: "t1", Actual: thing.Kind, RequestID: requestID}
 	}
 
 	// Prevent stack overflow from deeply nested comments
@@ -158,7 +168,7 @@ func (p *Parser) ParseComment(ctx context.Context, thing *types.Thing, pc *parse
 				slog.Int("depth", pc.depth),
 				slog.Int("max_depth", MaxCommentDepth))
 		}
-		return nil, &DepthError{CurrentDepth: pc.depth, MaxDepth: MaxCommentDepth}
+		return nil, &DepthError{CurrentDepth: pc.depth, MaxDepth: MaxCommentDepth, RequestID: requestID}
 	}
 
 	// Optimized single unmarshal with unified structure
@@ -172,7 +182,7 @@ func (p *Parser) ParseComment(ctx context.Context, thing *types.Thing, pc *parse
 			p.logger.LogAttrs(ctx, slog.LevelWarn, "failed to parse comment data",
 				slog.String("error", err.Error()))
 		}
-		return nil, &UnmarshalError{ThingKind: "Comment", Operation: "unmarshal_comment", Err: err}
+		return nil, &UnmarshalError{ThingKind: "Comment", Operation: "unmarshal_comment", Err: err, RequestID: requestID}
 	}
 
 	// Validate the parsed comment
@@ -181,7 +191,7 @@ func (p *Parser) ParseComment(ctx context.Context, thing *types.Thing, pc *parse
 			p.logger.LogAttrs(ctx, slog.LevelWarn, "invalid comment data from Reddit API",
 				slog.String("error", err.Error()))
 		}
-		return nil, &ValidationError{ThingKind: "Comment", Field: "Comment", Err: err}
+		return nil, &ValidationError{ThingKind: "Comment", Field: "Comment", Err: err, RequestID: requestID}
 	}
 
 	// Check for infinite loops
@@ -211,18 +221,20 @@ func (p *Parser) ParseComment(ctx context.Context, thing *types.Thing, pc *parse
 
 // parseReplies handles the replies field parsing with error recovery
 func (p *Parser) parseReplies(ctx context.Context, comment *types.Comment, repliesData json.RawMessage, pc *parseContext) error {
+	requestID := reqid.FromContext(ctx)
+
 	var repliesThing types.Thing
 	if err := json.Unmarshal(repliesData, &repliesThing); err != nil {
-		return &UnmarshalError{ThingKind: "Replies", Operation: "unmarshal_replies", Err: err}
+		return &UnmarshalError{ThingKind: "Replies", Operation: "unmarshal_replies", Err: err, RequestID: requestID}
 	}
 
 	if repliesThing.Kind != "Listing" {
-		return &KindError{Operation: "parse_replies", Expected: "Listing", Actual: repliesThing.Kind}
+		return &KindError{Operation: "parse_replies", Expected: "Listing", Actual: repliesThing.Kind, RequestID: requestID}
 	}
 
 	listingData, err := p.ParseListing(ctx, &repliesThing)
 	if err != nil {
-		return &ExtractionError{Operation: "parse_replies_listing", Err: err}
+		return &ExtractionError{Operation: "parse_replies_listing", Err: err, RequestID: requestID}
 	}
 
 	// Process children with error recovery
@@ -251,11 +263,13 @@ func (p *Parser) parseReplies(ctx context.Context, comment *types.Comment, repli
 
 // ParseSubreddit extracts a SubredditData from a Thing of kind "t5".
 func (p *Parser) ParseSubreddit(ctx context.Context, thing *types.Thing) (*types.SubredditData, error) {
+	requestID := reqid.FromContext(ctx)
+
 	if thing == nil {
-		return nil, &KindError{Operation: "parse_subreddit", Expected: "non-nil", Actual: "nil"}
+		return nil, &KindError{Operation: "parse_subreddit", Expected: "non-nil", Actual: "nil", RequestID: requestID}
 	}
 	if thing.Kind != "t5" {
-		return nil, &KindError{Operation: "parse_subreddit", Expected: "t5", Actual: thing.Kind}
+		return nil, &KindError{Operation: "parse_subreddit", Expected: "t5", Actual: thing.Kind, RequestID: requestID}
 	}
 
 	var result types.SubredditData
@@ -264,7 +278,7 @@ func (p *Parser) ParseSubreddit(ctx context.Context, thing *types.Thing) (*types
 			p.logger.LogAttrs(ctx, slog.LevelWarn, "failed to parse subreddit data",
 				slog.String("error", err.Error()))
 		}
-		return nil, &UnmarshalError{ThingKind: "Subreddit", Operation: "unmarshal_subreddit", Err: err}
+		return nil, &UnmarshalError{ThingKind: "Subreddit", Operation: "unmarshal_subreddit", Err: err, RequestID: requestID}
 	}
 
 	// Validate the parsed subreddit
@@ -273,7 +287,7 @@ func (p *Parser) ParseSubreddit(ctx context.Context, thing *types.Thing) (*types
 			p.logger.LogAttrs(ctx, slog.LevelWarn, "invalid subreddit data from Reddit API",
 				slog.String("error", err.Error()))
 		}
-		return nil, &ValidationError{ThingKind: "Subreddit", Field: "SubredditData", Err: err}
+		return nil, &ValidationError{ThingKind: "Subreddit", Field: "SubredditData", Err: err, RequestID: requestID}
 	}
 
 	return &result, nil
@@ -281,11 +295,13 @@ func (p *Parser) ParseSubreddit(ctx context.Context, thing *types.Thing) (*types
 
 // ParseAccount extracts an AccountData from a Thing of kind "t2".
 func (p *Parser) ParseAccount(ctx context.Context, thing *types.Thing) (*types.AccountData, error) {
+	requestID := reqid.FromContext(ctx)
+
 	if thing == nil {
-		return nil, &KindError{Operation: "parse_account", Expected: "non-nil", Actual: "nil"}
+		return nil, &KindError{Operation: "parse_account", Expected: "non-nil", Actual: "nil", RequestID: requestID}
 	}
 	if thing.Kind != "t2" {
-		return nil, &KindError{Operation: "parse_account", Expected: "t2", Actual: thing.Kind}
+		return nil, &KindError{Operation: "parse_account", Expected: "t2", Actual: thing.Kind, RequestID: requestID}
 	}
 
 	var result types.AccountData
@@ -294,7 +310,7 @@ func (p *Parser) ParseAccount(ctx context.Context, thing *types.Thing) (*types.A
 			p.logger.LogAttrs(ctx, slog.LevelWarn, "failed to parse account data",
 				slog.String("error", err.Error()))
 		}
-		return nil, &UnmarshalError{ThingKind: "Account", Operation: "unmarshal_account", Err: err}
+		return nil, &UnmarshalError{ThingKind: "Account", Operation: "unmarshal_account", Err: err, RequestID: requestID}
 	}
 
 	// Validate the parsed account
@@ -303,7 +319,7 @@ func (p *Parser) ParseAccount(ctx context.Context, thing *types.Thing) (*types.A
 			p.logger.LogAttrs(ctx, slog.LevelWarn, "invalid account data from Reddit API",
 				slog.String("error", err.Error()))
 		}
-		return nil, &ValidationError{ThingKind: "Account", Field: "AccountData", Err: err}
+		return nil, &ValidationError{ThingKind: "Account", Field: "AccountData", Err: err, RequestID: requestID}
 	}
 
 	return &result, nil
@@ -311,11 +327,13 @@ func (p *Parser) ParseAccount(ctx context.Context, thing *types.Thing) (*types.A
 
 // ParseMessage extracts a MessageData from a Thing of kind "t4".
 func (p *Parser) ParseMessage(ctx context.Context, thing *types.Thing) (*types.MessageData, error) {
+	requestID := reqid.FromContext(ctx)
+
 	if thing == nil {
-		return nil, &KindError{Operation: "parse_message", Expected: "non-nil", Actual: "nil"}
+		return nil, &KindError{Operation: "parse_message", Expected: "non-nil", Actual: "nil", RequestID: requestID}
 	}
 	if thing.Kind != "t4" {
-		return nil, &KindError{Operation: "parse_message", Expected: "t4", Actual: thing.Kind}
+		return nil, &KindError{Operation: "parse_message", Expected: "t4", Actual: thing.Kind, RequestID: requestID}
 	}
 
 	var result types.MessageData
@@ -324,7 +342,7 @@ func (p *Parser) ParseMessage(ctx context.Context, thing *types.Thing) (*types.M
 			p.logger.LogAttrs(ctx, slog.LevelWarn, "failed to parse message data",
 				slog.String("error", err.Error()))
 		}
-		return nil, &UnmarshalError{ThingKind: "Message", Operation: "unmarshal_message", Err: err}
+		return nil, &UnmarshalError{ThingKind: "Message", Operation: "unmarshal_message", Err: err, RequestID: requestID}
 	}
 
 	// Validate the parsed message
@@ -333,7 +351,7 @@ func (p *Parser) ParseMessage(ctx context.Context, thing *types.Thing) (*types.M
 			p.logger.LogAttrs(ctx, slog.LevelWarn, "invalid message data from Reddit API",
 				slog.String("error", err.Error()))
 		}
-		return nil, &ValidationError{ThingKind: "Message", Field: "MessageData", Err: err}
+		return nil, &ValidationError{ThingKind: "Message", Field: "MessageData", Err: err, RequestID: requestID}
 	}
 
 	return &result, nil
@@ -341,11 +359,13 @@ func (p *Parser) ParseMessage(ctx context.Context, thing *types.Thing) (*types.M
 
 // ParseMore extracts a MoreData from a Thing of kind "more".
 func (p *Parser) ParseMore(ctx context.Context, thing *types.Thing) (*types.MoreData, error) {
+	requestID := reqid.FromContext(ctx)
+
 	if thing == nil {
-		return nil, &KindError{Operation: "parse_more", Expected: "non-nil", Actual: "nil"}
+		return nil, &KindError{Operation: "parse_more", Expected: "non-nil", Actual: "nil", RequestID: requestID}
 	}
 	if thing.Kind != "more" {
-		return nil, &KindError{Operation: "parse_more", Expected: "more", Actual: thing.Kind}
+		return nil, &KindError{Operation: "parse_more", Expected: "more", Actual: thing.Kind, RequestID: requestID}
 	}
 
 	var result types.MoreData
@@ -354,7 +374,7 @@ func (p *Parser) ParseMore(ctx context.Context, thing *types.Thing) (*types.More
 			p.logger.LogAttrs(ctx, slog.LevelWarn, "failed to parse more data",
 				slog.String("error", err.Error()))
 		}
-		return nil, &UnmarshalError{ThingKind: "More", Operation: "unmarshal_more", Err: err}
+		return nil, &UnmarshalError{ThingKind: "More", Operation: "unmarshal_more", Err: err, RequestID: requestID}
 	}
 
 	// Validate the parsed more data
@@ -363,7 +383,7 @@ func (p *Parser) ParseMore(ctx context.Context, thing *types.Thing) (*types.More
 			p.logger.LogAttrs(ctx, slog.LevelWarn, "invalid more data from Reddit API",
 				slog.String("error", err.Error()))
 		}
-		return nil, &ValidationError{ThingKind: "More", Field: "MoreData", Err: err}
+		return nil, &ValidationError{ThingKind: "More", Field: "MoreData", Err: err, RequestID: requestID}
 	}
 
 	return &result, nil
@@ -371,11 +391,13 @@ func (p *Parser) ParseMore(ctx context.Context, thing *types.Thing) (*types.More
 
 // ExtractPosts extracts all Post objects from a listing Thing.
 func (p *Parser) ExtractPosts(ctx context.Context, thing *types.Thing) ([]*types.Post, error) {
+	requestID := reqid.FromContext(ctx)
+
 	if thing == nil {
-		return nil, &KindError{Operation: "extract_posts", Expected: "non-nil", Actual: "nil"}
+		return nil, &KindError{Operation: "extract_posts", Expected: "non-nil", Actual: "nil", RequestID: requestID}
 	}
 	if thing.Kind != "Listing" {
-		return nil, &KindError{Operation: "extract_posts", Expected: "Listing", Actual: thing.Kind}
+		return nil, &KindError{Operation: "extract_posts", Expected: "Listing", Actual: thing.Kind, RequestID: requestID}
 	}
 
 	listingData, err := p.ParseListing(ctx, thing)
@@ -407,6 +429,7 @@ func (p *Parser) ExtractPosts(ctx context.Context, thing *types.Thing) ([]*types
 // Returns comments with proper tree structure (each comment has its Replies populated).
 // Also returns all "more" IDs found at any level in the tree for deferred loading.
 func (p *Parser) ExtractComments(ctx context.Context, thing *types.Thing) ([]*types.Comment, []string, error) {
+	requestID := reqid.FromContext(ctx)
 	comments := make([]*types.Comment, 0)
 	moreIDs := make([]string, 0)
 
@@ -426,7 +449,7 @@ func (p *Parser) ExtractComments(ctx context.Context, thing *types.Thing) ([]*ty
 
 	// Handle listing of comments
 	if thing.Kind != "Listing" {
-		return nil, nil, &KindError{Operation: "extract_comments", Expected: "Listing or t1", Actual: thing.Kind}
+		return nil, nil, &KindError{Operation: "extract_comments", Expected: "Listing or t1", Actual: thing.Kind, RequestID: requestID}
 	}
 
 	listingData, err := p.ParseListing(ctx, thing)
@@ -491,8 +514,10 @@ func (p *Parser) collectMoreIDsWithDepth(comment *types.Comment, depth int) []st
 // ExtractPostAndComments parses the typical response from GetComments which contains
 // [post_listing, comments_listing]. Returns the extracted post and comments data.
 func (p *Parser) ExtractPostAndComments(ctx context.Context, response []*types.Thing) (*types.CommentsResponse, error) {
+	requestID := reqid.FromContext(ctx)
+
 	if len(response) == 0 {
-		return nil, &ExtractionError{Operation: "extract_post_and_comments", Context: "empty response"}
+		return nil, &ExtractionError{Operation: "extract_post_and_comments", Context: "empty response", RequestID: requestID}
 	}
 
 	// Reddit can return either:
@@ -523,10 +548,10 @@ func (p *Parser) ExtractPostAndComments(ctx context.Context, response []*types.T
 		if err != nil {
 			// If we have a post but no comments, return the post
 			if result.Post != nil {
-				return result, &ExtractionError{Operation: "extract_comments", Err: err}
+				return result, &ExtractionError{Operation: "extract_comments", Err: err, RequestID: requestID}
 			}
 			// If we have neither post nor comments, return error
-			return nil, &ExtractionError{Operation: "extract_post_and_comments", Context: "failed to extract both post and comments"}
+			return nil, &ExtractionError{Operation: "extract_post_and_comments", Context: "failed to extract both post and comments", RequestID: requestID}
 		}
 
 		result.Comments = comments
@@ -549,7 +574,7 @@ func (p *Parser) ExtractPostAndComments(ctx context.Context, response []*types.T
 		// Try to extract as posts instead (might be a post-only response)
 		posts, err := p.ExtractPosts(ctx, response[0])
 		if err != nil || len(posts) == 0 {
-			return nil, &ExtractionError{Operation: "extract_data_from_single_listing", Err: err}
+			return nil, &ExtractionError{Operation: "extract_data_from_single_listing", Err: err, RequestID: requestID}
 		}
 		result.Post = posts[0]
 		return result, nil

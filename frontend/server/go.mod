@@ -14,6 +14,8 @@ require (
 	github.com/hashicorp/errwrap v1.1.0 // indirect
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
 	github.com/mattn/go-sqlite3 v1.14.32 // indirect
+	github.com/oklog/ulid/v2 v2.1.1 // indirect
+	golang.org/x/sync v0.12.0 // indirect
 )
 
 replace github.com/jamesprial/go-reddit-api-wrapper => ../../

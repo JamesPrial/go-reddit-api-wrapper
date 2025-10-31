@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jamesprial/go-reddit-api-wrapper/pkg/reqid"
 	"github.com/jamesprial/go-reddit-api-wrapper/storage"
 	_ "github.com/jamesprial/go-reddit-api-wrapper/storage/sqlite"
 )
@@ -66,11 +67,17 @@ func CORSMiddleware(next http.Handler) http.Handler {
 func LoggingMiddleware(logger *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Generate request ID and add to context if not already present
+			ctx := reqid.Ensure(r.Context())
+			requestID := reqid.FromContext(ctx)
+			r = r.WithContext(ctx)
+
 			start := time.Now()
 			logger.Info("incoming request",
 				"method", r.Method,
 				"path", r.RequestURI,
 				"remote_addr", r.RemoteAddr,
+				slog.String("request_id", requestID),
 			)
 
 			// Wrap response writer to capture status code
@@ -84,6 +91,7 @@ func LoggingMiddleware(logger *slog.Logger) func(http.Handler) http.Handler {
 				"path", r.RequestURI,
 				"status_code", recorder.statusCode,
 				"duration_ms", duration.Milliseconds(),
+				slog.String("request_id", requestID),
 			)
 		})
 	}
@@ -95,6 +103,9 @@ func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
 	}))
+
+	// Generate server instance ID for server lifecycle logging
+	serverInstanceID := reqid.Generate()
 
 	// Create session manager (auto-generates JWT secret at runtime)
 	sessionManager := NewSessionManager()
@@ -114,11 +125,11 @@ func main() {
 	store, err := storage.New(ctx, storeConfig)
 	cancel()
 	if err != nil {
-		logger.Error("failed to initialize storage", "db_path", sqliteDbPath, "error", err)
+		logger.Error("failed to initialize storage", "db_path", sqliteDbPath, "error", err, slog.String("server_id", serverInstanceID))
 		os.Exit(1)
 	}
 
-	logger.Info("storage initialized successfully", "db_path", sqliteDbPath)
+	logger.Info("storage initialized successfully", "db_path", sqliteDbPath, slog.String("server_id", serverInstanceID))
 
 	// Create handler with store
 	handler := NewHandler(sessionManager, logger, store)
@@ -155,7 +166,7 @@ func main() {
 	muxWithMiddleware = CORSMiddleware(muxWithMiddleware)
 	muxWithMiddleware = LoggingMiddleware(logger)(muxWithMiddleware)
 
-	logger.Info("all components initialized successfully")
+	logger.Info("all components initialized successfully", slog.String("server_id", serverInstanceID))
 
 	// Create HTTP server
 	server := &http.Server{
@@ -169,7 +180,7 @@ func main() {
 	// Start server in a goroutine
 	serverErrors := make(chan error, 1)
 	go func() {
-		logger.Info("starting server", "addr", server.Addr)
+		logger.Info("starting server", "addr", server.Addr, slog.String("server_id", serverInstanceID))
 		serverErrors <- server.ListenAndServe()
 	}()
 
@@ -181,14 +192,14 @@ func main() {
 		ticker := time.NewTicker(5 * time.Minute)
 		defer ticker.Stop()
 
-		logger.Info("starting bulk save job cleanup goroutine", "interval", "5m", "max_age", "5m")
+		logger.Info("starting bulk save job cleanup goroutine", "interval", "5m", "max_age", "5m", slog.String("server_id", serverInstanceID))
 
 		for {
 			select {
 			case <-ticker.C:
 				cleanupOldJobs(5*time.Minute, logger)
 			case <-cleanupStop:
-				logger.Info("stopping job cleanup goroutine")
+				logger.Info("stopping job cleanup goroutine", slog.String("server_id", serverInstanceID))
 				return
 			}
 		}
@@ -201,14 +212,14 @@ func main() {
 	select {
 	case err := <-serverErrors:
 		if err != http.ErrServerClosed {
-			logger.Error("server error", "error", err)
+			logger.Error("server error", "error", err, slog.String("server_id", serverInstanceID))
 		}
 	case sig := <-sigChan:
-		logger.Info("received signal", "signal", sig)
+		logger.Info("received signal", "signal", sig, slog.String("server_id", serverInstanceID))
 	}
 
 	// Graceful shutdown
-	logger.Info("shutting down server...")
+	logger.Info("shutting down server...", slog.String("server_id", serverInstanceID))
 
 	// Stop job cleanup goroutine
 	close(cleanupStop)
@@ -220,14 +231,14 @@ func main() {
 	// Close storage
 	if store != nil {
 		if err := store.Close(); err != nil {
-			logger.Error("failed to close storage on first attempt", "error", err)
+			logger.Error("failed to close storage on first attempt", "error", err, slog.String("server_id", serverInstanceID))
 			// For SQLite, a delay may help with pending operations
 			time.Sleep(100 * time.Millisecond)
 			if err := store.Close(); err != nil {
-				logger.Error("failed to close storage on second attempt", "error", err)
+				logger.Error("failed to close storage on second attempt", "error", err, slog.String("server_id", serverInstanceID))
 			}
 		} else {
-			logger.Info("storage closed successfully")
+			logger.Info("storage closed successfully", slog.String("server_id", serverInstanceID))
 		}
 	}
 
@@ -235,9 +246,9 @@ func main() {
 	defer shutdownCancel()
 
 	if err := server.Shutdown(shutdownCtx); err != nil {
-		logger.Error("failed to shutdown server gracefully", "error", err)
+		logger.Error("failed to shutdown server gracefully", "error", err, slog.String("server_id", serverInstanceID))
 		os.Exit(1)
 	}
 
-	logger.Info("server shutdown successfully")
+	logger.Info("server shutdown successfully", slog.String("server_id", serverInstanceID))
 }
