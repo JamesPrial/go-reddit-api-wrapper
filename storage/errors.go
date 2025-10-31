@@ -12,10 +12,16 @@ type NotFoundError struct {
 	ResourceType string
 	// ResourceID is the ID of the resource that was not found
 	ResourceID string
+	// RequestID is the request ID for tracing (optional)
+	RequestID string
 }
 
 func (e *NotFoundError) Error() string {
-	return fmt.Sprintf("%s %q not found in storage", e.ResourceType, e.ResourceID)
+	msg := fmt.Sprintf("%s %q not found in storage", e.ResourceType, e.ResourceID)
+	if e.RequestID != "" {
+		msg += fmt.Sprintf(" (request_id: %s)", e.RequestID)
+	}
+	return msg
 }
 
 // ValidationError represents errors that occur during input validation in storage operations.
@@ -32,6 +38,8 @@ type ValidationError struct {
 	Reason string
 	// Err is the underlying error (if applicable)
 	Err error
+	// RequestID is the request ID for tracing (optional)
+	RequestID string
 }
 
 func (e *ValidationError) Error() string {
@@ -56,6 +64,10 @@ func (e *ValidationError) Error() string {
 		msg += fmt.Sprintf(", err: %v", e.Err)
 	}
 
+	if e.RequestID != "" {
+		msg += fmt.Sprintf(" (request_id: %s)", e.RequestID)
+	}
+
 	return msg
 }
 
@@ -77,6 +89,8 @@ type IntegrityError struct {
 	Reason string
 	// Err is the underlying error (if applicable)
 	Err error
+	// RequestID is the request ID for tracing (optional)
+	RequestID string
 }
 
 func (e *IntegrityError) Error() string {
@@ -89,6 +103,10 @@ func (e *IntegrityError) Error() string {
 
 	if e.Err != nil {
 		msg += fmt.Sprintf(", err: %v", e.Err)
+	}
+
+	if e.RequestID != "" {
+		msg += fmt.Sprintf(" (request_id: %s)", e.RequestID)
 	}
 
 	return msg
@@ -108,6 +126,8 @@ type TransactionError struct {
 	Message string
 	// Err is the underlying error from the database
 	Err error
+	// RequestID is the request ID for tracing (optional)
+	RequestID string
 }
 
 func (e *TransactionError) Error() string {
@@ -124,6 +144,10 @@ func (e *TransactionError) Error() string {
 
 	if e.Err != nil {
 		msg += fmt.Sprintf(", err: %v", e.Err)
+	}
+
+	if e.RequestID != "" {
+		msg += fmt.Sprintf(" (request_id: %s)", e.RequestID)
 	}
 
 	return msg
@@ -145,6 +169,8 @@ type DatabaseError struct {
 	Message string
 	// Err is the underlying database error
 	Err error
+	// RequestID is the request ID for tracing (optional)
+	RequestID string
 }
 
 func (e *DatabaseError) Error() string {
@@ -167,6 +193,10 @@ func (e *DatabaseError) Error() string {
 		msg += fmt.Sprintf(", err: %v", e.Err)
 	}
 
+	if e.RequestID != "" {
+		msg += fmt.Sprintf(" (request_id: %s)", e.RequestID)
+	}
+
 	return msg
 }
 
@@ -185,6 +215,8 @@ type ConflictError struct {
 	ResourceID string
 	// Message contains additional context about the conflict
 	Message string
+	// RequestID is the request ID for tracing (optional)
+	RequestID string
 }
 
 func (e *ConflictError) Error() string {
@@ -193,6 +225,9 @@ func (e *ConflictError) Error() string {
 		msg = fmt.Sprintf("conflict: %s %q %s", e.ResourceType, e.ResourceID, e.Message)
 	} else {
 		msg = fmt.Sprintf("conflict: %s %q already exists", e.ResourceType, e.ResourceID)
+	}
+	if e.RequestID != "" {
+		msg += fmt.Sprintf(" (request_id: %s)", e.RequestID)
 	}
 	return msg
 }

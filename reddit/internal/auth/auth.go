@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/jamesprial/go-reddit-api-wrapper/pkg/reqid"
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/clock"
 )
 
@@ -102,14 +103,20 @@ type tokenResponse struct {
 
 // GetToken performs the password grant flow to get an access token.
 func (a *Authenticator) GetToken(ctx context.Context) (string, error) {
+	// Extract request ID at method entry for tracing
+	requestID := reqid.FromContext(ctx)
+
 	// Check cache first - lock-free read
 	if cached := a.cachedToken.Load(); cached != nil {
 		// Capture the current time once for consistent comparison
 		now := a.clock.Now()
 		if now.Before(cached.expiry) {
 			if a.logger != nil {
-				a.logger.LogAttrs(ctx, slog.LevelDebug, "using cached reddit token",
-					slog.Time("expires_at", cached.expiry))
+				attrs := []slog.Attr{slog.Time("expires_at", cached.expiry)}
+				if requestID != "" {
+					attrs = append(attrs, slog.String("request_id", requestID))
+				}
+				a.logger.LogAttrs(ctx, slog.LevelDebug, "using cached reddit token", attrs...)
 			}
 			return cached.token, nil
 		}
@@ -125,8 +132,11 @@ func (a *Authenticator) GetToken(ctx context.Context) (string, error) {
 		now := a.clock.Now()
 		if now.Before(cached.expiry) {
 			if a.logger != nil {
-				a.logger.LogAttrs(ctx, slog.LevelDebug, "using cached reddit token (after lock)",
-					slog.Time("expires_at", cached.expiry))
+				attrs := []slog.Attr{slog.Time("expires_at", cached.expiry)}
+				if requestID != "" {
+					attrs = append(attrs, slog.String("request_id", requestID))
+				}
+				a.logger.LogAttrs(ctx, slog.LevelDebug, "using cached reddit token (after lock)", attrs...)
 			}
 			return cached.token, nil
 		}
@@ -138,8 +148,8 @@ func (a *Authenticator) GetToken(ctx context.Context) (string, error) {
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.tokenURL.String(), strings.NewReader(data))
 	if err != nil {
-		a.logAuthError(ctx, "failed to create token request", err)
-		return "", &TokenError{Operation: "fetch", Err: err}
+		a.logAuthError(ctx, requestID, "failed to create token request", err)
+		return "", &TokenError{Operation: "fetch", RequestID: requestID, Err: err}
 	}
 
 	req.SetBasicAuth(a.clientID, a.clientSecret)
@@ -150,8 +160,8 @@ func (a *Authenticator) GetToken(ctx context.Context) (string, error) {
 
 	resp, err := a.client.Do(req)
 	if err != nil {
-		a.logAuthError(ctx, "failed to execute token request", err)
-		return "", &TokenError{Operation: "fetch", Err: err}
+		a.logAuthError(ctx, requestID, "failed to execute token request", err)
+		return "", &TokenError{Operation: "fetch", RequestID: requestID, Err: err}
 	}
 	defer resp.Body.Close()
 
@@ -159,8 +169,8 @@ func (a *Authenticator) GetToken(ctx context.Context) (string, error) {
 	limitedReader := io.LimitReader(resp.Body, maxResponseBodySize)
 	bodyBytes, err := io.ReadAll(limitedReader)
 	if err != nil {
-		a.logAuthError(ctx, "failed to read token response", err)
-		return "", &TokenError{Operation: "fetch", HTTPStatus: resp.StatusCode, Err: err}
+		a.logAuthError(ctx, requestID, "failed to read token response", err)
+		return "", &TokenError{Operation: "fetch", HTTPStatus: resp.StatusCode, RequestID: requestID, Err: err}
 	}
 	// Check if we hit the size limit
 	if int64(len(bodyBytes)) == maxResponseBodySize {
@@ -168,41 +178,41 @@ func (a *Authenticator) GetToken(ctx context.Context) (string, error) {
 		var extraByte [1]byte
 		if n, _ := resp.Body.Read(extraByte[:]); n > 0 {
 			err := fmt.Errorf("response body exceeded max size of %d bytes", maxResponseBodySize)
-			a.logAuthError(ctx, "response body too large", err)
-			return "", &TokenError{Operation: "fetch", HTTPStatus: resp.StatusCode, Body: string(bodyBytes[:1000]), Err: err}
+			a.logAuthError(ctx, requestID, "response body too large", err)
+			return "", &TokenError{Operation: "fetch", HTTPStatus: resp.StatusCode, Body: string(bodyBytes[:1000]), RequestID: requestID, Err: err}
 		}
 	}
 
 	duration := a.clock.Since(start)
-	a.logAuthHTTPResult(ctx, resp.StatusCode, duration, bodyBytes)
+	a.logAuthHTTPResult(ctx, requestID, resp.StatusCode, duration, bodyBytes)
 
 	if resp.StatusCode != http.StatusOK {
-		return "", &TokenError{Operation: "fetch", HTTPStatus: resp.StatusCode, Body: string(bodyBytes)}
+		return "", &TokenError{Operation: "fetch", HTTPStatus: resp.StatusCode, Body: string(bodyBytes), RequestID: requestID}
 	}
 
 	var tokenResp tokenResponse
 	if err := json.Unmarshal(bodyBytes, &tokenResp); err != nil {
-		a.logAuthError(ctx, "failed to decode token response", err)
-		return "", &TokenError{Operation: "fetch", HTTPStatus: resp.StatusCode, Body: string(bodyBytes), Err: err}
+		a.logAuthError(ctx, requestID, "failed to decode token response", err)
+		return "", &TokenError{Operation: "fetch", HTTPStatus: resp.StatusCode, Body: string(bodyBytes), RequestID: requestID, Err: err}
 	}
 
 	if tokenResp.AccessToken == "" {
 		err := fmt.Errorf("access token was empty in response")
-		a.logAuthError(ctx, "received empty access token", err)
-		return "", &TokenError{Operation: "fetch", HTTPStatus: resp.StatusCode, Body: string(bodyBytes), Err: err}
+		a.logAuthError(ctx, requestID, "received empty access token", err)
+		return "", &TokenError{Operation: "fetch", HTTPStatus: resp.StatusCode, Body: string(bodyBytes), RequestID: requestID, Err: err}
 	}
 
 	// Validate ExpiresIn bounds to prevent integer overflow and invalid values
 
 	if tokenResp.ExpiresIn < 0 {
 		err := fmt.Errorf("invalid expires_in value: %d (cannot be negative)", tokenResp.ExpiresIn)
-		a.logAuthError(ctx, "received negative expires_in", err)
-		return "", &TokenError{Operation: "fetch", HTTPStatus: resp.StatusCode, Body: string(bodyBytes), Err: err}
+		a.logAuthError(ctx, requestID, "received negative expires_in", err)
+		return "", &TokenError{Operation: "fetch", HTTPStatus: resp.StatusCode, Body: string(bodyBytes), RequestID: requestID, Err: err}
 	}
 	if tokenResp.ExpiresIn > maxTokenExpirySeconds {
 		err := fmt.Errorf("invalid expires_in value: %d (exceeds maximum of %d seconds)", tokenResp.ExpiresIn, maxTokenExpirySeconds)
-		a.logAuthError(ctx, "received expires_in exceeding maximum", err)
-		return "", &TokenError{Operation: "fetch", HTTPStatus: resp.StatusCode, Body: string(bodyBytes), Err: err}
+		a.logAuthError(ctx, requestID, "received expires_in exceeding maximum", err)
+		return "", &TokenError{Operation: "fetch", HTTPStatus: resp.StatusCode, Body: string(bodyBytes), RequestID: requestID, Err: err}
 	}
 
 	// Cache the token with tiered expiry thresholds based on token lifetime
@@ -229,7 +239,7 @@ func (a *Authenticator) GetToken(ctx context.Context) (string, error) {
 		expiry: a.clock.Now().Add(expiryDuration),
 	})
 
-	a.logAuthSuccess(ctx, duration, tokenResp)
+	a.logAuthSuccess(ctx, requestID, duration, tokenResp)
 
 	return tokenResp.AccessToken, nil
 }
@@ -258,7 +268,7 @@ func (a *Authenticator) logAuthRequest(ctx context.Context) {
 	a.logger.LogAttrs(ctx, slog.LevelDebug, "requesting reddit access token", attrs...)
 }
 
-func (a *Authenticator) logAuthHTTPResult(ctx context.Context, status int, duration time.Duration, body []byte) {
+func (a *Authenticator) logAuthHTTPResult(ctx context.Context, requestID string, status int, duration time.Duration, body []byte) {
 	if a.logger == nil {
 		return
 	}
@@ -268,6 +278,9 @@ func (a *Authenticator) logAuthHTTPResult(ctx context.Context, status int, durat
 		slog.Int("status", status),
 		slog.Duration("duration", duration),
 		slog.Int("response_bytes", len(body)),
+	}
+	if requestID != "" {
+		attrs = append(attrs, slog.String("request_id", requestID))
 	}
 	if a.tokenURL != nil {
 		attrs = append(attrs, slog.String("url", a.tokenURL.String()))
@@ -283,13 +296,16 @@ func (a *Authenticator) logAuthHTTPResult(ctx context.Context, status int, durat
 	a.logger.LogAttrs(ctx, level, msg, attrs...)
 }
 
-func (a *Authenticator) logAuthError(ctx context.Context, message string, err error) {
+func (a *Authenticator) logAuthError(ctx context.Context, requestID string, message string, err error) {
 	if a.logger == nil {
 		return
 	}
 
 	ctx = contextOrBackground(ctx)
 	attrs := []slog.Attr{slog.String("error", err.Error())}
+	if requestID != "" {
+		attrs = append(attrs, slog.String("request_id", requestID))
+	}
 	if a.tokenURL != nil {
 		attrs = append(attrs, slog.String("url", a.tokenURL.String()))
 	}
@@ -297,13 +313,16 @@ func (a *Authenticator) logAuthError(ctx context.Context, message string, err er
 	a.logger.LogAttrs(ctx, slog.LevelError, message, attrs...)
 }
 
-func (a *Authenticator) logAuthSuccess(ctx context.Context, duration time.Duration, token tokenResponse) {
+func (a *Authenticator) logAuthSuccess(ctx context.Context, requestID string, duration time.Duration, token tokenResponse) {
 	if a.logger == nil {
 		return
 	}
 
 	ctx = contextOrBackground(ctx)
 	attrs := []slog.Attr{slog.Duration("duration", duration)}
+	if requestID != "" {
+		attrs = append(attrs, slog.String("request_id", requestID))
+	}
 	if token.ExpiresIn > 0 {
 		attrs = append(attrs, slog.Int("expires_in", token.ExpiresIn))
 	}
