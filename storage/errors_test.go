@@ -557,3 +557,230 @@ func TestErrors_AllFieldsCombinations(t *testing.T) {
 		require.Contains(t, msg, "SELECT * FROM posts")
 	})
 }
+
+// TestErrors_NotFoundErrorWithRequestID verifies NotFoundError includes RequestID in error message
+// when RequestID is non-empty.
+func TestErrors_NotFoundErrorWithRequestID(t *testing.T) {
+	t.Run("with RequestID", func(t *testing.T) {
+		err := &storage.NotFoundError{
+			ResourceType: "post",
+			ResourceID:   "abc123",
+			RequestID:    "req-12345",
+		}
+
+		msg := err.Error()
+		require.Contains(t, msg, "post")
+		require.Contains(t, msg, "abc123")
+		require.Contains(t, msg, "request_id: req-12345")
+	})
+
+	t.Run("without RequestID", func(t *testing.T) {
+		err := &storage.NotFoundError{
+			ResourceType: "post",
+			ResourceID:   "abc123",
+		}
+
+		msg := err.Error()
+		require.NotContains(t, msg, "request_id")
+		require.Equal(t, `post "abc123" not found in storage`, msg)
+	})
+}
+
+// TestErrors_ValidationErrorWithRequestID verifies ValidationError includes RequestID in error message
+// when RequestID is non-empty.
+func TestErrors_ValidationErrorWithRequestID(t *testing.T) {
+	t.Run("with RequestID", func(t *testing.T) {
+		err := &storage.ValidationError{
+			Operation: "UpsertPost",
+			Field:     "post",
+			Reason:    "cannot be nil",
+			RequestID: "req-67890",
+		}
+
+		msg := err.Error()
+		require.Contains(t, msg, "UpsertPost")
+		require.Contains(t, msg, "post")
+		require.Contains(t, msg, "request_id: req-67890")
+	})
+
+	t.Run("without RequestID", func(t *testing.T) {
+		err := &storage.ValidationError{
+			Operation: "UpsertPost",
+			Field:     "post",
+			Reason:    "cannot be nil",
+		}
+
+		msg := err.Error()
+		require.NotContains(t, msg, "request_id")
+	})
+}
+
+// TestErrors_IntegrityErrorWithRequestID verifies IntegrityError includes RequestID in error message
+// when RequestID is non-empty.
+func TestErrors_IntegrityErrorWithRequestID(t *testing.T) {
+	t.Run("with RequestID", func(t *testing.T) {
+		err := &storage.IntegrityError{
+			Operation:    "UpsertComment",
+			ResourceType: "comment",
+			ResourceID:   "cmt123",
+			Reason:       "parent not found",
+			RequestID:    "req-11111",
+		}
+
+		msg := err.Error()
+		require.Contains(t, msg, "UpsertComment")
+		require.Contains(t, msg, "comment")
+		require.Contains(t, msg, "request_id: req-11111")
+	})
+
+	t.Run("without RequestID", func(t *testing.T) {
+		err := &storage.IntegrityError{
+			ResourceType: "comment",
+			ResourceID:   "cmt123",
+			Reason:       "parent not found",
+		}
+
+		msg := err.Error()
+		require.NotContains(t, msg, "request_id")
+	})
+}
+
+// TestErrors_TransactionErrorWithRequestID verifies TransactionError includes RequestID in error message
+// when RequestID is non-empty.
+func TestErrors_TransactionErrorWithRequestID(t *testing.T) {
+	t.Run("with RequestID", func(t *testing.T) {
+		err := &storage.TransactionError{
+			Operation: "commit",
+			Message:   "database locked",
+			RequestID: "req-22222",
+		}
+
+		msg := err.Error()
+		require.Contains(t, msg, "commit")
+		require.Contains(t, msg, "database locked")
+		require.Contains(t, msg, "request_id: req-22222")
+	})
+
+	t.Run("without RequestID", func(t *testing.T) {
+		err := &storage.TransactionError{
+			Operation: "commit",
+			Message:   "database locked",
+		}
+
+		msg := err.Error()
+		require.NotContains(t, msg, "request_id")
+	})
+}
+
+// TestErrors_DatabaseErrorWithRequestID verifies DatabaseError includes RequestID in error message
+// when RequestID is non-empty.
+func TestErrors_DatabaseErrorWithRequestID(t *testing.T) {
+	t.Run("with RequestID", func(t *testing.T) {
+		err := &storage.DatabaseError{
+			Operation: "GetPost",
+			Message:   "query failed",
+			RequestID: "req-33333",
+		}
+
+		msg := err.Error()
+		require.Contains(t, msg, "GetPost")
+		require.Contains(t, msg, "query failed")
+		require.Contains(t, msg, "request_id: req-33333")
+	})
+
+	t.Run("without RequestID", func(t *testing.T) {
+		err := &storage.DatabaseError{
+			Operation: "GetPost",
+			Message:   "query failed",
+		}
+
+		msg := err.Error()
+		require.NotContains(t, msg, "request_id")
+	})
+}
+
+// TestErrors_ConflictErrorWithRequestID verifies ConflictError includes RequestID in error message
+// when RequestID is non-empty.
+func TestErrors_ConflictErrorWithRequestID(t *testing.T) {
+	t.Run("with RequestID", func(t *testing.T) {
+		err := &storage.ConflictError{
+			ResourceType: "post",
+			ResourceID:   "dup123",
+			Message:      "already exists",
+			RequestID:    "req-44444",
+		}
+
+		msg := err.Error()
+		require.Contains(t, msg, "post")
+		require.Contains(t, msg, "dup123")
+		require.Contains(t, msg, "request_id: req-44444")
+	})
+
+	t.Run("without RequestID", func(t *testing.T) {
+		err := &storage.ConflictError{
+			ResourceType: "post",
+			ResourceID:   "dup123",
+			Message:      "already exists",
+		}
+
+		msg := err.Error()
+		require.NotContains(t, msg, "request_id")
+	})
+}
+
+// TestErrors_AllErrorTypesWithRequestID uses table-driven test to verify all 6 error types
+// properly handle RequestID field.
+func TestErrors_AllErrorTypesWithRequestID(t *testing.T) {
+	tests := []struct {
+		name       string
+		err        error
+		requestID  string
+		shouldHave bool
+	}{
+		{
+			name:       "NotFoundError with RequestID",
+			err:        &storage.NotFoundError{ResourceType: "post", ResourceID: "1", RequestID: "req-1"},
+			requestID:  "req-1",
+			shouldHave: true,
+		},
+		{
+			name:       "ValidationError with RequestID",
+			err:        &storage.ValidationError{Field: "f", Reason: "r", RequestID: "req-2"},
+			requestID:  "req-2",
+			shouldHave: true,
+		},
+		{
+			name:       "IntegrityError with RequestID",
+			err:        &storage.IntegrityError{ResourceType: "c", ResourceID: "1", Reason: "r", RequestID: "req-3"},
+			requestID:  "req-3",
+			shouldHave: true,
+		},
+		{
+			name:       "TransactionError with RequestID",
+			err:        &storage.TransactionError{Operation: "test", RequestID: "req-4"},
+			requestID:  "req-4",
+			shouldHave: true,
+		},
+		{
+			name:       "DatabaseError with RequestID",
+			err:        &storage.DatabaseError{Operation: "test", RequestID: "req-5"},
+			requestID:  "req-5",
+			shouldHave: true,
+		},
+		{
+			name:       "ConflictError with RequestID",
+			err:        &storage.ConflictError{ResourceType: "p", ResourceID: "1", RequestID: "req-6"},
+			requestID:  "req-6",
+			shouldHave: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			msg := tt.err.Error()
+			if tt.shouldHave {
+				require.Contains(t, msg, "request_id: "+tt.requestID)
+			}
+		})
+	}
+}

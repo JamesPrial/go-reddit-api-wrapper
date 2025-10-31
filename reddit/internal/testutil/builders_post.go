@@ -129,10 +129,14 @@ func (pb *PostBuilder) WithAuthor(author string) *PostBuilder {
 
 // WithSubreddit sets the subreddit name and automatically updates the SubredditID
 // to "t5_" + lowercase(subreddit) to match Reddit's fullname format.
+// Removes underscores from the subreddit ID since fullnames can't contain them.
 func (pb *PostBuilder) WithSubreddit(sub string) *PostBuilder {
 	pb.post.Subreddit = sub
-	// Reddit subreddit IDs are always lowercase
-	pb.post.SubredditID = "t5_" + strings.ToLower(sub)
+	// Reddit subreddit IDs are always lowercase and must use base36 format (no underscores)
+	// So we remove underscores when generating the ID
+	idBase := strings.ToLower(sub)
+	idBase = strings.ReplaceAll(idBase, "_", "")
+	pb.post.SubredditID = "t5_" + idBase
 	return pb
 }
 

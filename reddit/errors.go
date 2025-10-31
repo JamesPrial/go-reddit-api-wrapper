@@ -19,13 +19,21 @@ type ConfigError struct {
 	Field string
 	// Message contains the detailed error message
 	Message string
+	// RequestID is the unique identifier for the request (if available)
+	RequestID string
 }
 
 func (e *ConfigError) Error() string {
+	var msg string
 	if e.Field != "" {
-		return fmt.Sprintf("config error in field %s: %s", e.Field, e.Message)
+		msg = fmt.Sprintf("config error in field %s: %s", e.Field, e.Message)
+	} else {
+		msg = fmt.Sprintf("config error: %s", e.Message)
 	}
-	return fmt.Sprintf("config error: %s", e.Message)
+	if e.RequestID != "" {
+		msg += fmt.Sprintf(" (request_id: %s)", e.RequestID)
+	}
+	return msg
 }
 
 // ValidationError represents errors that occur during input validation.
@@ -40,6 +48,8 @@ type ValidationError struct {
 	Reason string
 	// Err is the underlying error (if applicable)
 	Err error
+	// RequestID is the unique identifier for the request (if available)
+	RequestID string
 }
 
 func (e *ValidationError) Error() string {
@@ -52,6 +62,10 @@ func (e *ValidationError) Error() string {
 
 	if e.Err != nil {
 		msg += fmt.Sprintf(", err: %v", e.Err)
+	}
+
+	if e.RequestID != "" {
+		msg += fmt.Sprintf(" (request_id: %s)", e.RequestID)
 	}
 
 	return msg
@@ -73,15 +87,25 @@ type AuthError struct {
 	Body string
 	// Err contains the underlying error if available
 	Err error
+	// RequestID is the unique identifier for the request (if available)
+	RequestID string
 }
 
 func (e *AuthError) Error() string {
 	// Handle special cases to match legacy format
 	if e.StatusCode == 0 && e.Body == "" && e.Message == "" && e.Err != nil {
-		return fmt.Sprintf("auth error, err: %v", e.Err)
+		msg := fmt.Sprintf("auth error, err: %v", e.Err)
+		if e.RequestID != "" {
+			msg += fmt.Sprintf(" (request_id: %s)", e.RequestID)
+		}
+		return msg
 	}
 	if e.StatusCode == 0 && e.Body != "" && e.Message == "" && e.Err == nil {
-		return fmt.Sprintf("auth error, body: %q", e.Body)
+		msg := fmt.Sprintf("auth error, body: %q", e.Body)
+		if e.RequestID != "" {
+			msg += fmt.Sprintf(" (request_id: %s)", e.RequestID)
+		}
+		return msg
 	}
 
 	var parts []string
@@ -103,10 +127,18 @@ func (e *AuthError) Error() string {
 		parts = append(parts, fmt.Sprintf("err: %v", e.Err))
 	}
 
+	var msg string
 	if len(parts) == 1 {
-		return parts[0]
+		msg = parts[0]
+	} else {
+		msg = parts[0] + ": " + fmt.Sprintf("%s", joinParts(parts[1:], ", "))
 	}
-	return parts[0] + ": " + fmt.Sprintf("%s", joinParts(parts[1:], ", "))
+
+	if e.RequestID != "" {
+		msg += fmt.Sprintf(" (request_id: %s)", e.RequestID)
+	}
+
+	return msg
 }
 
 func (e *AuthError) Unwrap() error {
@@ -125,14 +157,24 @@ type APIError struct {
 	Message string
 	// Details contains any additional error details from the API
 	Details interface{}
+	// RequestID is the unique identifier for the request (if available)
+	RequestID string
 }
 
 func (e *APIError) Error() string {
+	var msg string
 	if e.ErrorCode != "" {
-		return fmt.Sprintf("reddit API error (status %d, code %s): %s", e.StatusCode, e.ErrorCode, e.Message)
+		msg = fmt.Sprintf("reddit API error (status %d, code %s): %s", e.StatusCode, e.ErrorCode, e.Message)
+	} else {
+		// Use the legacy format for backward compatibility
+		msg = fmt.Sprintf("API request failed with status %d: %s", e.StatusCode, e.Message)
 	}
-	// Use the legacy format for backward compatibility
-	return fmt.Sprintf("API request failed with status %d: %s", e.StatusCode, e.Message)
+
+	if e.RequestID != "" {
+		msg += fmt.Sprintf(" (request_id: %s)", e.RequestID)
+	}
+
+	return msg
 }
 
 // RateLimitError represents errors that occur during rate limiting operations.
@@ -145,13 +187,23 @@ type RateLimitError struct {
 	WaitDuration time.Duration
 	// Err is the underlying error
 	Err error
+	// RequestID is the unique identifier for the request (if available)
+	RequestID string
 }
 
 func (e *RateLimitError) Error() string {
+	var msg string
 	if e.WaitDuration > 0 {
-		return fmt.Sprintf("rate limit error (%s) after waiting %v: %v", e.Reason, e.WaitDuration, e.Err)
+		msg = fmt.Sprintf("rate limit error (%s) after waiting %v: %v", e.Reason, e.WaitDuration, e.Err)
+	} else {
+		msg = fmt.Sprintf("rate limit error (%s): %v", e.Reason, e.Err)
 	}
-	return fmt.Sprintf("rate limit error (%s): %v", e.Reason, e.Err)
+
+	if e.RequestID != "" {
+		msg += fmt.Sprintf(" (request_id: %s)", e.RequestID)
+	}
+
+	return msg
 }
 
 func (e *RateLimitError) Unwrap() error {
@@ -170,13 +222,23 @@ type NetworkError struct {
 	Duration time.Duration
 	// Err is the underlying error
 	Err error
+	// RequestID is the unique identifier for the request (if available)
+	RequestID string
 }
 
 func (e *NetworkError) Error() string {
+	var msg string
 	if e.Duration > 0 {
-		return fmt.Sprintf("network error for %s %s after %v: %v", e.Method, e.URL, e.Duration, e.Err)
+		msg = fmt.Sprintf("network error for %s %s after %v: %v", e.Method, e.URL, e.Duration, e.Err)
+	} else {
+		msg = fmt.Sprintf("network error for %s %s: %v", e.Method, e.URL, e.Err)
 	}
-	return fmt.Sprintf("network error for %s %s: %v", e.Method, e.URL, e.Err)
+
+	if e.RequestID != "" {
+		msg += fmt.Sprintf(" (request_id: %s)", e.RequestID)
+	}
+
+	return msg
 }
 
 func (e *NetworkError) Unwrap() error {
@@ -193,6 +255,8 @@ type ParseError struct {
 	Message string
 	// Err contains the underlying error if available
 	Err error
+	// RequestID is the unique identifier for the request (if available)
+	RequestID string
 }
 
 func (e *ParseError) Error() string {
@@ -202,10 +266,18 @@ func (e *ParseError) Error() string {
 		msg = e.Err.Error()
 	}
 
+	var errMsg string
 	if e.Operation != "" {
-		return fmt.Sprintf("parse error during %s: %s", e.Operation, msg)
+		errMsg = fmt.Sprintf("parse error during %s: %s", e.Operation, msg)
+	} else {
+		errMsg = fmt.Sprintf("parse error: %s", msg)
 	}
-	return fmt.Sprintf("parse error: %s", msg)
+
+	if e.RequestID != "" {
+		errMsg += fmt.Sprintf(" (request_id: %s)", e.RequestID)
+	}
+
+	return errMsg
 }
 
 func (e *ParseError) Unwrap() error {

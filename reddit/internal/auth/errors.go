@@ -29,6 +29,7 @@ type TokenError struct {
 	Operation  string // The operation being performed ("fetch", "refresh")
 	HTTPStatus int    // HTTP status code (0 if no HTTP request was made)
 	Body       string // Response body for debugging (empty if not applicable)
+	RequestID  string // Request ID for tracing (empty if not available)
 	Err        error  // The underlying error
 }
 
@@ -41,6 +42,10 @@ func (e *TokenError) Error() string {
 		}
 	} else {
 		msg = fmt.Sprintf("token %s error", e.Operation)
+	}
+
+	if e.RequestID != "" {
+		msg += fmt.Sprintf(", request_id: %s", e.RequestID)
 	}
 
 	if e.Err != nil {

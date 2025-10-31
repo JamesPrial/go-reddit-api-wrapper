@@ -476,15 +476,14 @@ func BenchmarkParser_ExtractPostAndComments(b *testing.B) {
 	}
 }
 
-// BenchmarkParseContext_Pool benchmarks the sync.Pool operations
-func BenchmarkParseContext_Pool(b *testing.B) {
-	parser := NewParser()
+// BenchmarkParseContext_Allocation benchmarks parseContext allocation
+func BenchmarkParseContext_Allocation(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		pc := parser.pool.Get().(*parseContext)
-		parser.pool.Put(pc)
+		pc := &parseContext{seenIDs: make(map[string]bool)}
+		_ = pc
 	}
 }
 

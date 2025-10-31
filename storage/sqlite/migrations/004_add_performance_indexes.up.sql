@@ -1,0 +1,136 @@
+-- ============================================================================
+-- Migration: 004_add_performance_indexes.up.sql
+-- Purpose: Add performance indexes for score filtering and subreddit queries
+-- ============================================================================
+--
+-- PERFORMANCE OPTIMIZATION CONTEXT:
+--
+-- The posts table currently has the following indexes:
+--   1. idx_posts_subreddit_created: For "recent posts in subreddit" queries
+--   2. idx_posts_author: For "posts by author" queries
+--   3. idx_posts_fetched_at: For cache eviction queries
+--
+-- This migration adds two additional indexes to optimize common filtering patterns:
+--
+-- ============================================================================
+-- INDEX 1: idx_posts_score (Score filtering)
+-- ============================================================================
+--
+-- PURPOSE:
+--   Enables efficient filtering and sorting by score across all posts.
+--   Example queries:
+--     - Find all posts with score >= 100 (MinScore filter)
+--     - Find top-scored posts across all subreddits
+--     - Sort any result set by score without full table scans
+--
+-- QUERY PATTERN OPTIMIZED:
+--   SELECT * FROM posts WHERE score >= ? ORDER BY score DESC;
+--
+-- PERFORMANCE IMPACT:
+--   Without Index: O(n) table scan + full sort
+--   - Reads all rows into memory for evaluation and sorting
+--   - Cost: ~1-5ms for 10K posts, scales linearly with data growth
+--   - Workload: High CPU usage during sort operations
+--
+--   With Index: O(log n) index lookup + linear scan of qualifying rows
+--   - Uses B-tree to navigate to first qualifying score
+--   - Scans only matching rows (potentially all if filter is permissive)
+--   - Cost: ~0.1-0.3ms for 10K posts with selective filters
+--   - Workload: Primarily I/O bound, minimal CPU for sorting
+--
+-- BENCHMARK IMPROVEMENTS (estimated):
+--   - MinScore=10000 (top 1% of posts): 20-50x faster
+--   - MinScore=5000 (top 5% of posts): 10-20x faster
+--   - MinScore=100 (top 20% of posts): 3-5x faster
+--
+-- USE CASES:
+--   1. Filtering high-quality/high-engagement content
+--   2. Trending post identification
+--   3. Finding controversial posts
+--   4. Sorting any dataset by score without table scan
+--
+-- STORAGE TRADE-OFF:
+--   - Index size: ~200KB per 10K posts (B-tree overhead)
+--   - Write overhead: Minimal for INSERT/UPDATE (score rarely changes)
+--   - Read benefit: Significant for score-based queries
+--
+-- ============================================================================
+-- INDEX 2: idx_posts_subreddit_score (Subreddit + Score composite)
+-- ============================================================================
+--
+-- PURPOSE:
+--   Enables efficient "top posts in subreddit" queries with score filtering.
+--   This composite index enables more efficient queries than using separate indexes
+--   because it covers both filtering dimensions in a single B-tree lookup.
+--   Example queries:
+--     - Find top-scored posts in a specific subreddit
+--     - Find high-quality posts (score >= threshold) in a subreddit
+--     - Sort posts by score within a subreddit without full scan
+--
+-- QUERY PATTERN OPTIMIZED:
+--   SELECT * FROM posts WHERE subreddit = ? AND score >= ? ORDER BY score DESC;
+--
+-- PERFORMANCE IMPACT:
+--   Without Composite Index (using idx_posts_subreddit_created):
+--   - Uses subreddit index, then filters by score in memory
+--   - Cost: ~0.5-2ms for 10K posts (can't use score for sort)
+--   - Workload: Linear scan of all posts in subreddit
+--
+--   With Composite Index:
+--   - Uses B-tree to navigate to (subreddit, score) pair directly
+--   - Naturally ordered by score DESC for efficient iteration
+--   - Cost: ~0.05-0.2ms for 10K posts with selective filters
+--   - Workload: Direct access to qualifying rows
+--
+-- INDEX STRUCTURE:
+--   CREATE INDEX idx_posts_subreddit_score ON posts(subreddit, score DESC)
+--
+--   This structure allows SQLite to use the index for:
+--   1. Filtering by subreddit (first column)
+--   2. Filtering by score >= threshold (second column)
+--   3. Sorting by score DESC (naturally ordered in index)
+--
+--   SQLite will use this index for queries like:
+--   - WHERE subreddit = 'golang' AND score >= 50 (full utilization)
+--   - WHERE subreddit = 'golang' ORDER BY score DESC (full utilization)
+--   - WHERE score >= 50 (partial: only score column used, subreddit skipped)
+--
+-- BENCHMARK IMPROVEMENTS (estimated):
+--   - 100 subreddits with 100 posts each:
+--     * Top posts in subreddit: 30-100x faster than table scan
+--     * Top 10 posts with MinScore in subreddit: 50-200x faster
+--   - Single large subreddit (10K posts):
+--     * Score-based sort: 5-10x faster than created_utc sort
+--
+-- USE CASES:
+--   1. "Top posts in subreddit" features (e.g., /r/golang top week)
+--   2. Subreddit-specific hot content identification
+--   3. Quality filtering within community context
+--   4. Ranking posts by engagement within subreddit
+--
+-- STORAGE TRADE-OFF:
+--   - Index size: ~300KB per 10K posts across 100 subreddits
+--   - Write overhead: Minimal (subreddit and score rarely change)
+--   - Read benefit: Critical for multi-dimensional queries
+--
+-- COMPOSITE vs SEPARATE INDEXES:
+--   Composite INDEX: 1 B-tree with (subreddit, score DESC)
+--   - Enables both dimensions to be used in single index lookup
+--   - Avoids multiple index access patterns
+--   - More efficient for queries using both dimensions
+--
+--   Separate Indexes: One on subreddit, one on score
+--   - SQLite chooses only one to use (usually most selective)
+--   - Still requires filtering/sorting with other dimension in memory
+--   - Less efficient for compound predicates
+--
+-- ============================================================================
+
+-- Index for score-based filtering and sorting across all posts
+-- Covers: WHERE score >= ? and ORDER BY score DESC
+CREATE INDEX IF NOT EXISTS idx_posts_score ON posts(score DESC);
+
+-- Composite index for efficient "top posts in subreddit" queries
+-- Covers: WHERE subreddit = ? AND score >= ? ORDER BY score DESC
+-- This is more efficient than separate indexes for compound predicates
+CREATE INDEX IF NOT EXISTS idx_posts_subreddit_score ON posts(subreddit, score DESC);

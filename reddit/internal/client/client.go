@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/jamesprial/go-reddit-api-wrapper/pkg/reqid"
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/clock"
 	"golang.org/x/time/rate"
@@ -106,8 +107,9 @@ type Client struct {
 	clock           clock.Clock // Time abstraction for testing
 
 	limiter            *rate.Limiter
-	forceWaitUntil     atomic.Int64 // Unix nanoseconds
-	rateLimitThreshold float64      // When to start proactive throttling
+	forceWaitUntil     atomic.Int64                     // Unix nanoseconds
+	rateLimitThreshold float64                          // When to start proactive throttling
+	transportMetrics   atomic.Pointer[TransportMetrics] // Connection and DNS metrics (optional)
 }
 
 // RateLimitConfig controls how requests are throttled before reaching Reddit.
@@ -131,6 +133,10 @@ func NewClient(httpClient *http.Client, baseURL string, userAgent string, logger
 // NewClientWithRateLimit returns a new Reddit API client with custom rate limiting.
 // If a nil httpClient is provided, http.DefaultClient will be used.
 // If a nil clock is provided, a real clock will be used.
+//
+// Transport metrics are not automatically detected. Call SetTransportMetrics()
+// after creating the client to enable connection metrics logging.
+// SetTransportMetrics is thread-safe and can be called at any time.
 func NewClientWithRateLimit(httpClient *http.Client, baseURL string, userAgent string, logger *slog.Logger, cfg RateLimitConfig, clk clock.Clock) (*Client, error) {
 	if httpClient == nil {
 		httpClient = http.DefaultClient
@@ -167,6 +173,7 @@ func NewClientWithRateLimit(httpClient *http.Client, baseURL string, userAgent s
 		rateLimitThreshold: threshold,
 		clock:              clk,
 	}
+	// transportMetrics is initialized to nil (zero value of atomic.Pointer)
 
 	return c, nil
 }
@@ -181,14 +188,32 @@ func (c *Client) SetLogBodyLimit(limit int) {
 	c.maxLogBodyBytes = limit
 }
 
+// SetTransportMetrics sets the transport metrics to track connection statistics.
+// This enables connection and DNS metrics to be included in debug logs.
+// Thread-safe - can be called concurrently.
+func (c *Client) SetTransportMetrics(metrics *TransportMetrics) {
+	c.transportMetrics.Store(metrics)
+}
+
+// GetConnectionMetrics returns the transport metrics if available, or nil.
+// Returns a pointer to the live metrics object which continues to be updated.
+// Thread-safe - can be called concurrently.
+func (c *Client) GetConnectionMetrics() *TransportMetrics {
+	return c.transportMetrics.Load()
+}
+
 // NewRequest creates an API request. A relative URL can be provided in path,
 // in which case it is resolved relative to the BaseURL of the Client.
 // Optional query parameters can be provided as url.Values.
 // Note: The caller is responsible for setting authentication headers.
 func (c *Client) NewRequest(ctx context.Context, method, path string, body io.Reader, params ...url.Values) (*http.Request, error) {
+	// Ensure request ID exists in context
+	ctx = reqid.Ensure(ctx)
+	requestID := reqid.FromContext(ctx)
+
 	u, err := c.BaseURL.Parse(path)
 	if err != nil {
-		return nil, &RequestBuildError{Operation: "parse_path", URL: path, Err: err}
+		return nil, &RequestBuildError{Operation: "parse_path", URL: path, RequestID: requestID, Err: err}
 	}
 
 	// Add query parameters if provided
@@ -204,7 +229,7 @@ func (c *Client) NewRequest(ctx context.Context, method, path string, body io.Re
 
 	req, err := http.NewRequestWithContext(ctx, method, u.String(), body)
 	if err != nil {
-		return nil, &RequestBuildError{Operation: "create_request", URL: u.String(), Err: err}
+		return nil, &RequestBuildError{Operation: "create_request", URL: u.String(), RequestID: requestID, Err: err}
 	}
 
 	req.Header.Set("User-Agent", c.UserAgent)
@@ -216,20 +241,21 @@ func (c *Client) NewRequest(ctx context.Context, method, path string, body io.Re
 // This centralizes rate limiting, logging, and error handling for all HTTP operations.
 func (c *Client) doRequest(req *http.Request) ([]byte, *http.Response, error) {
 	ctx := req.Context()
+	requestID := reqid.FromContext(ctx)
 	start := c.clock.Now()
 
 	// Rate limiting
 	if err := c.waitForRateLimit(ctx); err != nil {
-		c.logWaitFailure(ctx, req, err)
-		return nil, nil, &RateLimitError{Reason: "wait_failed", Err: err}
+		c.logWaitFailure(ctx, req, requestID, err)
+		return nil, nil, &RateLimitError{Reason: "wait_failed", RequestID: requestID, Err: err}
 	}
 
 	// Execute request
 	resp, err := c.client.Do(req)
 	if err != nil {
 		duration := c.clock.Since(start)
-		c.logTransportError(ctx, req, duration, err)
-		return nil, nil, &TransportError{Method: req.Method, URL: req.URL.String(), Duration: duration, Err: err}
+		c.logTransportError(ctx, req, requestID, duration, err)
+		return nil, nil, &TransportError{Method: req.Method, URL: req.URL.String(), Duration: duration, RequestID: requestID, Err: err}
 	}
 	defer resp.Body.Close()
 
@@ -244,8 +270,8 @@ func (c *Client) doRequest(req *http.Request) ([]byte, *http.Response, error) {
 	limitedReader := io.LimitReader(resp.Body, MAX_RESPONSE_BODY_SIZE)
 	bytesRead, err := io.Copy(buf, limitedReader)
 	if err != nil {
-		c.logBodyReadError(ctx, req, resp, c.clock.Since(start), err)
-		return nil, resp, &ResponseReadError{URL: req.URL.String(), BytesRead: bytesRead, Err: err}
+		c.logBodyReadError(ctx, req, resp, requestID, c.clock.Since(start), err)
+		return nil, resp, &ResponseReadError{URL: req.URL.String(), BytesRead: bytesRead, RequestID: requestID, Err: err}
 	}
 
 	// Check if we hit the size limit
@@ -254,8 +280,8 @@ func (c *Client) doRequest(req *http.Request) ([]byte, *http.Response, error) {
 		var extraByte [1]byte
 		if n, _ := resp.Body.Read(extraByte[:]); n > 0 {
 			err := fmt.Errorf("response body exceeded max size of %d bytes", MAX_RESPONSE_BODY_SIZE)
-			c.logBodyReadError(ctx, req, resp, c.clock.Since(start), err)
-			return nil, resp, &ResponseReadError{URL: req.URL.String(), BytesRead: bytesRead, MaxSize: MAX_RESPONSE_BODY_SIZE}
+			c.logBodyReadError(ctx, req, resp, requestID, c.clock.Since(start), err)
+			return nil, resp, &ResponseReadError{URL: req.URL.String(), BytesRead: bytesRead, MaxSize: MAX_RESPONSE_BODY_SIZE, RequestID: requestID}
 		}
 	}
 
@@ -263,11 +289,11 @@ func (c *Client) doRequest(req *http.Request) ([]byte, *http.Response, error) {
 	bodyBytes := make([]byte, buf.Len())
 	copy(bodyBytes, buf.Bytes())
 
-	c.logHTTPResult(ctx, req, resp, bodyBytes, c.clock.Since(start))
+	c.logHTTPResult(ctx, req, resp, requestID, bodyBytes, c.clock.Since(start))
 
 	// Check HTTP status
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		apiErr := &APIError{StatusCode: resp.StatusCode}
+		apiErr := &APIError{StatusCode: resp.StatusCode, RequestID: requestID}
 
 		if len(bodyBytes) > 0 {
 			if errCode, msg, details := extractAPIErrorDetails(bodyBytes); errCode != "" || msg != "" || details != nil {
@@ -301,6 +327,8 @@ func (c *Client) doRequest(req *http.Request) ([]byte, *http.Response, error) {
 // JSON decoded and stored in the value pointed to by v, or returned as an
 // error if an API error has occurred.
 func (c *Client) Do(req *http.Request, v *types.Thing) error {
+	ctx := req.Context()
+	requestID := reqid.FromContext(ctx)
 	bodyBytes, resp, err := c.doRequest(req)
 	if err != nil {
 		return err
@@ -308,9 +336,9 @@ func (c *Client) Do(req *http.Request, v *types.Thing) error {
 
 	if v != nil && len(bodyBytes) > 0 {
 		if err := json.Unmarshal(bodyBytes, v); err != nil {
-			c.logDecodeError(req.Context(), req, resp, err)
+			c.logDecodeError(ctx, req, resp, requestID, err)
 			snippet := truncateBody(bodyBytes, TRUNCATE_LEN)
-			return &DecodeError{Operation: "unmarshal_thing", BodySnippet: snippet, Err: err}
+			return &DecodeError{Operation: "unmarshal_thing", BodySnippet: snippet, RequestID: requestID, Err: err}
 		}
 	}
 
@@ -320,6 +348,8 @@ func (c *Client) Do(req *http.Request, v *types.Thing) error {
 // DoThingArray sends an API request and returns either an array of Things or a single Thing wrapped in an array.
 // Used for the comments endpoint which can return [post, comments] or a single Listing.
 func (c *Client) DoThingArray(req *http.Request) ([]*types.Thing, error) {
+	ctx := req.Context()
+	requestID := reqid.FromContext(ctx)
 	bodyBytes, resp, err := c.doRequest(req)
 	if err != nil {
 		return nil, err
@@ -332,7 +362,7 @@ func (c *Client) DoThingArray(req *http.Request) ([]*types.Thing, error) {
 		// It's an array response
 		if err := json.Unmarshal(bodyBytes, &result); err != nil {
 			snippet := truncateBody(bodyBytes, TRUNCATE_LEN)
-			return nil, &DecodeError{Operation: "unmarshal_array", BodySnippet: snippet, Err: err}
+			return nil, &DecodeError{Operation: "unmarshal_array", BodySnippet: snippet, RequestID: requestID, Err: err}
 		}
 	} else if len(bodyBytes) > 0 && bodyBytes[0] == '{' {
 		// It's a single object - could be a Listing or an error
@@ -344,10 +374,10 @@ func (c *Client) DoThingArray(req *http.Request) ([]*types.Thing, error) {
 				Message string `json:"message"`
 			}
 			if err := json.Unmarshal(bodyBytes, &errObj); err == nil && errObj.Error != "" {
-				return nil, &APIError{StatusCode: resp.StatusCode, ErrorCode: errObj.Error, Message: errObj.Message}
+				return nil, &APIError{StatusCode: resp.StatusCode, ErrorCode: errObj.Error, Message: errObj.Message, RequestID: requestID}
 			}
 			snippet := truncateBody(bodyBytes, TRUNCATE_LEN)
-			return nil, &DecodeError{Operation: "unmarshal_single_thing", BodySnippet: snippet, Err: err}
+			return nil, &DecodeError{Operation: "unmarshal_single_thing", BodySnippet: snippet, RequestID: requestID, Err: err}
 		}
 
 		// If it's a Listing with comments, wrap it in an array
@@ -360,6 +390,7 @@ func (c *Client) DoThingArray(req *http.Request) ([]*types.Thing, error) {
 				Expected:    "Listing",
 				Actual:      singleThing.Kind,
 				BodySnippet: snippet,
+				RequestID:   requestID,
 			}
 		}
 	} else {
@@ -369,6 +400,7 @@ func (c *Client) DoThingArray(req *http.Request) ([]*types.Thing, error) {
 			Expected:    "JSON object or array",
 			Actual:      "empty or invalid",
 			BodySnippet: snippet,
+			RequestID:   requestID,
 		}
 	}
 
@@ -377,6 +409,8 @@ func (c *Client) DoThingArray(req *http.Request) ([]*types.Thing, error) {
 
 // DoMoreChildren sends an API request to the morechildren endpoint and returns the Things array.
 func (c *Client) DoMoreChildren(req *http.Request) ([]*types.Thing, error) {
+	ctx := req.Context()
+	requestID := reqid.FromContext(ctx)
 	bodyBytes, resp, err := c.doRequest(req)
 	if err != nil {
 		return nil, err
@@ -394,12 +428,12 @@ func (c *Client) DoMoreChildren(req *http.Request) ([]*types.Thing, error) {
 
 	if err := json.Unmarshal(bodyBytes, &response); err != nil {
 		snippet := truncateBody(bodyBytes, TRUNCATE_LEN)
-		return nil, &DecodeError{Operation: "unmarshal_morechildren", BodySnippet: snippet, Err: err}
+		return nil, &DecodeError{Operation: "unmarshal_morechildren", BodySnippet: snippet, RequestID: requestID, Err: err}
 	}
 
 	// Check for API errors
 	if len(response.JSON.Errors) > 0 {
-		return nil, &APIError{StatusCode: resp.StatusCode, Message: fmt.Sprintf("API error: %v", response.JSON.Errors[0])}
+		return nil, &APIError{StatusCode: resp.StatusCode, Message: fmt.Sprintf("API error: %v", response.JSON.Errors[0]), RequestID: requestID}
 	}
 
 	return response.JSON.Data.Things, nil
@@ -579,34 +613,42 @@ func rateLimitContext(resp *http.Response) context.Context {
 	return context.Background()
 }
 
-func (c *Client) logWaitFailure(ctx context.Context, req *http.Request, err error) {
+func (c *Client) logWaitFailure(ctx context.Context, req *http.Request, requestID string, err error) {
 	if c.logger == nil {
 		return
 	}
 
 	ctx = contextOrBackground(ctx)
-	c.logger.LogAttrs(ctx, slog.LevelWarn, "reddit request canceled before send",
+	attrs := []slog.Attr{
 		slog.String("method", req.Method),
 		slog.String("url", req.URL.String()),
 		slog.String("error", err.Error()),
-	)
+	}
+	if requestID != "" {
+		attrs = append(attrs, slog.String("request_id", requestID))
+	}
+	c.logger.LogAttrs(ctx, slog.LevelWarn, "reddit request canceled before send", attrs...)
 }
 
-func (c *Client) logTransportError(ctx context.Context, req *http.Request, duration time.Duration, err error) {
+func (c *Client) logTransportError(ctx context.Context, req *http.Request, requestID string, duration time.Duration, err error) {
 	if c.logger == nil {
 		return
 	}
 
 	ctx = contextOrBackground(ctx)
-	c.logger.LogAttrs(ctx, slog.LevelError, "reddit request transport error",
+	attrs := []slog.Attr{
 		slog.String("method", req.Method),
 		slog.String("url", req.URL.String()),
 		slog.Duration("duration", duration),
 		slog.String("error", err.Error()),
-	)
+	}
+	if requestID != "" {
+		attrs = append(attrs, slog.String("request_id", requestID))
+	}
+	c.logger.LogAttrs(ctx, slog.LevelError, "reddit request transport error", attrs...)
 }
 
-func (c *Client) logBodyReadError(ctx context.Context, req *http.Request, resp *http.Response, duration time.Duration, err error) {
+func (c *Client) logBodyReadError(ctx context.Context, req *http.Request, resp *http.Response, requestID string, duration time.Duration, err error) {
 	if c.logger == nil {
 		return
 	}
@@ -620,12 +662,15 @@ func (c *Client) logBodyReadError(ctx context.Context, req *http.Request, resp *
 	}
 	if resp != nil {
 		attrs = append(attrs, slog.Int("status", resp.StatusCode))
+	}
+	if requestID != "" {
+		attrs = append(attrs, slog.String("request_id", requestID))
 	}
 
 	c.logger.LogAttrs(ctx, slog.LevelError, "reddit response read failed", attrs...)
 }
 
-func (c *Client) logDecodeError(ctx context.Context, req *http.Request, resp *http.Response, err error) {
+func (c *Client) logDecodeError(ctx context.Context, req *http.Request, resp *http.Response, requestID string, err error) {
 	if c.logger == nil {
 		return
 	}
@@ -639,11 +684,14 @@ func (c *Client) logDecodeError(ctx context.Context, req *http.Request, resp *ht
 	if resp != nil {
 		attrs = append(attrs, slog.Int("status", resp.StatusCode))
 	}
+	if requestID != "" {
+		attrs = append(attrs, slog.String("request_id", requestID))
+	}
 
 	c.logger.LogAttrs(ctx, slog.LevelError, "reddit response decode failed", attrs...)
 }
 
-func (c *Client) logHTTPResult(ctx context.Context, req *http.Request, resp *http.Response, body []byte, duration time.Duration) {
+func (c *Client) logHTTPResult(ctx context.Context, req *http.Request, resp *http.Response, requestID string, body []byte, duration time.Duration) {
 	if c.logger == nil {
 		return
 	}
@@ -653,6 +701,9 @@ func (c *Client) logHTTPResult(ctx context.Context, req *http.Request, resp *htt
 		slog.String("method", req.Method),
 		slog.String("url", req.URL.String()),
 		slog.Duration("duration", duration),
+	}
+	if requestID != "" {
+		attrs = append(attrs, slog.String("request_id", requestID))
 	}
 
 	status := 0
@@ -668,6 +719,17 @@ func (c *Client) logHTTPResult(ctx context.Context, req *http.Request, resp *htt
 		if v := resp.Header.Get("Retry-After"); v != "" {
 			attrs = append(attrs, slog.String("retry_after", v))
 		}
+	}
+
+	// Include connection metrics if available
+	metrics := c.transportMetrics.Load()
+	if metrics != nil {
+		attrs = append(attrs,
+			slog.Int64("connections_opened", metrics.ConnectionsOpened.Load()),
+			slog.Int64("connections_reused", metrics.ConnectionsReused.Load()),
+			slog.Int64("connections_failed", metrics.ConnectionsFailed.Load()),
+			slog.Int64("dns_lookups_total", metrics.DNSLookupsTotal.Load()),
+		)
 	}
 
 	level := slog.LevelInfo
