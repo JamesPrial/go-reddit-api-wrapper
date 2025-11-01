@@ -19,6 +19,21 @@ import (
 	"unicode"
 )
 
+const (
+	MAX_NEGATION_LOOKBACK                = 3
+	PUNCTUATION_BOOST_CONSECUTIVE_FACTOR = 0.1
+	NO_PUNCTUATION_BOOST                 = 1.0
+	MAX_PUNCTUATION_BOOST                = 1.5
+	MAX_PUNCTUATION_BOOST_CONSECUTIVE    = 5
+	NO_CAPS_BOOST                        = 1.0
+	MAX_CAPS_BOOST                       = 1.3
+	CAPS_BOOST_PERCENTAGE_FACTOR         = 0.3
+	NO_NEGATION_BOOST                    = 1.0
+	MAX_NEGATION_BOOST                   = 1.5
+	MAX_SCORE                            = 1.0
+	MIN_SCORE                            = -1.0
+)
+
 // negationWords is a package-level variable containing words that typically negate
 // or invert the sentiment of the word that follows them.
 // This is initialized by calling Init() with a ModifierConfig.
@@ -83,7 +98,7 @@ func DetectNegation(tokens []string, index int) bool {
 	}
 
 	// Look back up to 3 tokens
-	lookbackStart := max(0, index-3)
+	lookbackStart := max(0, index-MAX_NEGATION_LOOKBACK)
 
 	// Thread-safe read of negation words
 	negationWordsMu.RLock()
@@ -118,7 +133,7 @@ func DetectNegation(tokens []string, index int) bool {
 // Returns a multiplier value to apply to sentiment scores.
 func CalculatePunctuationBoost(text string) float64 {
 	if text == "" {
-		return 1.0
+		return NO_PUNCTUATION_BOOST
 	}
 
 	// Count repeated punctuation sequences
@@ -150,13 +165,13 @@ func CalculatePunctuationBoost(text string) float64 {
 	// Convert consecutive count to boost multiplier
 	// No boost for single punctuation or none
 	if maxConsecutive <= 1 {
-		return 1.0
+		return NO_PUNCTUATION_BOOST
 	}
 
 	// Scale from 1.1 (2 consecutive) to 1.5 (6+ consecutive)
 	// Formula: 1.0 + (min(maxConsecutive - 1, 5) * 0.1)
-	boost := 1.0 + math.Min(float64(maxConsecutive-1), 5.0)*0.1
-	return math.Min(boost, 1.5)
+	boost := NO_PUNCTUATION_BOOST + math.Min(float64(maxConsecutive-1), MAX_PUNCTUATION_BOOST_CONSECUTIVE)*PUNCTUATION_BOOST_CONSECUTIVE_FACTOR
+	return math.Min(boost, MAX_PUNCTUATION_BOOST)
 }
 
 // CalculateCapsBoost calculates a score boost based on the percentage of ALL CAPS words
@@ -171,12 +186,12 @@ func CalculatePunctuationBoost(text string) float64 {
 // Returns a multiplier value to apply to sentiment scores.
 func CalculateCapsBoost(text string) float64 {
 	if text == "" {
-		return 1.0
+		return NO_CAPS_BOOST
 	}
 
 	words := strings.Fields(text)
 	if len(words) == 0 {
-		return 1.0
+		return NO_CAPS_BOOST
 	}
 
 	capsCount := 0
@@ -191,8 +206,9 @@ func CalculateCapsBoost(text string) float64 {
 
 	// Scale from 1.0 (0%) to 1.3 (100%)
 	// Formula: 1.0 + (capsPercentage * 0.3)
-	boost := 1.0 + (capsPercentage * 0.3)
-	return math.Min(boost, 1.3)
+
+	boost := NO_CAPS_BOOST + (capsPercentage * CAPS_BOOST_PERCENTAGE_FACTOR)
+	return math.Min(boost, MAX_CAPS_BOOST)
 }
 
 // isAllCaps checks if a word is in ALL CAPS format.
@@ -252,10 +268,10 @@ func ApplyModifiers(baseScore float64, text string, tokens []string) float64 {
 	// Skip boost calculations if text is empty
 	if text == "" {
 		// Clamp the final score to [-1.0, 1.0] range
-		if modifiedScore > 1.0 {
-			modifiedScore = 1.0
-		} else if modifiedScore < -1.0 {
-			modifiedScore = -1.0
+		if modifiedScore > MAX_SCORE {
+			modifiedScore = MAX_SCORE
+		} else if modifiedScore < MIN_SCORE {
+			modifiedScore = MIN_SCORE
 		}
 		return modifiedScore
 	}
@@ -269,10 +285,10 @@ func ApplyModifiers(baseScore float64, text string, tokens []string) float64 {
 	modifiedScore *= capsBoost
 
 	// Clamp the final score to [-1.0, 1.0] range
-	if modifiedScore > 1.0 {
-		modifiedScore = 1.0
-	} else if modifiedScore < -1.0 {
-		modifiedScore = -1.0
+	if modifiedScore > MAX_SCORE {
+		modifiedScore = MAX_SCORE
+	} else if modifiedScore < MIN_SCORE {
+		modifiedScore = MIN_SCORE
 	}
 
 	return modifiedScore

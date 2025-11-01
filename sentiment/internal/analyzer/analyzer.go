@@ -8,6 +8,15 @@ import (
 	"github.com/jamesprial/go-reddit-api-wrapper/sentiment/internal/preprocessor"
 )
 
+// Sentiment score thresholds used to categorize text sentiment.
+const (
+	VERY_NEGATIVE_SENTIMENT_THRESHOLD = -0.6 // Scores below this are VeryNegative
+	NEGATIVE_SENTIMENT_THRESHOLD      = -0.2 // Scores below this are Negative
+	NEUTRAL_SENTIMENT_THRESHOLD       = 0.2  // Scores below this are Neutral
+	POSITIVE_SENTIMENT_THRESHOLD      = 0.6  // Scores below this are Positive
+	// Scores >= 0.6 are VeryPositive
+)
+
 // Analyzer performs sentiment analysis on text using a lexicon-based approach
 // with additional modifiers for negation, punctuation emphasis, and capitalization.
 type Analyzer struct {
@@ -144,13 +153,13 @@ func (a *Analyzer) AnalyzeText(text string) (sentiment int, score float64, confi
 	// Convert score to sentiment classification
 	// Thresholds chosen to balance sensitivity with specificity
 	switch {
-	case score < -0.6:
+	case score < VERY_NEGATIVE_SENTIMENT_THRESHOLD:
 		sentiment = -2 // VeryNegative
-	case score < -0.2:
+	case score < NEGATIVE_SENTIMENT_THRESHOLD:
 		sentiment = -1 // Negative
-	case score < 0.2:
+	case score < NEUTRAL_SENTIMENT_THRESHOLD:
 		sentiment = 0 // Neutral
-	case score < 0.6:
+	case score < POSITIVE_SENTIMENT_THRESHOLD:
 		sentiment = 1 // Positive
 	default:
 		sentiment = 2 // VeryPositive

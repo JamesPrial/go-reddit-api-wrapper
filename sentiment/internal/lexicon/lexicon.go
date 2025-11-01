@@ -153,21 +153,21 @@ func Init(config *LexiconConfig) error {
 			return
 		}
 
-		if config.PositiveWords == nil || len(config.PositiveWords) == 0 {
+		if len(config.PositiveWords) == 0 {
 			initMu.Lock()
 			initErr = NewError("positive words map must not be nil or empty")
 			initMu.Unlock()
 			return
 		}
 
-		if config.NegativeWords == nil || len(config.NegativeWords) == 0 {
+		if len(config.NegativeWords) == 0 {
 			initMu.Lock()
 			initErr = NewError("negative words map must not be nil or empty")
 			initMu.Unlock()
 			return
 		}
 
-		if config.Emoticons == nil || len(config.Emoticons) == 0 {
+		if len(config.Emoticons) == 0 {
 			initMu.Lock()
 			initErr = NewError("emoticons map must not be nil or empty")
 			initMu.Unlock()

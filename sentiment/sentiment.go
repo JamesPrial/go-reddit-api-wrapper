@@ -12,6 +12,15 @@ import (
 	"github.com/jamesprial/go-reddit-api-wrapper/sentiment/internal/modifier"
 )
 
+// Sentiment score thresholds used to categorize text sentiment, imported from analyzer package.
+const (
+	VERY_NEGATIVE_SENTIMENT_THRESHOLD = analyzer.VERY_NEGATIVE_SENTIMENT_THRESHOLD // Scores below this are VeryNegative
+	NEGATIVE_SENTIMENT_THRESHOLD      = analyzer.NEGATIVE_SENTIMENT_THRESHOLD      // Scores below this are Negative
+	NEUTRAL_SENTIMENT_THRESHOLD       = analyzer.NEUTRAL_SENTIMENT_THRESHOLD       // Scores below this are Neutral
+	POSITIVE_SENTIMENT_THRESHOLD      = analyzer.POSITIVE_SENTIMENT_THRESHOLD      // Scores below this are Positive
+	// Scores >= 0.6 are VeryPositive
+)
+
 func init() {
 	// Initialize lexicon and modifier packages with default configuration on package load.
 	// This ensures the packages are ready even if NewAnalyzer is never called.
@@ -344,13 +353,13 @@ func (a *Analyzer) analyzePostInternal(ctx context.Context, post *types.Post) *P
 	// Convert combined score to sentiment classification
 	var sentiment Sentiment
 	switch {
-	case combinedScore < -0.6:
+	case combinedScore < NEGATIVE_SENTIMENT_THRESHOLD:
 		sentiment = VeryNegative
-	case combinedScore < -0.2:
+	case combinedScore < NEGATIVE_SENTIMENT_THRESHOLD:
 		sentiment = Negative
-	case combinedScore < 0.2:
+	case combinedScore < NEUTRAL_SENTIMENT_THRESHOLD:
 		sentiment = Neutral
-	case combinedScore < 0.6:
+	case combinedScore < POSITIVE_SENTIMENT_THRESHOLD:
 		sentiment = Positive
 	default:
 		sentiment = VeryPositive
@@ -403,13 +412,13 @@ func (a *Analyzer) analyzeCommentInternal(ctx context.Context, comment *types.Co
 	// Convert score to sentiment classification
 	var sentiment Sentiment
 	switch {
-	case score < -0.6:
+	case score < NEGATIVE_SENTIMENT_THRESHOLD:
 		sentiment = VeryNegative
-	case score < -0.2:
+	case score < NEGATIVE_SENTIMENT_THRESHOLD:
 		sentiment = Negative
-	case score < 0.2:
+	case score < NEUTRAL_SENTIMENT_THRESHOLD:
 		sentiment = Neutral
-	case score < 0.6:
+	case score < POSITIVE_SENTIMENT_THRESHOLD:
 		sentiment = Positive
 	default:
 		sentiment = VeryPositive
