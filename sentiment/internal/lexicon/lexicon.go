@@ -7,7 +7,6 @@
 package lexicon
 
 import (
-	"errors"
 	"math"
 	"strings"
 	"unicode"
@@ -68,18 +67,18 @@ type Lexicon struct {
 //   - Any word map (positive, negative, emoticons) is nil or empty
 //   - NegationWords slice is nil or empty
 func NewLexicon(positiveWords map[string]float64, negativeWords map[string]float64, emoticons map[string]float64, negationWords []string) (*Lexicon, error) {
-	if positiveWords == nil || len(positiveWords) == 0 {
+	if len(positiveWords) == 0 {
 		return nil, NewError("positive words map must not be nil or empty")
 	}
-	if negativeWords == nil || len(negativeWords) == 0 {
+	if len(negativeWords) == 0 {
 		return nil, NewError("negative words map must not be nil or empty")
 	}
 	if negationWords == nil {
-		return nil, errors.New("NegationWords slice cannot be nil")
+		return nil, NewError("NegationWords slice cannot be nil")
 	}
 
 	if len(negationWords) == 0 {
-		return nil, errors.New("NegationWords slice cannot be empty")
+		return nil, NewError("NegationWords slice cannot be empty")
 	}
 
 	// Convert negation words slice to map for O(1) lookups
