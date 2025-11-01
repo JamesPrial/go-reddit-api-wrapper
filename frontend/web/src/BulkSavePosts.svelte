@@ -103,9 +103,9 @@
 
         const progress = await getBulkSaveProgress(token, jobId, abortController?.signal);
 
-        postsSaved = progress.postsSaved || 0;
-        postsTotal = progress.postsTotal || 0;
-        commentsSaved = progress.commentsSaved || 0;
+        postsSaved = progress.posts_saved || 0;
+        postsTotal = progress.posts_total || 0;
+        commentsSaved = progress.comments_saved || 0;
 
         // Calculate progress percentage
         if (postsTotal > 0) {
@@ -189,7 +189,7 @@
         abortController.signal
       );
 
-      jobId = response.jobId;
+      jobId = response.job_id;
       postsTotal = count;
       statusMessage = 'Bulk save started...';
 

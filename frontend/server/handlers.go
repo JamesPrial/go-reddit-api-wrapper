@@ -156,7 +156,7 @@ type BulkSaveResponse struct {
 
 // BulkSaveProgress represents the progress of a bulk save operation.
 type BulkSaveProgress struct {
-	Status        string `json:"status"`                 // "in_progress", "completed", "error"
+	Status        string `json:"status"`                 // "in_progress", "fetching_posts", "saving", "fetching_comments", "completed", "error"
 	PostsSaved    int    `json:"posts_saved"`            // Number of posts successfully saved
 	PostsTotal    int    `json:"posts_total"`            // Total number of posts to save
 	CommentsSaved int    `json:"comments_saved"`         // Number of comments successfully saved
@@ -1534,6 +1534,11 @@ func (h *Handler) performBulkSave(jobID string, job *bulkSaveJob, redditClient *
 	var allPosts []*types.Post
 	afterCursor := ""
 
+	// Update status to indicate fetching posts
+	job.mu.Lock()
+	job.status = "fetching_posts"
+	job.mu.Unlock()
+
 	// Fetch posts page by page
 	for page := 0; page < pagesNeeded; page++ {
 		// Check if context is cancelled
@@ -1622,6 +1627,11 @@ func (h *Handler) performBulkSave(jobID string, job *bulkSaveJob, redditClient *
 		job.mu.Unlock()
 	}
 
+	// Update status to indicate saving posts
+	job.mu.Lock()
+	job.status = "saving"
+	job.mu.Unlock()
+
 	// Save posts in batches
 	for i := 0; i < len(allPosts); i += bulkSaveBatchSize {
 		// Check if context is cancelled
@@ -1671,6 +1681,11 @@ func (h *Handler) performBulkSave(jobID string, job *bulkSaveJob, redditClient *
 			h.logger.Error("bulk save timed out before fetching comments", "job_id", jobID)
 			return
 		}
+
+		// Update status to indicate fetching comments
+		job.mu.Lock()
+		job.status = "fetching_comments"
+		job.mu.Unlock()
 
 		// Collect post IDs
 		postIDs := make([]string, len(allPosts))
@@ -1727,8 +1742,8 @@ func (h *Handler) performBulkSave(jobID string, job *bulkSaveJob, redditClient *
 
 	// Mark job as completed
 	job.mu.Lock()
-	// Only mark as completed if status is still in_progress (not already set to error)
-	if job.status == "in_progress" {
+	// Mark as completed if no error occurred (regardless of intermediate status)
+	if job.status != "error" {
 		job.status = "completed"
 	}
 	job.completedAt = time.Now()
