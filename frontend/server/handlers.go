@@ -156,7 +156,7 @@ type BulkSaveResponse struct {
 
 // BulkSaveProgress represents the progress of a bulk save operation.
 type BulkSaveProgress struct {
-	Status        string `json:"status"`                 // "in_progress", "completed", "error"
+	Status        string `json:"status"`                 // "in_progress", "fetching_posts", "saving", "fetching_comments", "completed", "error"
 	PostsSaved    int    `json:"posts_saved"`            // Number of posts successfully saved
 	PostsTotal    int    `json:"posts_total"`            // Total number of posts to save
 	CommentsSaved int    `json:"comments_saved"`         // Number of comments successfully saved
@@ -1742,8 +1742,8 @@ func (h *Handler) performBulkSave(jobID string, job *bulkSaveJob, redditClient *
 
 	// Mark job as completed
 	job.mu.Lock()
-	// Only mark as completed if status is still in_progress (not already set to error)
-	if job.status == "in_progress" {
+	// Mark as completed if no error occurred (regardless of intermediate status)
+	if job.status != "error" {
 		job.status = "completed"
 	}
 	job.completedAt = time.Now()
