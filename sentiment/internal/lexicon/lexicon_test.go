@@ -1,555 +1,614 @@
 package lexicon
 
 import (
-	"sync"
+	"math"
 	"testing"
 )
 
-// init ensures the lexicon is initialized before running tests.
-func init() {
-	if err := Init(DefaultLexiconConfig()); err != nil {
-		panic("failed to initialize lexicon: " + err.Error())
+// ============================================================================
+// Test Helpers
+// ============================================================================
+
+// createTestLexicon creates a Lexicon instance for testing with sample data.
+func createTestLexicon(t *testing.T) *Lexicon {
+	t.Helper()
+
+	positiveWords := map[string]float64{
+		"good":      1.0,
+		"great":     1.5,
+		"excellent": 2.0,
+		"love":      1.5,
+		"amazing":   2.0,
+	}
+
+	negativeWords := map[string]float64{
+		"bad":      -1.0,
+		"terrible": -1.5,
+		"awful":    -2.0,
+		"hate":     -1.5,
+		"horrible": -2.0,
+	}
+
+	emoticons := map[string]float64{
+		":)":  0.5,
+		":-)": 0.5,
+		":D":  1.0,
+		":-D": 1.0,
+		":(":  -0.5,
+		":-(": -0.5,
+	}
+
+	negationWords := []string{
+		"not", "no", "never", "neither",
+		"nobody", "nothing", "nowhere",
+		"don't", "doesn't", "didn't",
+		"won't", "can't", "shouldn't",
+		"couldn't", "wouldn't",
+		"isnt", "isn't", "wasnt", "wasn't",
+		"havent", "haven't", "hasnt", "hasn't",
+		"cant", "wont", "shouldnt", "couldnt", "wouldnt",
+	}
+
+	lex, err := NewLexicon(positiveWords, negativeWords, emoticons, negationWords)
+	if err != nil {
+		t.Fatalf("failed to create test lexicon: %v", err)
+	}
+	return lex
+}
+
+// almostEqual checks if two float64 values are approximately equal.
+func almostEqual(a, b float64) bool {
+	epsilon := 0.0001
+	return math.Abs(a-b) < epsilon
+}
+
+// ============================================================================
+// Constructor and Configuration Tests
+// ============================================================================
+
+// TestNewLexicon tests the NewLexicon constructor with various configurations.
+func TestNewLexicon(t *testing.T) {
+	tests := []struct {
+		name          string
+		positiveWords map[string]float64
+		negativeWords map[string]float64
+		emoticons     map[string]float64
+		negationWords []string
+		expectErr     bool
+		errMsg        string
+	}{
+		{
+			name:          "nil positive words",
+			positiveWords: nil,
+			negativeWords: map[string]float64{"bad": -1.0},
+			emoticons:     map[string]float64{":)": 0.5},
+			negationWords: []string{"not"},
+			expectErr:     true,
+			errMsg:        "positive words map must not be nil or empty",
+		},
+		{
+			name:          "empty positive words",
+			positiveWords: map[string]float64{},
+			negativeWords: map[string]float64{"bad": -1.0},
+			emoticons:     map[string]float64{":)": 0.5},
+			negationWords: []string{"not"},
+			expectErr:     true,
+			errMsg:        "positive words map must not be nil or empty",
+		},
+		{
+			name:          "nil negative words",
+			positiveWords: map[string]float64{"good": 1.0},
+			negativeWords: nil,
+			emoticons:     map[string]float64{":)": 0.5},
+			negationWords: []string{"not"},
+			expectErr:     true,
+			errMsg:        "negative words map must not be nil or empty",
+		},
+		{
+			name:          "empty negative words",
+			positiveWords: map[string]float64{"good": 1.0},
+			negativeWords: map[string]float64{},
+			emoticons:     map[string]float64{":)": 0.5},
+			negationWords: []string{"not"},
+			expectErr:     true,
+			errMsg:        "negative words map must not be nil or empty",
+		},
+		{
+			name:          "nil negation words",
+			positiveWords: map[string]float64{"good": 1.0},
+			negativeWords: map[string]float64{"bad": -1.0},
+			emoticons:     map[string]float64{":)": 0.5},
+			negationWords: nil,
+			expectErr:     true,
+			errMsg:        "NegationWords slice cannot be nil",
+		},
+		{
+			name:          "empty negation words",
+			positiveWords: map[string]float64{"good": 1.0},
+			negativeWords: map[string]float64{"bad": -1.0},
+			emoticons:     map[string]float64{":)": 0.5},
+			negationWords: []string{},
+			expectErr:     true,
+			errMsg:        "NegationWords slice cannot be empty",
+		},
+		{
+			name:          "valid configuration",
+			positiveWords: map[string]float64{"good": 1.0},
+			negativeWords: map[string]float64{"bad": -1.0},
+			emoticons:     map[string]float64{":)": 0.5},
+			negationWords: []string{"not"},
+			expectErr:     false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lex, err := NewLexicon(tt.positiveWords, tt.negativeWords, tt.emoticons, tt.negationWords)
+
+			if (err != nil) != tt.expectErr {
+				t.Errorf("NewLexicon() error = %v, expectErr %v", err, tt.expectErr)
+				return
+			}
+
+			if tt.expectErr && err.Error() != tt.errMsg {
+				t.Errorf("NewLexicon() error message = %v, want %v", err.Error(), tt.errMsg)
+			}
+
+			if !tt.expectErr && lex == nil {
+				t.Error("NewLexicon() returned nil lexicon without error")
+			}
+		})
 	}
 }
 
-// resetForTesting resets the lexicon state for error condition tests.
-// This is exported only for testing purposes and should not be used in production code.
-// It is protected by a mutex to ensure only one test can reset at a time.
-func resetForTesting() {
-	resetMu.Lock()
-	defer resetMu.Unlock()
+// ============================================================================
+// Negation Detection Tests
+// ============================================================================
 
-	positiveWords = nil
-	negativeWords = nil
-	emoticons = nil
-	initErr = nil
-	initOnce = sync.Once{}
-}
+// TestDetectNegation tests the DetectNegation method.
+func TestDetectNegation(t *testing.T) {
+	lex := createTestLexicon(t)
 
-var resetMu sync.Mutex
-
-// TestGetPositiveWords tests that GetPositiveWords returns a non-empty map.
-func TestGetPositiveWords(t *testing.T) {
-	words := GetPositiveWords()
-
-	t.Run("returns non-empty map", func(t *testing.T) {
-		if len(words) == 0 {
-			t.Error("expected non-empty positive words map")
-		}
-	})
-
-	t.Run("contains expected words", func(t *testing.T) {
-		expectedWords := []string{"good", "great", "excellent", "love", "amazing"}
-		for _, word := range expectedWords {
-			if _, exists := words[word]; !exists {
-				t.Errorf("expected word %q in positive words map", word)
-			}
-		}
-	})
-
-	t.Run("all scores are in valid range [1.0, 2.0]", func(t *testing.T) {
-		for word, score := range words {
-			if score < 1.0 || score > 2.0 {
-				t.Errorf("word %q has invalid score %f, expected range [1.0, 2.0]", word, score)
-			}
-		}
-	})
-
-	t.Run("scores are positive", func(t *testing.T) {
-		for word, score := range words {
-			if score <= 0 {
-				t.Errorf("word %q has non-positive score %f", word, score)
-			}
-		}
-	})
-}
-
-// TestGetNegativeWords tests that GetNegativeWords returns a non-empty map.
-func TestGetNegativeWords(t *testing.T) {
-	words := GetNegativeWords()
-
-	t.Run("returns non-empty map", func(t *testing.T) {
-		if len(words) == 0 {
-			t.Error("expected non-empty negative words map")
-		}
-	})
-
-	t.Run("contains expected words", func(t *testing.T) {
-		expectedWords := []string{"bad", "terrible", "awful", "hate", "horrible"}
-		for _, word := range expectedWords {
-			if _, exists := words[word]; !exists {
-				t.Errorf("expected word %q in negative words map", word)
-			}
-		}
-	})
-
-	t.Run("all scores are in valid range [-2.0, -0.5]", func(t *testing.T) {
-		for word, score := range words {
-			if score < -2.0 || score > -0.5 {
-				t.Errorf("word %q has invalid score %f, expected range [-2.0, -0.5]", word, score)
-			}
-		}
-	})
-
-	t.Run("scores are negative", func(t *testing.T) {
-		for word, score := range words {
-			if score >= 0 {
-				t.Errorf("word %q has non-negative score %f", word, score)
-			}
-		}
-	})
-
-	t.Run("returns the same underlying map (not a copy)", func(t *testing.T) {
-		words1 := GetNegativeWords()
-		words2 := GetNegativeWords()
-
-		// Both should reference the same map
-		if len(words1) != len(words2) {
-			t.Error("expected same underlying map")
-		}
-		// Verify they have the same content by comparing a few entries
-		for i, word := range []string{"bad", "terrible", "awful"} {
-			score1, exists1 := words1[word]
-			score2, exists2 := words2[word]
-			if !exists1 || !exists2 || score1 != score2 {
-				t.Errorf("entry %d (%q) mismatch", i, word)
-			}
-		}
-	})
-}
-
-// TestGetEmoticons tests that GetEmoticons returns a non-empty map.
-func TestGetEmoticons(t *testing.T) {
-	emoticons := GetEmoticons()
-
-	t.Run("returns non-empty map", func(t *testing.T) {
-		if len(emoticons) == 0 {
-			t.Error("expected non-empty emoticons map")
-		}
-	})
-
-	t.Run("contains expected emoticons", func(t *testing.T) {
-		expectedEmoticons := []string{":)", ":(", ":-D", ":D"}
-		for _, emoticon := range expectedEmoticons {
-			if _, exists := emoticons[emoticon]; !exists {
-				t.Errorf("expected emoticon %q in emoticons map", emoticon)
-			}
-		}
-	})
-
-	t.Run("happy emoticons have positive scores", func(t *testing.T) {
-		happyEmoticons := []string{":)", ":-)"}
-		for _, emoticon := range happyEmoticons {
-			score, exists := emoticons[emoticon]
-			if !exists {
-				t.Errorf("expected emoticon %q", emoticon)
-				continue
-			}
-			if score <= 0 {
-				t.Errorf("emoticon %q should have positive score, got %f", emoticon, score)
-			}
-		}
-	})
-
-	t.Run("sad emoticons have negative scores", func(t *testing.T) {
-		sadEmoticons := []string{":(", ":-("}
-		for _, emoticon := range sadEmoticons {
-			score, exists := emoticons[emoticon]
-			if !exists {
-				t.Errorf("expected emoticon %q", emoticon)
-				continue
-			}
-			if score >= 0 {
-				t.Errorf("emoticon %q should have negative score, got %f", emoticon, score)
-			}
-		}
-	})
-
-	t.Run("all scores are within reasonable range", func(t *testing.T) {
-		minScore := -2.0
-		maxScore := 2.0
-		for emoticon, score := range emoticons {
-			if score < minScore || score > maxScore {
-				t.Errorf("emoticon %q has score %f outside range [%f, %f]", emoticon, score, minScore, maxScore)
-			}
-		}
-	})
-
-	t.Run("returns the same underlying map (not a copy)", func(t *testing.T) {
-		emoticons1 := GetEmoticons()
-		emoticons2 := GetEmoticons()
-
-		// Both should reference the same map
-		if len(emoticons1) != len(emoticons2) {
-			t.Error("expected same underlying map")
-		}
-		// Verify they have the same content by comparing a few entries
-		for i, emoticon := range []string{":)", ":(", ":-D"} {
-			score1, exists1 := emoticons1[emoticon]
-			score2, exists2 := emoticons2[emoticon]
-			if !exists1 || !exists2 || score1 != score2 {
-				t.Errorf("entry %d (%q) mismatch", i, emoticon)
-			}
-		}
-	})
-}
-
-// TestNoOverlapBetweenLexicons tests that there is no overlap between positive and negative words.
-func TestNoOverlapBetweenLexicons(t *testing.T) {
-	positive := GetPositiveWords()
-	negative := GetNegativeWords()
-
-	overlaps := []string{}
-	for word := range positive {
-		if _, exists := negative[word]; exists {
-			overlaps = append(overlaps, word)
-		}
+	tests := []struct {
+		name     string
+		tokens   []string
+		index    int
+		expected bool
+	}{
+		{
+			name:     "no negation before word",
+			tokens:   []string{"this", "is", "good"},
+			index:    2,
+			expected: false,
+		},
+		{
+			name:     "negation immediately before word",
+			tokens:   []string{"not", "good"},
+			index:    1,
+			expected: true,
+		},
+		{
+			name:     "negation one token before",
+			tokens:   []string{"is", "not", "good"},
+			index:    2,
+			expected: true,
+		},
+		{
+			name:     "negation two tokens before",
+			tokens:   []string{"it", "is", "not", "good"},
+			index:    3,
+			expected: true,
+		},
+		{
+			name:     "negation three tokens before",
+			tokens:   []string{"i", "think", "it", "is", "not", "good"},
+			index:    5,
+			expected: true,
+		},
+		{
+			name:     "negation too far before (more than 3 tokens)",
+			tokens:   []string{"i", "really", "truly", "think", "good"},
+			index:    4,
+			expected: false,
+		},
+		{
+			name:     "negation after word is not detected",
+			tokens:   []string{"good", "not"},
+			index:    0,
+			expected: false,
+		},
+		{
+			name:     "no negation with no tokens",
+			tokens:   []string{},
+			index:    0,
+			expected: false,
+		},
+		{
+			name:     "no negation at index 0",
+			tokens:   []string{"good"},
+			index:    0,
+			expected: false,
+		},
+		{
+			name:     "different negation words",
+			tokens:   []string{"never", "good"},
+			index:    1,
+			expected: true,
+		},
+		{
+			name:     "multiple negations in lookback range",
+			tokens:   []string{"no", "not", "never", "good"},
+			index:    3,
+			expected: true,
+		},
+		{
+			name:     "contraction negation",
+			tokens:   []string{"don't", "like"},
+			index:    1,
+			expected: true,
+		},
+		{
+			name:     "contraction negation with apostrophe",
+			tokens:   []string{"isn't", "great"},
+			index:    1,
+			expected: true,
+		},
 	}
 
-	if len(overlaps) > 0 {
-		t.Errorf("found overlapping words between positive and negative lexicons: %v", overlaps)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := lex.DetectNegation(tt.tokens, tt.index)
+			if result != tt.expected {
+				t.Errorf("DetectNegation(%v, %d) = %v, want %v", tt.tokens, tt.index, result, tt.expected)
+			}
+		})
 	}
 }
 
-// TestLexiconScoreDistribution tests the distribution of scores in lexicons.
-func TestLexiconScoreDistribution(t *testing.T) {
-	t.Run("positive words distribution", func(t *testing.T) {
-		words := GetPositiveWords()
+// ============================================================================
+// Punctuation Boost Tests
+// ============================================================================
 
-		score1Count := 0
-		score15Count := 0
-		score18Count := 0
-		score2Count := 0
+// TestGetPunctuationMultiplier tests the GetPunctuationMultiplier method.
+func TestGetPunctuationMultiplier(t *testing.T) {
+	lex := createTestLexicon(t)
 
-		for _, score := range words {
-			// Round to check for common values
-			if score >= 0.95 && score <= 1.05 {
-				score1Count++
-			} else if score >= 1.45 && score <= 1.55 {
-				score15Count++
-			} else if score >= 1.75 && score <= 1.85 {
-				score18Count++
-			} else if score >= 1.95 && score <= 2.05 {
-				score2Count++
+	tests := []struct {
+		name       string
+		text       string
+		minBoost   float64
+		maxBoost   float64
+		expectedEq float64 // exact match if set to non-zero
+	}{
+		{
+			name:       "empty string",
+			text:       "",
+			minBoost:   1.0,
+			maxBoost:   1.0,
+			expectedEq: 1.0,
+		},
+		{
+			name:       "no punctuation",
+			text:       "hello world",
+			minBoost:   1.0,
+			maxBoost:   1.0,
+			expectedEq: 1.0,
+		},
+		{
+			name:       "single punctuation",
+			text:       "hello!",
+			minBoost:   1.0,
+			maxBoost:   1.0,
+			expectedEq: 1.0,
+		},
+		{
+			name:       "double exclamation",
+			text:       "hello!!",
+			minBoost:   1.1,
+			maxBoost:   1.1,
+			expectedEq: 1.1,
+		},
+		{
+			name:       "triple exclamation",
+			text:       "hello!!!",
+			minBoost:   1.2,
+			maxBoost:   1.2,
+			expectedEq: 1.2,
+		},
+		{
+			name:       "five exclamations",
+			text:       "hello!!!!!",
+			minBoost:   1.4,
+			maxBoost:   1.4,
+			expectedEq: 1.4,
+		},
+		{
+			name:       "many exclamations capped at 1.5",
+			text:       "hello!!!!!!!!!",
+			minBoost:   1.5,
+			maxBoost:   1.5,
+			expectedEq: 1.5,
+		},
+		{
+			name:       "double question marks",
+			text:       "what??",
+			minBoost:   1.1,
+			maxBoost:   1.1,
+			expectedEq: 1.1,
+		},
+		{
+			name:       "multiple punctuation sequences",
+			text:       "amazing!!! and great??",
+			minBoost:   1.2, // max consecutive is 3 (!!!)
+			maxBoost:   1.2,
+			expectedEq: 1.2,
+		},
+		{
+			name:       "mixed punctuation not repeated",
+			text:       "hello!? world?!",
+			minBoost:   1.0,
+			maxBoost:   1.0,
+			expectedEq: 1.0,
+		},
+		{
+			name:       "dots repeated",
+			text:       "wait...",
+			minBoost:   1.2,
+			maxBoost:   1.2,
+			expectedEq: 1.2,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := lex.GetPunctuationMultiplier(tt.text)
+
+			if tt.expectedEq > 0 {
+				if !almostEqual(result, tt.expectedEq) {
+					t.Errorf("GetPunctuationMultiplier(%q) = %f, want %f", tt.text, result, tt.expectedEq)
+				}
+			} else {
+				if result < tt.minBoost || result > tt.maxBoost {
+					t.Errorf("GetPunctuationMultiplier(%q) = %f, want in range [%f, %f]", tt.text, result, tt.minBoost, tt.maxBoost)
+				}
 			}
-		}
 
-		// Should have a reasonable distribution
-		if score1Count == 0 && score15Count == 0 && score18Count == 0 && score2Count == 0 {
-			t.Error("expected some scores at common values")
-		}
-	})
-
-	t.Run("negative words distribution", func(t *testing.T) {
-		words := GetNegativeWords()
-
-		scoreMinus1Count := 0
-		scoreMinus15Count := 0
-		scoreMinus18Count := 0
-		scoreMinus2Count := 0
-
-		for _, score := range words {
-			// Round to check for common values
-			if score <= -0.95 && score >= -1.05 {
-				scoreMinus1Count++
-			} else if score <= -1.45 && score >= -1.55 {
-				scoreMinus15Count++
-			} else if score <= -1.75 && score >= -1.85 {
-				scoreMinus18Count++
-			} else if score <= -1.95 && score >= -2.05 {
-				scoreMinus2Count++
+			// Verify boost is always >= 1.0 and <= 1.5
+			if result < 1.0 || result > 1.5 {
+				t.Errorf("boost %f outside valid range [1.0, 1.5]", result)
 			}
+		})
+	}
+}
+
+// TestPunctuationMultiplierRange tests punctuation multiplier stays in range.
+func TestPunctuationMultiplierRange(t *testing.T) {
+	lex := createTestLexicon(t)
+
+	tests := []string{
+		"",
+		"test",
+		"test!",
+		"test!!",
+		"test!!!",
+		"test!!!!",
+		"test!!!!!",
+		"test!!!!!!",
+	}
+
+	for _, text := range tests {
+		result := lex.GetPunctuationMultiplier(text)
+		if result < 1.0 || result > 1.5 {
+			t.Errorf("GetPunctuationMultiplier(%q) = %f, expected range [1.0, 1.5]", text, result)
 		}
-
-		// Should have a reasonable distribution
-		if scoreMinus1Count == 0 && scoreMinus15Count == 0 && scoreMinus18Count == 0 && scoreMinus2Count == 0 {
-			t.Error("expected some scores at common values")
-		}
-	})
-}
-
-// TestPositiveWordsCount verifies that we have a reasonable number of positive words.
-func TestPositiveWordsCount(t *testing.T) {
-	words := GetPositiveWords()
-	if len(words) < 10 {
-		t.Errorf("expected at least 10 positive words, got %d", len(words))
 	}
 }
 
-// TestNegativeWordsCount verifies that we have a reasonable number of negative words.
-func TestNegativeWordsCount(t *testing.T) {
-	words := GetNegativeWords()
-	if len(words) < 10 {
-		t.Errorf("expected at least 10 negative words, got %d", len(words))
+// ============================================================================
+// Capitalization Boost Tests
+// ============================================================================
+
+// TestGetCapsMultiplier tests the GetCapsMultiplier method.
+func TestGetCapsMultiplier(t *testing.T) {
+	lex := createTestLexicon(t)
+
+	tests := []struct {
+		name       string
+		text       string
+		minBoost   float64
+		maxBoost   float64
+		expectedEq float64 // exact match if set to non-zero
+	}{
+		{
+			name:       "empty string",
+			text:       "",
+			minBoost:   1.0,
+			maxBoost:   1.0,
+			expectedEq: 1.0,
+		},
+		{
+			name:       "no caps words",
+			text:       "this is a test",
+			minBoost:   1.0,
+			maxBoost:   1.0,
+			expectedEq: 1.0,
+		},
+		{
+			name:       "single word all caps",
+			text:       "This is GREAT",
+			minBoost:   1.0,
+			maxBoost:   1.1,
+			expectedEq: 0, // approximately 1.1 (1/3 words in caps)
+		},
+		{
+			name:       "two words all caps",
+			text:       "THIS IS great",
+			minBoost:   1.15,
+			maxBoost:   1.25,
+			expectedEq: 0, // approximately 1.2 (2/3 words in caps)
+		},
+		{
+			name:       "all words all caps",
+			text:       "THIS IS GREAT",
+			minBoost:   1.25,
+			maxBoost:   1.3,
+			expectedEq: 1.3,
+		},
+		{
+			name:       "single letter words ignored",
+			text:       "I A TEST",
+			minBoost:   1.0,
+			maxBoost:   1.1,
+			expectedEq: 0, // TEST is caps, but only 1/3 words
+		},
+		{
+			name:       "mixed case not counted as caps",
+			text:       "TeSt test",
+			minBoost:   1.0,
+			maxBoost:   1.0,
+			expectedEq: 1.0,
+		},
+		{
+			name:       "caps with punctuation",
+			text:       "HELLO! WORLD?",
+			minBoost:   1.25,
+			maxBoost:   1.3,
+			expectedEq: 1.3,
+		},
+		{
+			name:       "fifty percent caps",
+			text:       "HELLO world GOOD bad",
+			minBoost:   1.1,
+			maxBoost:   1.2,
+			expectedEq: 0, // 2/4 words = 50% = 1.15
+		},
 	}
-}
 
-// TestEmoticonsCount verifies that we have a reasonable number of emoticons.
-func TestEmoticonsCount(t *testing.T) {
-	emoticons := GetEmoticons()
-	if len(emoticons) < 5 {
-		t.Errorf("expected at least 5 emoticons, got %d", len(emoticons))
-	}
-}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := lex.GetCapsMultiplier(tt.text)
 
-// TestInitWithValidConfig tests that Init successfully initializes with a valid config.
-func TestInitWithValidConfig(t *testing.T) {
-	config := DefaultLexiconConfig()
-	err := Init(config)
-	// Init may return an error if already initialized by the test init() function,
-	// which is acceptable. The important thing is that it doesn't panic.
-	_ = err
-}
-
-// TestInitWithNilConfig tests that Init returns an error when config is nil.
-func TestInitWithNilConfig(t *testing.T) {
-	resetForTesting()
-	defer resetForTesting()
-
-	err := Init(nil)
-	if err == nil {
-		t.Fatal("expected error for nil config, got nil")
-	}
-
-	expectedMsg := "lexicon config cannot be nil"
-	if err.Error() != expectedMsg {
-		t.Errorf("expected error message %q, got %q", expectedMsg, err.Error())
-	}
-
-	// Verify that getters panic when lexicon is not initialized
-	t.Run("getters panic when not initialized", func(t *testing.T) {
-		defer func() {
-			if r := recover(); r == nil {
-				t.Error("expected panic from GetPositiveWords, got nil")
+			if tt.expectedEq > 0 {
+				if !almostEqual(result, tt.expectedEq) {
+					t.Errorf("GetCapsMultiplier(%q) = %f, want %f", tt.text, result, tt.expectedEq)
+				}
+			} else {
+				if result < tt.minBoost || result > tt.maxBoost {
+					t.Errorf("GetCapsMultiplier(%q) = %f, want in range [%f, %f]", tt.text, result, tt.minBoost, tt.maxBoost)
+				}
 			}
-		}()
-		GetPositiveWords()
-	})
-}
 
-// TestInitWithMissingPositiveWords tests that Init returns an error when positive words are missing.
-func TestInitWithMissingPositiveWords(t *testing.T) {
-	resetForTesting()
-	defer resetForTesting()
-
-	config := &LexiconConfig{
-		PositiveWords: nil,
-		NegativeWords: map[string]float64{"bad": -1.0},
-		Emoticons:     map[string]float64{":)": 0.5},
-	}
-
-	err := Init(config)
-	if err == nil {
-		t.Fatal("expected error for nil positive words, got nil")
-	}
-
-	expectedMsg := "positive words map must not be nil or empty"
-	if err.Error() != expectedMsg {
-		t.Errorf("expected error message %q, got %q", expectedMsg, err.Error())
+			// Verify boost is always >= 1.0 and <= 1.3
+			if result < 1.0 || result > 1.3 {
+				t.Errorf("boost %f outside valid range [1.0, 1.3]", result)
+			}
+		})
 	}
 }
 
-// TestInitWithMissingNegativeWords tests that Init returns an error when negative words are missing.
-func TestInitWithMissingNegativeWords(t *testing.T) {
-	resetForTesting()
-	defer resetForTesting()
+// TestCapsMultiplierRange tests caps multiplier stays in range.
+func TestCapsMultiplierRange(t *testing.T) {
+	lex := createTestLexicon(t)
 
-	config := &LexiconConfig{
-		PositiveWords: map[string]float64{"good": 1.0},
-		NegativeWords: nil,
-		Emoticons:     map[string]float64{":)": 0.5},
+	tests := []string{
+		"",
+		"test",
+		"TEST",
+		"THIS IS TEST",
+		"THIS IS A TEST",
+		"THIS IS A TEST CASE",
 	}
 
-	err := Init(config)
-	if err == nil {
-		t.Fatal("expected error for nil negative words, got nil")
-	}
-
-	expectedMsg := "negative words map must not be nil or empty"
-	if err.Error() != expectedMsg {
-		t.Errorf("expected error message %q, got %q", expectedMsg, err.Error())
-	}
-}
-
-// TestInitWithMissingEmoticons tests that Init returns an error when emoticons are missing.
-func TestInitWithMissingEmoticons(t *testing.T) {
-	resetForTesting()
-	defer resetForTesting()
-
-	config := &LexiconConfig{
-		PositiveWords: map[string]float64{"good": 1.0},
-		NegativeWords: map[string]float64{"bad": -1.0},
-		Emoticons:     nil,
-	}
-
-	err := Init(config)
-	if err == nil {
-		t.Fatal("expected error for nil emoticons, got nil")
-	}
-
-	expectedMsg := "emoticons map must not be nil or empty"
-	if err.Error() != expectedMsg {
-		t.Errorf("expected error message %q, got %q", expectedMsg, err.Error())
+	for _, text := range tests {
+		result := lex.GetCapsMultiplier(text)
+		if result < 1.0 || result > 1.3 {
+			t.Errorf("GetCapsMultiplier(%q) = %f, expected range [1.0, 1.3]", text, result)
+		}
 	}
 }
 
-// TestInitCalledBeforeGetters tests that getters panic if called before successful initialization.
-func TestInitCalledBeforeGetters(t *testing.T) {
-	resetForTesting()
-	defer resetForTesting()
+// ============================================================================
+// Multiplier Tests
+// ============================================================================
 
-	// Attempt to call getters before initialization
-	t.Run("GetPositiveWords panics", func(t *testing.T) {
-		defer func() {
-			if r := recover(); r == nil {
-				t.Error("expected panic, got nil")
+// TestGetMultiplier tests the GetMultiplier method which combines punctuation and caps boosts.
+func TestGetMultiplier(t *testing.T) {
+	lex := createTestLexicon(t)
+
+	tests := []struct {
+		name    string
+		text    string
+		minMult float64
+		maxMult float64
+	}{
+		{
+			name:    "no modifiers",
+			text:    "test",
+			minMult: 1.0,
+			maxMult: 1.0,
+		},
+		{
+			name:    "punctuation only",
+			text:    "test!!!",
+			minMult: 1.2,
+			maxMult: 1.2,
+		},
+		{
+			name:    "caps only",
+			text:    "THIS IS TEST",
+			minMult: 1.25,
+			maxMult: 1.3,
+		},
+		{
+			name:    "both punctuation and caps",
+			text:    "THIS IS TEST!!!",
+			minMult: 1.4,
+			maxMult: 2.0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := lex.GetMultiplier(tt.text)
+
+			if result < tt.minMult || result > tt.maxMult {
+				t.Errorf("GetMultiplier(%q) = %f, want in range [%f, %f]", tt.text, result, tt.minMult, tt.maxMult)
 			}
-		}()
-		GetPositiveWords()
-	})
 
-	resetForTesting()
-
-	t.Run("GetNegativeWords panics", func(t *testing.T) {
-		defer func() {
-			if r := recover(); r == nil {
-				t.Error("expected panic, got nil")
+			// Verify multiplier is always >= 1.0
+			if result < 1.0 {
+				t.Errorf("multiplier %f below valid minimum 1.0", result)
 			}
-		}()
-		GetNegativeWords()
-	})
-
-	resetForTesting()
-
-	t.Run("GetEmoticons panics", func(t *testing.T) {
-		defer func() {
-			if r := recover(); r == nil {
-				t.Error("expected panic, got nil")
-			}
-		}()
-		GetEmoticons()
-	})
+		})
+	}
 }
 
-// TestDefaultLexiconConfig tests that DefaultLexiconConfig returns a properly configured lexicon.
-func TestDefaultLexiconConfig(t *testing.T) {
-	t.Run("returns non-nil config", func(t *testing.T) {
-		config := DefaultLexiconConfig()
-		if config == nil {
-			t.Fatal("expected non-nil config")
+// ============================================================================
+// Edge Case Tests
+// ============================================================================
+
+// TestBoostEdgeCases tests edge cases in boost calculations.
+func TestBoostEdgeCases(t *testing.T) {
+	lex := createTestLexicon(t)
+
+	t.Run("punctuation multiplier with only special characters", func(t *testing.T) {
+		result := lex.GetPunctuationMultiplier("!!!...???")
+		if result < 1.0 || result > 1.5 {
+			t.Errorf("unexpected multiplier for special characters: %f", result)
 		}
 	})
 
-	t.Run("all maps are non-nil", func(t *testing.T) {
-		config := DefaultLexiconConfig()
-		if config.PositiveWords == nil {
-			t.Error("PositiveWords should not be nil")
-		}
-		if config.NegativeWords == nil {
-			t.Error("NegativeWords should not be nil")
-		}
-		if config.Emoticons == nil {
-			t.Error("Emoticons should not be nil")
+	t.Run("caps multiplier with only single letters", func(t *testing.T) {
+		result := lex.GetCapsMultiplier("I A B C")
+		if result != 1.0 {
+			t.Errorf("expected no multiplier for single letters, got %f", result)
 		}
 	})
 
-	t.Run("all maps are non-empty", func(t *testing.T) {
-		config := DefaultLexiconConfig()
-		if len(config.PositiveWords) == 0 {
-			t.Error("PositiveWords should not be empty")
-		}
-		if len(config.NegativeWords) == 0 {
-			t.Error("NegativeWords should not be empty")
-		}
-		if len(config.Emoticons) == 0 {
-			t.Error("Emoticons should not be empty")
-		}
-	})
-
-	t.Run("contains expected words", func(t *testing.T) {
-		config := DefaultLexiconConfig()
-		expectedPositive := []string{"good", "great", "excellent"}
-		for _, word := range expectedPositive {
-			if _, ok := config.PositiveWords[word]; !ok {
-				t.Errorf("expected positive word %q in default config", word)
-			}
-		}
-
-		expectedNegative := []string{"bad", "terrible", "awful"}
-		for _, word := range expectedNegative {
-			if _, ok := config.NegativeWords[word]; !ok {
-				t.Errorf("expected negative word %q in default config", word)
-			}
-		}
-
-		expectedEmoticons := []string{":)", ":("}
-		for _, emoticon := range expectedEmoticons {
-			if _, ok := config.Emoticons[emoticon]; !ok {
-				t.Errorf("expected emoticon %q in default config", emoticon)
-			}
-		}
-	})
-}
-
-// TestInitWithEmptyMaps tests that Init returns an error when any map is empty.
-func TestInitWithEmptyMaps(t *testing.T) {
-	t.Run("empty positive words", func(t *testing.T) {
-		resetForTesting()
-		defer resetForTesting()
-
-		config := &LexiconConfig{
-			PositiveWords: make(map[string]float64), // empty map
-			NegativeWords: map[string]float64{"bad": -1.0},
-			Emoticons:     map[string]float64{":)": 0.5},
-		}
-
-		err := Init(config)
-		if err == nil {
-			t.Fatal("expected error for empty positive words")
-		}
-
-		if err.Error() != "positive words map must not be nil or empty" {
-			t.Errorf("unexpected error message: %v", err)
-		}
-	})
-
-	t.Run("empty negative words", func(t *testing.T) {
-		resetForTesting()
-		defer resetForTesting()
-
-		config := &LexiconConfig{
-			PositiveWords: map[string]float64{"good": 1.0},
-			NegativeWords: make(map[string]float64), // empty map
-			Emoticons:     map[string]float64{":)": 0.5},
-		}
-
-		err := Init(config)
-		if err == nil {
-			t.Fatal("expected error for empty negative words")
-		}
-
-		if err.Error() != "negative words map must not be nil or empty" {
-			t.Errorf("unexpected error message: %v", err)
-		}
-	})
-
-	t.Run("empty emoticons", func(t *testing.T) {
-		resetForTesting()
-		defer resetForTesting()
-
-		config := &LexiconConfig{
-			PositiveWords: map[string]float64{"good": 1.0},
-			NegativeWords: map[string]float64{"bad": -1.0},
-			Emoticons:     make(map[string]float64), // empty map
-		}
-
-		err := Init(config)
-		if err == nil {
-			t.Fatal("expected error for empty emoticons")
-		}
-
-		if err.Error() != "emoticons map must not be nil or empty" {
-			t.Errorf("unexpected error message: %v", err)
+	t.Run("caps multiplier with numbers only", func(t *testing.T) {
+		result := lex.GetCapsMultiplier("123 456 789")
+		if result != 1.0 {
+			t.Errorf("expected no multiplier for numbers only, got %f", result)
 		}
 	})
 }

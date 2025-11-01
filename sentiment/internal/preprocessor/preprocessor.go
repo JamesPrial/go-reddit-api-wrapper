@@ -4,13 +4,12 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
-
-	"github.com/jamesprial/go-reddit-api-wrapper/sentiment/internal/lexicon"
 )
 
 // Preprocessor handles text preprocessing for sentiment analysis.
 // It provides methods for tokenization, normalization, and text feature extraction.
-type Preprocessor struct{}
+type Preprocessor struct {
+}
 
 // NewPreprocessor creates a new Preprocessor instance.
 func NewPreprocessor() *Preprocessor {
@@ -64,28 +63,6 @@ func (p *Preprocessor) Normalize(text string) string {
 	}
 
 	return normalized
-}
-
-// ExtractEmoticons finds all emoticons in the given text.
-// It searches for both text-based emoticons (e.g., ":)", ":-D") and emoji characters.
-func (p *Preprocessor) ExtractEmoticons(text string) []string {
-	if text == "" {
-		return nil
-	}
-
-	emoticonsMap := lexicon.GetEmoticons()
-	found := make([]string, 0)
-	seen := make(map[string]bool)
-
-	// Search for known emoticons
-	for emoticon := range emoticonsMap {
-		if strings.Contains(text, emoticon) && !seen[emoticon] {
-			found = append(found, emoticon)
-			seen[emoticon] = true
-		}
-	}
-
-	return found
 }
 
 // IsDeleted checks if the author string represents a deleted or removed post/comment.

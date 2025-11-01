@@ -9,65 +9,16 @@ import (
 	"github.com/jamesprial/go-reddit-api-wrapper/sentiment/config"
 	"github.com/jamesprial/go-reddit-api-wrapper/sentiment/internal/analyzer"
 	"github.com/jamesprial/go-reddit-api-wrapper/sentiment/internal/lexicon"
-	"github.com/jamesprial/go-reddit-api-wrapper/sentiment/internal/modifier"
 )
 
 // Sentiment score thresholds used to categorize text sentiment, imported from analyzer package.
 const (
-	VERY_NEGATIVE_SENTIMENT_THRESHOLD = analyzer.VERY_NEGATIVE_SENTIMENT_THRESHOLD // Scores below this are VeryNegative
-	NEGATIVE_SENTIMENT_THRESHOLD      = analyzer.NEGATIVE_SENTIMENT_THRESHOLD      // Scores below this are Negative
-	NEUTRAL_SENTIMENT_THRESHOLD       = analyzer.NEUTRAL_SENTIMENT_THRESHOLD       // Scores below this are Neutral
-	POSITIVE_SENTIMENT_THRESHOLD      = analyzer.POSITIVE_SENTIMENT_THRESHOLD      // Scores below this are Positive
+	VERY_NEGATIVE_SENTIMENT_THRESHOLD = analyzer.VERY_NEGATIVE_SCORE_THRESHOLD // Scores below this are VeryNegative
+	NEGATIVE_SENTIMENT_THRESHOLD      = analyzer.NEGATIVE_SCORE_THRESHOLD      // Scores below this are Negative
+	NEUTRAL_SENTIMENT_THRESHOLD       = analyzer.NEUTRAL_SCORE_THRESHOLD       // Scores below this are Neutral
+	POSITIVE_SENTIMENT_THRESHOLD      = analyzer.POSITIVE_SCORE_THRESHOLD      // Scores below this are Positive
 	// Scores >= 0.6 are VeryPositive
 )
-
-func init() {
-	// Initialize lexicon and modifier packages with default configuration on package load.
-	// This ensures the packages are ready even if NewAnalyzer is never called.
-	// If NewAnalyzer is called, it may reinitialize with custom config, but sync.Once
-	// in both packages prevents actual re-initialization - the first call wins.
-	// See initializePackages() for details.
-	initializePackages(nil)
-}
-
-// initializePackages initializes the lexicon and modifier internal packages.
-// If cfg is nil, loads the default embedded configuration.
-// Otherwise, uses the provided configuration.
-//
-// IMPORTANT: Due to sync.Once protection in lexicon and modifier packages,
-// the first call to Init() in each package "locks in" the configuration.
-// If this function is called multiple times, only the first call takes effect.
-// This is why package initialization happens in init(), ensuring defaults are set.
-func initializePackages(cfg *config.Config) error {
-	// Load configuration if not provided
-	if cfg == nil {
-		var err error
-		cfg, err = config.LoadDefaultConfig()
-		if err != nil {
-			return fmt.Errorf("failed to load default lexicon config: %w", err)
-		}
-	}
-
-	// Initialize lexicon package with the provided config
-	lexiconCfg := &lexicon.LexiconConfig{
-		PositiveWords: cfg.Lexicon.PositiveWords,
-		NegativeWords: cfg.Lexicon.NegativeWords,
-		Emoticons:     cfg.Lexicon.Emoticons,
-	}
-	if err := lexicon.Init(lexiconCfg); err != nil {
-		return fmt.Errorf("failed to initialize lexicon: %w", err)
-	}
-
-	// Initialize modifier package with the provided config
-	modifierCfg := &modifier.ModifierConfig{
-		NegationWords: cfg.Modifier.NegationWords,
-	}
-	if err := modifier.Init(modifierCfg); err != nil {
-		return fmt.Errorf("failed to initialize modifier: %w", err)
-	}
-
-	return nil
-}
 
 // Analyzer performs sentiment analysis on Reddit posts and comments.
 // It uses a keyword-based approach to classify content sentiment.
@@ -75,7 +26,8 @@ func initializePackages(cfg *config.Config) error {
 //
 // Analyzer is safe for concurrent use from multiple goroutines.
 type Analyzer struct {
-	config *Config
+	lexicon *lexicon.Lexicon
+	config  *Config
 }
 
 // AnalyzerOption is a functional option for configuring an Analyzer.
@@ -84,7 +36,7 @@ type AnalyzerOption func(*analyzerOptions) error
 // analyzerOptions holds configuration options for analyzer initialization.
 type analyzerOptions struct {
 	config           *Config
-	lexiconModConfig *config.Config
+	lexiconConfig    *config.Config
 }
 
 // WithConfig returns an AnalyzerOption that uses the provided config.
@@ -119,32 +71,32 @@ func WithConfigFile(path string) AnalyzerOption {
 	}
 }
 
-// WithLexiconModConfig returns an AnalyzerOption that uses the provided lexicon/modifier config.
+// WithLexiconConfig returns an AnalyzerOption that uses the provided lexicon/modifier config.
 // This config contains the sentiment lexicons (positive/negative words, emoticons) and modifier settings.
 // If config is nil, the default embedded configuration will be used.
-func WithLexiconModConfig(cfg *config.Config) AnalyzerOption {
+func WithLexiconConfig(cfg *config.Config) AnalyzerOption {
 	return func(opts *analyzerOptions) error {
 		if cfg != nil {
-			opts.lexiconModConfig = cfg
+			opts.lexiconConfig = cfg
 		}
 		return nil
 	}
 }
 
-// WithLexiconModConfigFile returns an AnalyzerOption that loads lexicon/modifier config from a file.
+// WithLexiconConfigFile returns an AnalyzerOption that loads lexicon/modifier config from a file.
 // The file should be in the format supported by sentiment/config package, containing
 // positive_words, negative_words, emoticons, and negation_words fields.
 // Returns an error if the file cannot be read or parsed.
-func WithLexiconModConfigFile(path string) AnalyzerOption {
+func WithLexiconConfigFile(path string) AnalyzerOption {
 	return func(opts *analyzerOptions) error {
 		if path == "" {
 			return nil
 		}
 		cfg, err := config.LoadLexiconConfigFromFile(path)
 		if err != nil {
-			return fmt.Errorf("failed to load lexicon/modifier config from file %q: %w", path, err)
+			return fmt.Errorf("failed to load lexicon config from file %q: %w", path, err)
 		}
-		opts.lexiconModConfig = cfg
+		opts.lexiconConfig = cfg
 		return nil
 	}
 }
@@ -155,15 +107,9 @@ func WithLexiconModConfigFile(path string) AnalyzerOption {
 //  1. Analyzer Configuration (MinWordCount, EnableEmoticons):
 //     Set via WithConfig() or WithConfigFile(). Defaults are used if not provided.
 //
-//  2. Lexicon/Modifier Configuration (sentiment words, emoticons, negation words):
-//     Set via WithLexiconModConfig() or WithLexiconModConfigFile().
+//  2. Lexicon Configuration (sentiment words, emoticons, negation words):
+//     Set via WithLexiconConfig() or WithLexiconConfigFile().
 //     Defaults from embedded files are used if not provided.
-//
-// IMPORTANT: Due to sync.Once protection in the lexicon and modifier packages,
-// custom lexicon/modifier configuration can only take effect if provided BEFORE
-// NewAnalyzer is called for the first time. If the packages are already initialized
-// with defaults (from the init() function), subsequent calls to NewAnalyzer with
-// different lexicon/modifier configs will not change the already-initialized packages.
 //
 // The returned Analyzer is ready for use immediately and is safe for concurrent use
 // from multiple goroutines.
@@ -185,24 +131,24 @@ func WithLexiconModConfigFile(path string) AnalyzerOption {
 //		// handle error
 //	}
 //
-//	// Using custom lexicon/modifier configuration from file
-//	analyzer, err := NewAnalyzer(WithLexiconModConfigFile("/path/to/lexicon_config.json"))
+//	// Using custom lexicon configuration from file
+//	analyzer, err := NewAnalyzer(WithLexiconConfigFile("/path/to/lexicon_config.json"))
 //	if err != nil {
 //		// handle error
 //	}
 //
-//	// Using both custom analyzer and lexicon/modifier configs
+//	// Using both custom analyzer and lexicon configs
 //	analyzer, err := NewAnalyzer(
 //		WithConfig(&Config{MinWordCount: 2, EnableEmoticons: false}),
-//		WithLexiconModConfigFile("/path/to/lexicon_config.json"),
+//		WithLexiconConfigFile("/path/to/lexicon_config.json"),
 //	)
 //	if err != nil {
 //		// handle error
 //	}
 func NewAnalyzer(opts ...AnalyzerOption) (*Analyzer, error) {
 	options := &analyzerOptions{
-		config:           nil,
-		lexiconModConfig: nil,
+		config:        nil,
+		lexiconConfig: nil,
 	}
 
 	// Apply all options
@@ -217,16 +163,34 @@ func NewAnalyzer(opts ...AnalyzerOption) (*Analyzer, error) {
 		options.config = DefaultConfig()
 	}
 
-	// Initialize lexicon and modifier packages with the provided or default config
-	// Note: Due to sync.Once in these packages, only the first call takes effect.
-	// The init() function already initializes with defaults, so this call will not
-	// change the packages if they're already initialized.
-	if err := initializePackages(options.lexiconModConfig); err != nil {
-		return nil, err
+	// Load lexicon configuration (default or custom)
+	var cfg *config.Config
+	if options.lexiconConfig != nil {
+		cfg = options.lexiconConfig
+	} else {
+		var err error
+		cfg, err = config.LoadDefaultConfig()
+		if err != nil {
+			return nil, fmt.Errorf("failed to load default lexicon config: %w", err)
+		}
+	}
+
+	// Create lexicon instance
+	lexiconCfg := &lexicon.LexiconConfig{
+		PositiveWords: cfg.Lexicon.PositiveWords,
+		NegativeWords: cfg.Lexicon.NegativeWords,
+		Emoticons:     cfg.Lexicon.Emoticons,
+		NegationWords: cfg.Modifier.NegationWords,
+	}
+
+	lex, err := lexicon.NewLexicon(lexiconCfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create lexicon: %w", err)
 	}
 
 	return &Analyzer{
-		config: options.config,
+		lexicon: lex,
+		config:  options.config,
 	}, nil
 }
 
@@ -339,7 +303,7 @@ func (a *Analyzer) analyzePostInternal(ctx context.Context, post *types.Post) *P
 	}
 
 	// Create internal analyzer with config settings
-	internalAnalyzer := analyzer.NewAnalyzer(a.config.MinWordCount, a.config.EnableEmoticons)
+	internalAnalyzer := analyzer.NewAnalyzer(a.lexicon, a.config.MinWordCount, a.config.EnableEmoticons)
 
 	// Analyze title and capture score and confidence
 	_, titleScore, titleConf := internalAnalyzer.AnalyzeText(post.Title)
@@ -404,7 +368,7 @@ func (a *Analyzer) analyzeCommentInternal(ctx context.Context, comment *types.Co
 	}
 
 	// Create internal analyzer with config settings
-	internalAnalyzer := analyzer.NewAnalyzer(a.config.MinWordCount, a.config.EnableEmoticons)
+	internalAnalyzer := analyzer.NewAnalyzer(a.lexicon, a.config.MinWordCount, a.config.EnableEmoticons)
 
 	// Analyze comment body
 	_, score, confidence := internalAnalyzer.AnalyzeText(comment.Body)

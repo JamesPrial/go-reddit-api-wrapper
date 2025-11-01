@@ -4,16 +4,7 @@ import (
 	"strings"
 	"testing"
 	"unicode/utf8"
-
-	"github.com/jamesprial/go-reddit-api-wrapper/sentiment/internal/lexicon"
 )
-
-// init ensures the lexicon is initialized before running tests.
-func init() {
-	if err := lexicon.Init(lexicon.DefaultLexiconConfig()); err != nil {
-		panic("failed to initialize lexicon: " + err.Error())
-	}
-}
 
 // TestTokenize tests the Tokenize method with various inputs.
 func TestTokenize(t *testing.T) {
@@ -152,80 +143,6 @@ func TestNormalize(t *testing.T) {
 			result := p.Normalize(tt.input)
 			if result != tt.expected {
 				t.Errorf("Normalize(%q) = %q, want %q", tt.input, result, tt.expected)
-			}
-		})
-	}
-}
-
-// TestExtractEmoticons tests the ExtractEmoticons method.
-func TestExtractEmoticons(t *testing.T) {
-	p := NewPreprocessor()
-
-	tests := []struct {
-		name     string
-		input    string
-		contains []string // emoticons that should be found
-	}{
-		{
-			name:     "empty string",
-			input:    "",
-			contains: nil,
-		},
-		{
-			name:     "no emoticons",
-			input:    "This is a test",
-			contains: nil,
-		},
-		{
-			name:     "single happy emoticon",
-			input:    "This is great :)",
-			contains: []string{":)"},
-		},
-		{
-			name:     "single sad emoticon",
-			input:    "This is bad :(",
-			contains: []string{":("},
-		},
-		{
-			name:     "multiple emoticons",
-			input:    "Good :) and bad :(",
-			contains: []string{":)", ":("},
-		},
-		{
-			name:     "duplicate emoticons",
-			input:    "Great :) Really great :)",
-			contains: []string{":)"},
-		},
-		{
-			name:     "emoticons with other punctuation",
-			input:    "Perfect :-D and terrible :-(",
-			contains: []string{":-D", ":-("},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := p.ExtractEmoticons(tt.input)
-
-			if len(tt.contains) == 0 {
-				if len(result) != 0 {
-					t.Errorf("ExtractEmoticons(%q) = %v, want empty", tt.input, result)
-				}
-				return
-			}
-
-			// Check that all expected emoticons are present
-			for _, expected := range tt.contains {
-				found := false
-				for _, emoticon := range result {
-					if emoticon == expected {
-						found = true
-						break
-					}
-				}
-				if !found {
-					t.Errorf("ExtractEmoticons(%q) = %v, missing %q", tt.input, result, expected)
-				}
 			}
 		})
 	}
@@ -469,12 +386,6 @@ func TestPreprocessorUnicodeHandling(t *testing.T) {
 		}
 	})
 
-	t.Run("emoji handling", func(t *testing.T) {
-		text := "Great! 😊 Really good 😄"
-		emoticons := p.ExtractEmoticons(text)
-		// Emoticons function should find emoji
-		_ = emoticons
-	})
 }
 
 // TestPreprocessorEdgeCases tests edge cases in preprocessor methods.
