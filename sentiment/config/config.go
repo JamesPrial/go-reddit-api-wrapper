@@ -155,9 +155,9 @@ func parseConfig(data []byte, source string) (*Config, error) {
 
 // Validate checks that the configuration has all required fields and they are not nil.
 // It also validates that sentiment scores are within valid ranges:
-//   - Positive words: (0, 2.0]
-//   - Negative words: [-2.0, 0)
-//   - Emoticons: [-2.0, 2.0]
+//   - Positive words: (0, MAX_SCORE]
+//   - Negative words: [MIN_SCORE, 0)
+//   - Emoticons: [MIN_SCORE, MAX_SCORE]
 //
 // Returns an error if validation fails.
 func (c *Config) Validate() error {
@@ -181,24 +181,24 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("negation_words slice cannot be nil")
 	}
 
-	// Validate positive word scores are in valid range (0, 2.0]
+	// Validate positive word scores are in valid range (0, MAX_SCORE]
 	for word, score := range c.Lexicon.PositiveWords {
-		if score <= 0 || score > 2.0 {
-			return fmt.Errorf("positive word %q has invalid score %f (expected range: 0 < score <= 2.0)", word, score)
+		if score <= 0 || score > MAX_SCORE {
+			return fmt.Errorf("positive word %q has invalid score %f (expected range: 0 < score <= %f)", word, score, MAX_SCORE)
 		}
 	}
 
-	// Validate negative word scores are in valid range [-2.0, 0)
+	// Validate negative word scores are in valid range [MIN_SCORE, 0)
 	for word, score := range c.Lexicon.NegativeWords {
-		if score >= 0 || score < -2.0 {
-			return fmt.Errorf("negative word %q has invalid score %f (expected range: -2.0 <= score < 0)", word, score)
+		if score >= 0 || score < MIN_SCORE {
+			return fmt.Errorf("negative word %q has invalid score %f (expected range: %f <= score < 0)", word, score, MIN_SCORE)
 		}
 	}
 
-	// Validate emoticon scores are in valid range [-2.0, 2.0]
+	// Validate emoticon scores are in valid range [MIN_SCORE, MAX_SCORE]
 	for emoticon, score := range c.Lexicon.Emoticons {
-		if score < -2.0 || score > 2.0 {
-			return fmt.Errorf("emoticon %q has invalid score %f (expected range: -2.0 <= score <= 2.0)", emoticon, score)
+		if score < MIN_SCORE || score > MAX_SCORE {
+			return fmt.Errorf("emoticon %q has invalid score %f (expected range: %f <= score <= %f)", emoticon, score, MIN_SCORE, MAX_SCORE)
 		}
 	}
 
