@@ -1,6 +1,6 @@
 package sentiment
 
-import "github.com/jamesprial/go-reddit-api-wrapper/sentiment/internal/constants"
+import "github.com/jamesprial/go-reddit-api-wrapper/sentiment/config"
 
 // Sentiment represents the sentiment classification of content.
 // It is expressed as an integer ranging from VeryNegative to VeryPositive.
@@ -21,36 +21,36 @@ const (
 
 // Sentiment score thresholds and bounds used to categorize text sentiment.
 // These define the ranges that map numeric sentiment scores to Sentiment classifications.
-// Re-exported from internal/constants for public API access.
+// Re-exported from config for public API access.
 const (
-	// MinScore is the minimum valid sentiment score (inclusive).
-	MinScore = constants.MinScore
-	// MaxScore is the maximum valid sentiment score (inclusive).
-	MaxScore = constants.MaxScore
+	// MIN_SCORE is the minimum valid sentiment score (inclusive).
+	MIN_SCORE = config.MIN_SCORE
+	// MAX_SCORE is the maximum valid sentiment score (inclusive).
+	MAX_SCORE = config.MAX_SCORE
 
-	// VeryNegativeThreshold defines the upper bound for VeryNegative sentiment.
+	// VERY_NEGATIVE_SCORE_THRESHOLD defines the upper bound for VeryNegative sentiment.
 	// Scores below this threshold are classified as VeryNegative.
-	VeryNegativeThreshold = constants.VeryNegativeThreshold
+	VERY_NEGATIVE_SCORE_THRESHOLD = config.VERY_NEGATIVE_SCORE_THRESHOLD
 
-	// NegativeThreshold defines the upper bound for Negative sentiment.
-	// Scores >= VeryNegativeThreshold and < NegativeThreshold are classified as Negative.
-	NegativeThreshold = constants.NegativeThreshold
+	// NEGATIVE_SCORE_THRESHOLD defines the upper bound for Negative sentiment.
+	// Scores >= VERY_NEGATIVE_SCORE_THRESHOLD and < NEGATIVE_SCORE_THRESHOLD are classified as Negative.
+	NEGATIVE_SCORE_THRESHOLD = config.NEGATIVE_SCORE_THRESHOLD
 
-	// NeutralThreshold defines the upper bound for Neutral sentiment.
-	// Scores >= NegativeThreshold and < NeutralThreshold are classified as Neutral.
-	NeutralThreshold = constants.NeutralThreshold
+	// NEUTRAL_SCORE_THRESHOLD defines the upper bound for Neutral sentiment.
+	// Scores >= NEGATIVE_SCORE_THRESHOLD and < NEUTRAL_SCORE_THRESHOLD are classified as Neutral.
+	NEUTRAL_SCORE_THRESHOLD = config.NEUTRAL_SCORE_THRESHOLD
 
-	// PositiveThreshold defines the upper bound for Positive sentiment.
-	// Scores >= NeutralThreshold and < PositiveThreshold are classified as Positive.
-	// Scores >= PositiveThreshold are classified as VeryPositive.
-	PositiveThreshold = constants.PositiveThreshold
+	// POSITIVE_SCORE_THRESHOLD defines the upper bound for Positive sentiment.
+	// Scores >= NEUTRAL_SCORE_THRESHOLD and < POSITIVE_SCORE_THRESHOLD are classified as Positive.
+	// Scores >= POSITIVE_SCORE_THRESHOLD are classified as VeryPositive.
+	POSITIVE_SCORE_THRESHOLD = config.POSITIVE_SCORE_THRESHOLD
 
-	// ConfidenceScalingFactor is used to scale confidence calculations.
+	// CONFIDENCE_SCALING_FACTOR is used to scale confidence calculations.
 	// Applied to the match ratio to produce final confidence scores.
-	ConfidenceScalingFactor = constants.ConfidenceScalingFactor
+	CONFIDENCE_SCALING_FACTOR = config.CONFIDENCE_SCALING_FACTOR
 
-	// MaxConfidence is the maximum valid confidence value (inclusive).
-	MaxConfidence = constants.MaxConfidence
+	// MAX_CONFIDENCE is the maximum valid confidence value (inclusive).
+	MAX_CONFIDENCE = config.MAX_CONFIDENCE
 )
 
 // String returns a human-readable string representation of the sentiment.

@@ -10,23 +10,11 @@ import (
 	"math"
 	"strings"
 	"unicode"
+
+	"github.com/jamesprial/go-reddit-api-wrapper/sentiment/config"
 )
 
 // Modifier constants define the behavior of sentiment modifiers.
-const (
-	MAX_NEGATION_LOOKBACK                = 3
-	PUNCTUATION_BOOST_CONSECUTIVE_FACTOR = 0.1
-	NO_PUNCTUATION_BOOST                 = 1.0
-	MAX_PUNCTUATION_BOOST                = 1.5
-	MAX_PUNCTUATION_BOOST_CONSECUTIVE    = 5
-	NO_CAPS_BOOST                        = 1.0
-	MAX_CAPS_BOOST                       = 1.3
-	CAPS_BOOST_PERCENTAGE_FACTOR         = 0.3
-	NO_NEGATION_BOOST                    = 1.0
-	MAX_NEGATION_BOOST                   = 1.5
-	MAX_SCORE                            = 1.0
-	MIN_SCORE                            = -1.0
-)
 
 // Error represents a lexicon initialization or configuration error.
 type ConfigError struct {
@@ -133,7 +121,7 @@ func (l *Lexicon) DetectNegation(tokens []string, index int) bool {
 	}
 
 	// Look back up to 3 tokens
-	lookbackStart := max(0, index-MAX_NEGATION_LOOKBACK)
+	lookbackStart := max(0, index-config.MAX_NEGATION_LOOKBACK)
 
 	// Check preceding tokens for negation words
 	for i := lookbackStart; i < index; i++ {
@@ -180,7 +168,7 @@ func (l *Lexicon) ExtractEmoticons(text string) []string {
 // Returns a multiplier value to apply to sentiment scores.
 func (l *Lexicon) GetPunctuationMultiplier(text string) float64 {
 	if text == "" {
-		return NO_PUNCTUATION_BOOST
+		return config.NO_PUNCTUATION_BOOST
 	}
 
 	// Count repeated punctuation sequences
@@ -212,13 +200,13 @@ func (l *Lexicon) GetPunctuationMultiplier(text string) float64 {
 	// Convert consecutive count to boost multiplier
 	// No boost for single punctuation or none
 	if maxConsecutive <= 1 {
-		return NO_PUNCTUATION_BOOST
+		return config.NO_PUNCTUATION_BOOST
 	}
 
 	// Scale from 1.1 (2 consecutive) to 1.5 (6+ consecutive)
 	// Formula: 1.0 + (min(maxConsecutive - 1, 5) * 0.1)
-	boost := NO_PUNCTUATION_BOOST + math.Min(float64(maxConsecutive-1), MAX_PUNCTUATION_BOOST_CONSECUTIVE)*PUNCTUATION_BOOST_CONSECUTIVE_FACTOR
-	return math.Min(boost, MAX_PUNCTUATION_BOOST)
+	boost := config.NO_PUNCTUATION_BOOST + math.Min(float64(maxConsecutive-1), config.MAX_PUNCTUATION_BOOST_CONSECUTIVE)*config.PUNCTUATION_BOOST_CONSECUTIVE_FACTOR
+	return math.Min(boost, config.MAX_PUNCTUATION_BOOST)
 }
 
 // CalculateCapsBoost calculates a score boost based on the percentage of ALL CAPS words
@@ -233,12 +221,12 @@ func (l *Lexicon) GetPunctuationMultiplier(text string) float64 {
 // Returns a multiplier value to apply to sentiment scores.
 func (l *Lexicon) GetCapsMultiplier(text string) float64 {
 	if text == "" {
-		return NO_CAPS_BOOST
+		return config.NO_CAPS_BOOST
 	}
 
 	words := strings.Fields(text)
 	if len(words) == 0 {
-		return NO_CAPS_BOOST
+		return config.NO_CAPS_BOOST
 	}
 
 	capsCount := 0
@@ -249,8 +237,8 @@ func (l *Lexicon) GetCapsMultiplier(text string) float64 {
 	}
 
 	capsPercentage := float64(capsCount) / float64(len(words))
-	boost := NO_CAPS_BOOST + (capsPercentage * CAPS_BOOST_PERCENTAGE_FACTOR)
-	return math.Min(boost, MAX_CAPS_BOOST)
+	boost := config.NO_CAPS_BOOST + (capsPercentage * config.CAPS_BOOST_PERCENTAGE_FACTOR)
+	return math.Min(boost, config.MAX_CAPS_BOOST)
 }
 
 // GetMultiplier applies sentiment modifiers (punctuation and capitalization) to a base score.
@@ -269,10 +257,10 @@ func (l *Lexicon) GetMultiplier(text string) float64 {
 }
 
 func boundScore(score float64) float64 {
-	if score > MAX_SCORE {
-		return MAX_SCORE
-	} else if score < MIN_SCORE {
-		return MIN_SCORE
+	if score > config.MAX_SCORE {
+		return config.MAX_SCORE
+	} else if score < config.MIN_SCORE {
+		return config.MIN_SCORE
 	}
 	return score
 }

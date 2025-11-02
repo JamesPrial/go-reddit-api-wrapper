@@ -11,13 +11,22 @@ import (
 	"github.com/jamesprial/go-reddit-api-wrapper/sentiment/internal/lexicon"
 )
 
+type LexiconProvider interface {
+	GetScore(word string) float64
+	IsPositive(word string) bool
+	IsNegative(word string) bool
+	DetectNegation(tokens []string, index int) bool
+	ExtractEmoticons(text string) []string
+	GetMultiplier(text string) float64
+}
+
 // Analyzer performs sentiment analysis on Reddit posts and comments.
 // It uses a keyword-based approach to classify content sentiment.
 // The zero value of Analyzer is not usable; use NewAnalyzer to create an instance.
 //
 // Analyzer is safe for concurrent use from multiple goroutines.
 type Analyzer struct {
-	lexicon *lexicon.Lexicon
+	lexicon LexiconProvider
 	config  *Config
 }
 
@@ -26,8 +35,8 @@ type AnalyzerOption func(*analyzerOptions) error
 
 // analyzerOptions holds configuration options for analyzer initialization.
 type analyzerOptions struct {
-	config           *Config
-	lexiconConfig    *config.Config
+	config        *Config
+	lexiconConfig *config.Config
 }
 
 // WithConfig returns an AnalyzerOption that uses the provided config.
@@ -306,13 +315,13 @@ func (a *Analyzer) analyzePostInternal(ctx context.Context, post *types.Post) *P
 	// Convert combined score to sentiment classification
 	var sentiment Sentiment
 	switch {
-	case combinedScore < VeryNegativeThreshold:
+	case combinedScore < config.VERY_NEGATIVE_SCORE_THRESHOLD:
 		sentiment = VeryNegative
-	case combinedScore < NegativeThreshold:
+	case combinedScore < config.NEGATIVE_SCORE_THRESHOLD:
 		sentiment = Negative
-	case combinedScore < NeutralThreshold:
+	case combinedScore < config.NEUTRAL_SCORE_THRESHOLD:
 		sentiment = Neutral
-	case combinedScore < PositiveThreshold:
+	case combinedScore < config.POSITIVE_SCORE_THRESHOLD:
 		sentiment = Positive
 	default:
 		sentiment = VeryPositive
@@ -365,13 +374,13 @@ func (a *Analyzer) analyzeCommentInternal(ctx context.Context, comment *types.Co
 	// Convert score to sentiment classification
 	var sentiment Sentiment
 	switch {
-	case score < VeryNegativeThreshold:
+	case score < config.VERY_NEGATIVE_SCORE_THRESHOLD:
 		sentiment = VeryNegative
-	case score < NegativeThreshold:
+	case score < config.NEGATIVE_SCORE_THRESHOLD:
 		sentiment = Negative
-	case score < NeutralThreshold:
+	case score < config.NEUTRAL_SCORE_THRESHOLD:
 		sentiment = Neutral
-	case score < PositiveThreshold:
+	case score < config.POSITIVE_SCORE_THRESHOLD:
 		sentiment = Positive
 	default:
 		sentiment = VeryPositive

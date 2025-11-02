@@ -3,19 +3,19 @@ package analyzer
 import (
 	"math"
 
-	"github.com/jamesprial/go-reddit-api-wrapper/sentiment/internal/constants"
+	"github.com/jamesprial/go-reddit-api-wrapper/sentiment/config"
 	"github.com/jamesprial/go-reddit-api-wrapper/sentiment/internal/preprocessor"
 )
 
 // LexiconProvider defines the interface for lexicon operations used by the analyzer.
 // This interface enables dependency injection and testing with mock implementations.
 type LexiconProvider interface {
-	GetScore(word string) float64              // Returns the sentiment score for a word, or 0.0 if not found.
-	IsPositive(word string) bool               // Returns true if the word has a positive sentiment.
-	IsNegative(word string) bool               // Returns true if the word has a negative sentiment.
+	GetScore(word string) float64                   // Returns the sentiment score for a word, or 0.0 if not found.
+	IsPositive(word string) bool                    // Returns true if the word has a positive sentiment.
+	IsNegative(word string) bool                    // Returns true if the word has a negative sentiment.
 	DetectNegation(tokens []string, index int) bool // Checks if a word at the given index is negated by preceding words.
-	ExtractEmoticons(text string) []string     // Finds all emoticons in the given text.
-	GetMultiplier(text string) float64         // Applies sentiment modifiers (punctuation and capitalization) to a base score.
+	ExtractEmoticons(text string) []string          // Finds all emoticons in the given text.
+	GetMultiplier(text string) float64              // Applies sentiment modifiers (punctuation and capitalization) to a base score.
 }
 
 // PreprocessorProvider defines the interface for text preprocessing operations used by the analyzer.
@@ -79,23 +79,16 @@ func NewAnalyzer(lex LexiconProvider, minWordCount int, enableEmoticons bool) *A
 //     based on the ratio of matched words to total words
 func (a *Analyzer) AnalyzeText(text string) (sentimentValue int, score float64, confidence float64) {
 	// Sentiment value constants (match sentiment.Sentiment enum values)
-	const (
-		veryNegativeSentiment = -2
-		negativeSentiment     = -1
-		neutralSentiment      = 0
-		positiveSentiment     = 1
-		veryPositiveSentiment = 2
-	)
 
 	if text == "" {
-		return neutralSentiment, 0.0, 0.0
+		return config.NEUTRAL_SENTIMENT, 0.0, 0.0
 	}
 	if a.preprocessor.IsDeleted(text) {
-		return neutralSentiment, 0.0, 0.0
+		return config.NEUTRAL_SENTIMENT, 0.0, 0.0
 	}
 	tokens := a.preprocessor.Tokenize(text)
 	if a.minWordCount > 0 && len(tokens) < a.minWordCount {
-		return neutralSentiment, 0.0, 0.0
+		return config.NEUTRAL_SENTIMENT, 0.0, 0.0
 	}
 
 	totalScore := 0.0
@@ -136,7 +129,7 @@ func (a *Analyzer) AnalyzeText(text string) (sentimentValue int, score float64, 
 
 	if len(tokens) > 0 {
 		matchRatio := float64(matchedWords) / float64(len(tokens))
-		confidence = math.Min(matchRatio*constants.ConfidenceScalingFactor, constants.MaxConfidence)
+		confidence = math.Min(matchRatio*config.CONFIDENCE_SCALING_FACTOR, config.MAX_CONFIDENCE)
 	} else {
 		confidence = 0.0
 	}
@@ -144,23 +137,23 @@ func (a *Analyzer) AnalyzeText(text string) (sentimentValue int, score float64, 
 	// Convert score to sentiment classification
 	// Thresholds chosen to balance sensitivity with specificity
 	switch {
-	case score < constants.VeryNegativeThreshold:
-		sentimentValue = veryNegativeSentiment // VeryNegative
-	case score < constants.NegativeThreshold:
-		sentimentValue = negativeSentiment // Negative
-	case score < constants.NeutralThreshold:
-		sentimentValue = neutralSentiment // Neutral
-	case score < constants.PositiveThreshold:
-		sentimentValue = positiveSentiment // Positive
+	case score < config.VERY_NEGATIVE_SCORE_THRESHOLD:
+		sentimentValue = config.VERY_NEGATIVE_SENTIMENT // VeryNegative
+	case score < config.NEGATIVE_SCORE_THRESHOLD:
+		sentimentValue = config.NEGATIVE_SENTIMENT // Negative
+	case score < config.NEUTRAL_SCORE_THRESHOLD:
+		sentimentValue = config.NEUTRAL_SENTIMENT // Neutral
+	case score < config.POSITIVE_SCORE_THRESHOLD:
+		sentimentValue = config.POSITIVE_SENTIMENT // Positive
 	default:
-		sentimentValue = veryPositiveSentiment // VeryPositive
+		sentimentValue = config.VERY_POSITIVE_SENTIMENT // VeryPositive
 	}
 
 	// Ensure score is in valid range
-	if score > constants.MaxScore {
-		score = constants.MaxScore
-	} else if score < constants.MinScore {
-		score = constants.MinScore
+	if score > config.MAX_SCORE {
+		score = config.MAX_SCORE
+	} else if score < config.MIN_SCORE {
+		score = config.MIN_SCORE
 	}
 
 	return sentimentValue, score, confidence
@@ -193,10 +186,10 @@ func (a *Analyzer) CombineScores(scores ...float64) float64 {
 	combined := sum / float64(len(scores))
 
 	// Clamp to valid range
-	if combined > constants.MaxScore {
-		return constants.MaxScore
-	} else if combined < constants.MinScore {
-		return constants.MinScore
+	if combined > config.MAX_SCORE {
+		return config.MAX_SCORE
+	} else if combined < config.MIN_SCORE {
+		return config.MIN_SCORE
 	}
 
 	return combined
