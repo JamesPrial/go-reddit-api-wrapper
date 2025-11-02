@@ -11,15 +11,6 @@ import (
 	"github.com/jamesprial/go-reddit-api-wrapper/sentiment/internal/lexicon"
 )
 
-// Sentiment score thresholds used to categorize text sentiment, imported from analyzer package.
-const (
-	VERY_NEGATIVE_SENTIMENT_THRESHOLD = analyzer.VERY_NEGATIVE_SCORE_THRESHOLD // Scores below this are VeryNegative
-	NEGATIVE_SENTIMENT_THRESHOLD      = analyzer.NEGATIVE_SCORE_THRESHOLD      // Scores below this are Negative
-	NEUTRAL_SENTIMENT_THRESHOLD       = analyzer.NEUTRAL_SCORE_THRESHOLD       // Scores below this are Neutral
-	POSITIVE_SENTIMENT_THRESHOLD      = analyzer.POSITIVE_SCORE_THRESHOLD      // Scores below this are Positive
-	// Scores >= 0.6 are VeryPositive
-)
-
 // Analyzer performs sentiment analysis on Reddit posts and comments.
 // It uses a keyword-based approach to classify content sentiment.
 // The zero value of Analyzer is not usable; use NewAnalyzer to create an instance.
@@ -176,14 +167,12 @@ func NewAnalyzer(opts ...AnalyzerOption) (*Analyzer, error) {
 	}
 
 	// Create lexicon instance
-	lexiconCfg := &lexicon.LexiconConfig{
-		PositiveWords: cfg.Lexicon.PositiveWords,
-		NegativeWords: cfg.Lexicon.NegativeWords,
-		Emoticons:     cfg.Lexicon.Emoticons,
-		NegationWords: cfg.Modifier.NegationWords,
-	}
-
-	lex, err := lexicon.NewLexicon(lexiconCfg)
+	lex, err := lexicon.NewLexicon(
+		cfg.Lexicon.PositiveWords,
+		cfg.Lexicon.NegativeWords,
+		cfg.Lexicon.Emoticons,
+		cfg.Modifier.NegationWords,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create lexicon: %w", err)
 	}
@@ -317,13 +306,13 @@ func (a *Analyzer) analyzePostInternal(ctx context.Context, post *types.Post) *P
 	// Convert combined score to sentiment classification
 	var sentiment Sentiment
 	switch {
-	case combinedScore < NEGATIVE_SENTIMENT_THRESHOLD:
+	case combinedScore < VeryNegativeThreshold:
 		sentiment = VeryNegative
-	case combinedScore < NEGATIVE_SENTIMENT_THRESHOLD:
+	case combinedScore < NegativeThreshold:
 		sentiment = Negative
-	case combinedScore < NEUTRAL_SENTIMENT_THRESHOLD:
+	case combinedScore < NeutralThreshold:
 		sentiment = Neutral
-	case combinedScore < POSITIVE_SENTIMENT_THRESHOLD:
+	case combinedScore < PositiveThreshold:
 		sentiment = Positive
 	default:
 		sentiment = VeryPositive
@@ -376,13 +365,13 @@ func (a *Analyzer) analyzeCommentInternal(ctx context.Context, comment *types.Co
 	// Convert score to sentiment classification
 	var sentiment Sentiment
 	switch {
-	case score < NEGATIVE_SENTIMENT_THRESHOLD:
+	case score < VeryNegativeThreshold:
 		sentiment = VeryNegative
-	case score < NEGATIVE_SENTIMENT_THRESHOLD:
+	case score < NegativeThreshold:
 		sentiment = Negative
-	case score < NEUTRAL_SENTIMENT_THRESHOLD:
+	case score < NeutralThreshold:
 		sentiment = Neutral
-	case score < POSITIVE_SENTIMENT_THRESHOLD:
+	case score < PositiveThreshold:
 		sentiment = Positive
 	default:
 		sentiment = VeryPositive

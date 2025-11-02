@@ -1,5 +1,7 @@
 package sentiment
 
+import "github.com/jamesprial/go-reddit-api-wrapper/sentiment/internal/constants"
+
 // Sentiment represents the sentiment classification of content.
 // It is expressed as an integer ranging from VeryNegative to VeryPositive.
 type Sentiment int
@@ -15,6 +17,40 @@ const (
 	Positive Sentiment = 1
 	// VeryPositive represents highly positive sentiment.
 	VeryPositive Sentiment = 2
+)
+
+// Sentiment score thresholds and bounds used to categorize text sentiment.
+// These define the ranges that map numeric sentiment scores to Sentiment classifications.
+// Re-exported from internal/constants for public API access.
+const (
+	// MinScore is the minimum valid sentiment score (inclusive).
+	MinScore = constants.MinScore
+	// MaxScore is the maximum valid sentiment score (inclusive).
+	MaxScore = constants.MaxScore
+
+	// VeryNegativeThreshold defines the upper bound for VeryNegative sentiment.
+	// Scores below this threshold are classified as VeryNegative.
+	VeryNegativeThreshold = constants.VeryNegativeThreshold
+
+	// NegativeThreshold defines the upper bound for Negative sentiment.
+	// Scores >= VeryNegativeThreshold and < NegativeThreshold are classified as Negative.
+	NegativeThreshold = constants.NegativeThreshold
+
+	// NeutralThreshold defines the upper bound for Neutral sentiment.
+	// Scores >= NegativeThreshold and < NeutralThreshold are classified as Neutral.
+	NeutralThreshold = constants.NeutralThreshold
+
+	// PositiveThreshold defines the upper bound for Positive sentiment.
+	// Scores >= NeutralThreshold and < PositiveThreshold are classified as Positive.
+	// Scores >= PositiveThreshold are classified as VeryPositive.
+	PositiveThreshold = constants.PositiveThreshold
+
+	// ConfidenceScalingFactor is used to scale confidence calculations.
+	// Applied to the match ratio to produce final confidence scores.
+	ConfidenceScalingFactor = constants.ConfidenceScalingFactor
+
+	// MaxConfidence is the maximum valid confidence value (inclusive).
+	MaxConfidence = constants.MaxConfidence
 )
 
 // String returns a human-readable string representation of the sentiment.

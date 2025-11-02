@@ -4,6 +4,17 @@ import (
 	"math"
 	"strings"
 	"testing"
+
+	"github.com/jamesprial/go-reddit-api-wrapper/sentiment/internal/constants"
+)
+
+// Sentiment value constants (match sentiment.Sentiment enum values)
+const (
+	veryNegativeSentiment = -2
+	negativeSentiment     = -1
+	neutralSentiment      = 0
+	positiveSentiment     = 1
+	veryPositiveSentiment = 2
 )
 
 // ============================================================================
@@ -12,13 +23,15 @@ import (
 
 // mockLexicon implements LexiconProvider for testing
 type mockLexicon struct {
-	scores      map[string]float64
-	emoticons   []string
-	multiplier  float64
-	isPositive  func(string) bool
-	isNegative  func(string) bool
-	getScore    func(string) float64
-	getMultiplier func(string) float64
+	scores          map[string]float64
+	emoticons       []string
+	multiplier      float64
+	negationWords   map[string]bool
+	isPositive      func(string) bool
+	isNegative      func(string) bool
+	getScore        func(string) float64
+	getMultiplier   func(string) float64
+	detectNegation  func([]string, int) bool
 }
 
 func (m *mockLexicon) GetScore(word string) float64 {
@@ -63,6 +76,23 @@ func (m *mockLexicon) GetMultiplier(text string) float64 {
 		return m.getMultiplier(text)
 	}
 	return m.multiplier
+}
+
+func (m *mockLexicon) DetectNegation(tokens []string, index int) bool {
+	if m.detectNegation != nil {
+		return m.detectNegation(tokens, index)
+	}
+	// Default implementation: check for negation words in previous 3 tokens
+	if index <= 0 || len(tokens) == 0 {
+		return false
+	}
+	lookbackStart := max(0, index-3)
+	for i := lookbackStart; i < index; i++ {
+		if m.negationWords != nil && m.negationWords[tokens[i]] {
+			return true
+		}
+	}
+	return false
 }
 
 // mockPreprocessor implements PreprocessorProvider for testing
@@ -213,21 +243,21 @@ func TestAnalyzeText_EmptyAndInvalid(t *testing.T) {
 		{
 			name:              "empty string",
 			text:              "",
-			expectedSentiment: NEUTRAL_SENTIMENT,
+			expectedSentiment: neutralSentiment,
 			expectedScore:     0.0,
 			expectedConfidence: 0.0,
 		},
 		{
 			name:              "deleted content",
 			text:              "[deleted]",
-			expectedSentiment: NEUTRAL_SENTIMENT,
+			expectedSentiment: neutralSentiment,
 			expectedScore:     0.0,
 			expectedConfidence: 0.0,
 		},
 		{
 			name:              "removed content",
 			text:              "[removed]",
-			expectedSentiment: NEUTRAL_SENTIMENT,
+			expectedSentiment: neutralSentiment,
 			expectedScore:     0.0,
 			expectedConfidence: 0.0,
 		},
@@ -276,21 +306,21 @@ func TestAnalyzeText_MinWordCount(t *testing.T) {
 		{
 			name:              "below min word count",
 			text:              "good",
-			expectedSentiment: NEUTRAL_SENTIMENT,
+			expectedSentiment: neutralSentiment,
 			expectedScore:     0.0,
 			expectedConfidence: 0.0,
 		},
 		{
 			name:              "exactly at min word count",
 			text:              "this is very good text",
-			expectedSentiment: NEUTRAL_SENTIMENT,
+			expectedSentiment: neutralSentiment,
 			expectedScore:     0.0,
 			expectedConfidence: 0.0,
 		},
 		{
 			name:              "above min word count",
 			text:              "this is a very good long text",
-			expectedSentiment: NEUTRAL_SENTIMENT,
+			expectedSentiment: neutralSentiment,
 			expectedScore:     0.0,
 			expectedConfidence: 0.0,
 		},
@@ -345,9 +375,9 @@ func TestAnalyzeText_SentimentClassification(t *testing.T) {
 				}
 			},
 			text:              "test",
-			expectedSentiment: VERY_NEGATIVE_SENTIMENT,
+			expectedSentiment: veryNegativeSentiment,
 			minScore:          -1.0,
-			maxScore:          VERY_NEGATIVE_SCORE_THRESHOLD,
+			maxScore:          constants.VeryNegativeThreshold,
 		},
 		{
 			name: "negative sentiment",
@@ -368,9 +398,9 @@ func TestAnalyzeText_SentimentClassification(t *testing.T) {
 				}
 			},
 			text:              "test",
-			expectedSentiment: NEGATIVE_SENTIMENT,
-			minScore:          VERY_NEGATIVE_SCORE_THRESHOLD,
-			maxScore:          NEGATIVE_SCORE_THRESHOLD,
+			expectedSentiment: negativeSentiment,
+			minScore:          constants.VeryNegativeThreshold,
+			maxScore:          constants.NegativeThreshold,
 		},
 		{
 			name: "neutral sentiment",
@@ -391,9 +421,9 @@ func TestAnalyzeText_SentimentClassification(t *testing.T) {
 				}
 			},
 			text:              "test",
-			expectedSentiment: NEUTRAL_SENTIMENT,
-			minScore:          NEGATIVE_SCORE_THRESHOLD,
-			maxScore:          NEUTRAL_SCORE_THRESHOLD,
+			expectedSentiment: neutralSentiment,
+			minScore:          constants.NegativeThreshold,
+			maxScore:          constants.NeutralThreshold,
 		},
 		{
 			name: "positive sentiment",
@@ -414,9 +444,9 @@ func TestAnalyzeText_SentimentClassification(t *testing.T) {
 				}
 			},
 			text:              "test",
-			expectedSentiment: POSITIVE_SENTIMENT,
-			minScore:          NEUTRAL_SCORE_THRESHOLD,
-			maxScore:          POSITIVE_SCORE_THRESHOLD,
+			expectedSentiment: positiveSentiment,
+			minScore:          constants.NeutralThreshold,
+			maxScore:          constants.PositiveThreshold,
 		},
 		{
 			name: "very positive sentiment",
@@ -437,8 +467,8 @@ func TestAnalyzeText_SentimentClassification(t *testing.T) {
 				}
 			},
 			text:              "test",
-			expectedSentiment: VERY_POSITIVE_SENTIMENT,
-			minScore:          POSITIVE_SCORE_THRESHOLD,
+			expectedSentiment: veryPositiveSentiment,
+			minScore:          constants.PositiveThreshold,
 			maxScore:          1.0,
 		},
 	}
@@ -506,7 +536,7 @@ func TestAnalyzeText_Emoticons(t *testing.T) {
 			emoticonScore:    1.0,
 			multiplier:       2.0,
 			text:             "test :D",
-			expectedScoreMin: 1.0, // Clamped to MAX_SCORE
+			expectedScoreMin: 1.0, // Clamped to constants.MaxScore
 			expectedScoreMax: 1.0,
 		},
 	}
@@ -582,7 +612,7 @@ func TestAnalyzeText_Confidence(t *testing.T) {
 			enableEmoticons: true,
 			emoticonScore:   1.0,
 			expectedConfMin: 0.0,
-			expectedConfMax: MAX_CONFIDENCE,
+			expectedConfMax: constants.MaxConfidence,
 		},
 	}
 
@@ -611,9 +641,9 @@ func TestAnalyzeText_Confidence(t *testing.T) {
 					confidence, tt.expectedConfMin, tt.expectedConfMax)
 			}
 			
-			// Confidence should never exceed MAX_CONFIDENCE
-			if confidence > MAX_CONFIDENCE {
-				t.Errorf("confidence = %f exceeds MAX_CONFIDENCE %f", confidence, MAX_CONFIDENCE)
+			// Confidence should never exceed constants.MaxConfidence
+			if confidence > constants.MaxConfidence {
+				t.Errorf("confidence = %f exceeds constants.MaxConfidence %f", confidence, constants.MaxConfidence)
 			}
 		})
 	}
@@ -634,13 +664,13 @@ func TestAnalyzeText_ScoreClamping(t *testing.T) {
 			name:          "score above max clamped",
 			rawScore:      2.0,
 			multiplier:    1.0,
-			expectedScore: MAX_SCORE,
+			expectedScore: constants.MaxScore,
 		},
 		{
 			name:          "score below min clamped",
 			rawScore:      -2.0,
 			multiplier:    1.0,
-			expectedScore: MIN_SCORE,
+			expectedScore: constants.MinScore,
 		},
 		{
 			name:          "score within range unchanged",
@@ -652,13 +682,13 @@ func TestAnalyzeText_ScoreClamping(t *testing.T) {
 			name:          "score with multiplier above max",
 			rawScore:      0.8,
 			multiplier:    2.0,
-			expectedScore: MAX_SCORE,
+			expectedScore: constants.MaxScore,
 		},
 		{
 			name:          "score with multiplier below min",
 			rawScore:      -0.8,
 			multiplier:    2.0,
-			expectedScore: MIN_SCORE,
+			expectedScore: constants.MinScore,
 		},
 	}
 
@@ -687,8 +717,8 @@ func TestAnalyzeText_ScoreClamping(t *testing.T) {
 			}
 			
 			// Verify score is always in valid range
-			if score < MIN_SCORE || score > MAX_SCORE {
-				t.Errorf("score %f outside valid range [%f, %f]", score, MIN_SCORE, MAX_SCORE)
+			if score < constants.MinScore || score > constants.MaxScore {
+				t.Errorf("score %f outside valid range [%f, %f]", score, constants.MinScore, constants.MaxScore)
 			}
 		})
 	}
@@ -834,22 +864,22 @@ func TestCombineScores_Clamping(t *testing.T) {
 		{
 			name:          "average above max",
 			scores:        []float64{1.0, 1.0, 1.0, 1.0, 1.0},
-			expectedScore: MAX_SCORE,
+			expectedScore: constants.MaxScore,
 		},
 		{
 			name:          "average below min",
 			scores:        []float64{-1.0, -1.0, -1.0, -1.0, -1.0},
-			expectedScore: MIN_SCORE,
+			expectedScore: constants.MinScore,
 		},
 		{
 			name:          "extreme positive values",
 			scores:        []float64{5.0, 10.0, 15.0},
-			expectedScore: MAX_SCORE,
+			expectedScore: constants.MaxScore,
 		},
 		{
 			name:          "extreme negative values",
 			scores:        []float64{-5.0, -10.0, -15.0},
-			expectedScore: MIN_SCORE,
+			expectedScore: constants.MinScore,
 		},
 		{
 			name:          "mixed extreme values averaging to in-range",
@@ -867,8 +897,8 @@ func TestCombineScores_Clamping(t *testing.T) {
 			}
 			
 			// Verify result is always in valid range
-			if result < MIN_SCORE || result > MAX_SCORE {
-				t.Errorf("combined score %f outside valid range [%f, %f]", result, MIN_SCORE, MAX_SCORE)
+			if result < constants.MinScore || result > constants.MaxScore {
+				t.Errorf("combined score %f outside valid range [%f, %f]", result, constants.MinScore, constants.MaxScore)
 			}
 		})
 	}
@@ -885,13 +915,13 @@ func TestAnalyzeText_EdgeCases(t *testing.T) {
 		sentiment, score, confidence := analyzer.AnalyzeText(longText)
 		
 		// Should complete without panic
-		if sentiment < VERY_NEGATIVE_SENTIMENT || sentiment > VERY_POSITIVE_SENTIMENT {
+		if sentiment < veryNegativeSentiment || sentiment > veryPositiveSentiment {
 			t.Errorf("unexpected sentiment: %d", sentiment)
 		}
-		if score < MIN_SCORE || score > MAX_SCORE {
+		if score < constants.MinScore || score > constants.MaxScore {
 			t.Errorf("score %f outside valid range", score)
 		}
-		if confidence < 0.0 || confidence > MAX_CONFIDENCE {
+		if confidence < 0.0 || confidence > constants.MaxConfidence {
 			t.Errorf("confidence %f outside valid range", confidence)
 		}
 	})
@@ -902,13 +932,13 @@ func TestAnalyzeText_EdgeCases(t *testing.T) {
 		sentiment, score, confidence := analyzer.AnalyzeText(text)
 		
 		// Should handle unicode gracefully
-		if sentiment < VERY_NEGATIVE_SENTIMENT || sentiment > VERY_POSITIVE_SENTIMENT {
+		if sentiment < veryNegativeSentiment || sentiment > veryPositiveSentiment {
 			t.Errorf("unexpected sentiment: %d", sentiment)
 		}
-		if score < MIN_SCORE || score > MAX_SCORE {
+		if score < constants.MinScore || score > constants.MaxScore {
 			t.Errorf("score %f outside valid range", score)
 		}
-		if confidence < 0.0 || confidence > MAX_CONFIDENCE {
+		if confidence < 0.0 || confidence > constants.MaxConfidence {
 			t.Errorf("confidence %f outside valid range", confidence)
 		}
 	})
@@ -919,7 +949,7 @@ func TestAnalyzeText_EdgeCases(t *testing.T) {
 		sentiment, score, confidence := analyzer.AnalyzeText(text)
 		
 		// Should return neutral for no recognizable words
-		if sentiment != NEUTRAL_SENTIMENT {
+		if sentiment != neutralSentiment {
 			t.Errorf("expected neutral sentiment, got %d", sentiment)
 		}
 		if score != 0.0 {
@@ -936,7 +966,7 @@ func TestAnalyzeText_EdgeCases(t *testing.T) {
 		sentiment, _, _ := analyzer.AnalyzeText(text)
 		
 		// Should handle different whitespace types
-		if sentiment < NEUTRAL_SENTIMENT {
+		if sentiment < neutralSentiment {
 			t.Errorf("expected positive sentiment, got %d", sentiment)
 		}
 	})
@@ -967,8 +997,8 @@ func TestAnalyzeText_ConfidenceScaling(t *testing.T) {
 		_, _, confidence := analyzer.AnalyzeText("word")
 		
 		// With 1 match out of 1 word, confidence should be 1.0 * 1.2 = 1.2, capped at 1.0
-		if !almostEqual(confidence, MAX_CONFIDENCE) {
-			t.Errorf("confidence = %f, expected %f (with scaling)", confidence, MAX_CONFIDENCE)
+		if !almostEqual(confidence, constants.MaxConfidence) {
+			t.Errorf("confidence = %f, expected %f (with scaling)", confidence, constants.MaxConfidence)
 		}
 	})
 	
@@ -995,8 +1025,8 @@ func TestAnalyzeText_ConfidenceScaling(t *testing.T) {
 		
 		_, _, confidence := analyzer.AnalyzeText("word word word")
 		
-		if confidence > MAX_CONFIDENCE {
-			t.Errorf("confidence = %f exceeds MAX_CONFIDENCE %f", confidence, MAX_CONFIDENCE)
+		if confidence > constants.MaxConfidence {
+			t.Errorf("confidence = %f exceeds constants.MaxConfidence %f", confidence, constants.MaxConfidence)
 		}
 	})
 }
@@ -1011,18 +1041,18 @@ func TestAnalyzer_BoundaryValues(t *testing.T) {
 			score             float64
 			expectedSentiment int
 		}{
-			{-0.61, VERY_NEGATIVE_SENTIMENT},
-			{-0.60, NEGATIVE_SENTIMENT}, // boundary: >= -0.6 is NEGATIVE
-			{-0.59, NEGATIVE_SENTIMENT},
-			{-0.21, NEGATIVE_SENTIMENT},
-			{-0.20, NEUTRAL_SENTIMENT}, // boundary: >= -0.2 is NEUTRAL
-			{-0.19, NEUTRAL_SENTIMENT},
-			{0.19, NEUTRAL_SENTIMENT},
-			{0.20, POSITIVE_SENTIMENT}, // boundary: >= 0.2 is POSITIVE
-			{0.21, POSITIVE_SENTIMENT},
-			{0.59, POSITIVE_SENTIMENT},
-			{0.60, VERY_POSITIVE_SENTIMENT}, // boundary: >= 0.6 is VERY_POSITIVE
-			{0.61, VERY_POSITIVE_SENTIMENT},
+			{-0.61, veryNegativeSentiment},
+			{-0.60, negativeSentiment}, // boundary: >= -0.6 is NEGATIVE
+			{-0.59, negativeSentiment},
+			{-0.21, negativeSentiment},
+			{-0.20, neutralSentiment}, // boundary: >= -0.2 is NEUTRAL
+			{-0.19, neutralSentiment},
+			{0.19, neutralSentiment},
+			{0.20, positiveSentiment}, // boundary: >= 0.2 is POSITIVE
+			{0.21, positiveSentiment},
+			{0.59, positiveSentiment},
+			{0.60, veryPositiveSentiment}, // boundary: >= 0.6 is VERY_POSITIVE
+			{0.61, veryPositiveSentiment},
 		}
 		
 		for _, tt := range thresholds {
@@ -1059,30 +1089,30 @@ func TestAnalyzer_BoundaryValues(t *testing.T) {
 
 func TestAnalyzer_Constants(t *testing.T) {
 	t.Run("score thresholds are ordered", func(t *testing.T) {
-		if !(MIN_SCORE < VERY_NEGATIVE_SCORE_THRESHOLD &&
-			VERY_NEGATIVE_SCORE_THRESHOLD < NEGATIVE_SCORE_THRESHOLD &&
-			NEGATIVE_SCORE_THRESHOLD < NEUTRAL_SCORE_THRESHOLD &&
-			NEUTRAL_SCORE_THRESHOLD < POSITIVE_SCORE_THRESHOLD &&
-			POSITIVE_SCORE_THRESHOLD < MAX_SCORE) {
+		if !(constants.MinScore < constants.VeryNegativeThreshold &&
+			constants.VeryNegativeThreshold < constants.NegativeThreshold &&
+			constants.NegativeThreshold < constants.NeutralThreshold &&
+			constants.NeutralThreshold < constants.PositiveThreshold &&
+			constants.PositiveThreshold < constants.MaxScore) {
 			t.Error("score thresholds are not properly ordered")
 		}
 	})
 	
 	t.Run("sentiment values are ordered", func(t *testing.T) {
-		if !(VERY_NEGATIVE_SENTIMENT < NEGATIVE_SENTIMENT &&
-			NEGATIVE_SENTIMENT < NEUTRAL_SENTIMENT &&
-			NEUTRAL_SENTIMENT < POSITIVE_SENTIMENT &&
-			POSITIVE_SENTIMENT < VERY_POSITIVE_SENTIMENT) {
+		if !(veryNegativeSentiment < negativeSentiment &&
+			negativeSentiment < neutralSentiment &&
+			neutralSentiment < positiveSentiment &&
+			positiveSentiment < veryPositiveSentiment) {
 			t.Error("sentiment values are not properly ordered")
 		}
 	})
 	
 	t.Run("confidence values are valid", func(t *testing.T) {
-		if MAX_CONFIDENCE != 1.0 {
-			t.Errorf("MAX_CONFIDENCE = %f, expected 1.0", MAX_CONFIDENCE)
+		if constants.MaxConfidence != 1.0 {
+			t.Errorf("constants.MaxConfidence = %f, expected 1.0", constants.MaxConfidence)
 		}
-		if CONFIDENCE_SCALING_FACTOR <= 1.0 {
-			t.Errorf("CONFIDENCE_SCALING_FACTOR = %f, expected > 1.0", CONFIDENCE_SCALING_FACTOR)
+		if constants.ConfidenceScalingFactor <= 1.0 {
+			t.Errorf("constants.ConfidenceScalingFactor = %f, expected > 1.0", constants.ConfidenceScalingFactor)
 		}
 	})
 }

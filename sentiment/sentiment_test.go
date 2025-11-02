@@ -893,7 +893,7 @@ func TestNewAnalyzer(t *testing.T) {
 
 		analyzer, err := NewAnalyzer(
 			WithConfig(customAnalyzerConfig),
-			// Note: WithLexiconModConfig would require a custom config.Config object
+			// Note: WithLexiconConfig would require a custom config.Config object
 			// For testing, we just verify the analyzer config is used
 		)
 		if err != nil {
@@ -908,7 +908,7 @@ func TestNewAnalyzer(t *testing.T) {
 		}
 	})
 
-	t.Run("WithLexiconModConfigFile accepts valid config", func(t *testing.T) {
+	t.Run("WithLexiconConfigFile accepts valid config", func(t *testing.T) {
 		// Create a temporary lexicon config file with valid structure
 		tmpFile := t.TempDir() + "/lexicon_config.json"
 		configData := `{
@@ -921,7 +921,7 @@ func TestNewAnalyzer(t *testing.T) {
 			t.Fatalf("failed to write temp lexicon config file: %v", err)
 		}
 
-		analyzer, err := NewAnalyzer(WithLexiconModConfigFile(tmpFile))
+		analyzer, err := NewAnalyzer(WithLexiconConfigFile(tmpFile))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -930,28 +930,28 @@ func TestNewAnalyzer(t *testing.T) {
 		}
 	})
 
-	t.Run("WithLexiconModConfigFile returns error for non-existent file", func(t *testing.T) {
-		_, err := NewAnalyzer(WithLexiconModConfigFile("/nonexistent/path.json"))
+	t.Run("WithLexiconConfigFile returns error for non-existent file", func(t *testing.T) {
+		_, err := NewAnalyzer(WithLexiconConfigFile("/nonexistent/path.json"))
 		if err == nil {
 			t.Fatal("expected error for non-existent file")
 		}
 	})
 
-	t.Run("WithLexiconModConfigFile returns error for invalid JSON", func(t *testing.T) {
+	t.Run("WithLexiconConfigFile returns error for invalid JSON", func(t *testing.T) {
 		tmpFile := t.TempDir() + "/invalid_config.json"
 		if err := os.WriteFile(tmpFile, []byte("not valid json"), 0644); err != nil {
 			t.Fatalf("failed to write temp file: %v", err)
 		}
 
-		_, err := NewAnalyzer(WithLexiconModConfigFile(tmpFile))
+		_, err := NewAnalyzer(WithLexiconConfigFile(tmpFile))
 		if err == nil {
 			t.Fatal("expected error for invalid JSON")
 		}
 	})
 
-	t.Run("WithLexiconModConfig accepts nil and uses default", func(t *testing.T) {
+	t.Run("WithLexiconConfig accepts nil and uses default", func(t *testing.T) {
 		// Passing nil should use default config
-		analyzer, err := NewAnalyzer(WithLexiconModConfig(nil))
+		analyzer, err := NewAnalyzer(WithLexiconConfig(nil))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
