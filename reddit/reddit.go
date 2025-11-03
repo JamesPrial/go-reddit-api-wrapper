@@ -38,6 +38,7 @@ import (
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/reqid"
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/auth"
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/cache"
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/client"
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/parse"
 	validatorpkg "github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/validator"
@@ -154,6 +155,11 @@ type Config struct {
 	// Optional. If not specified, defaults to 100 requests/minute with burst of 10.
 	// Set RequestsPerMinute to a very high value (e.g., 100000) to effectively disable rate limiting for tests.
 	RateLimitConfig *RateLimitConfig
+
+	// TokenCachePath specifies where to persist OAuth tokens.
+	// If empty, tokens are cached in-memory only (default).
+	// Example: "/home/user/.cache/reddit-api/token.json"
+	TokenCachePath string
 }
 
 // TokenProvider defines the interface for retrieving an access token.
@@ -166,7 +172,8 @@ type TokenProvider interface {
 
 	// InvalidateToken clears any cached token, forcing a fresh token fetch on next GetToken call.
 	// This is useful when a token has been revoked or is known to be invalid.
-	InvalidateToken()
+	// The context is used for request tracing via request IDs.
+	InvalidateToken(ctx context.Context)
 }
 
 // HTTPClient defines the behavior required from the internal HTTP client.
@@ -316,6 +323,24 @@ func NewClientWithContext(ctx context.Context, config *Config) (*Reddit, error) 
 		return nil, translateValidationError(err)
 	}
 
+	// Create token cache based on config
+	var tokenCache cache.Cache
+	if config.TokenCachePath != "" {
+		var cacheErr error
+		tokenCache, cacheErr = cache.NewFileCache(config.TokenCachePath, nil)
+		if cacheErr != nil {
+			// Log warning but continue with memory cache
+			if config.Logger != nil {
+				config.Logger.LogAttrs(ctx, slog.LevelWarn, "failed to create file cache, using memory cache",
+					slog.String("path", config.TokenCachePath),
+					slog.String("error", cacheErr.Error()))
+			}
+			tokenCache = cache.NewMemoryCache(nil)
+		}
+	} else {
+		tokenCache = cache.NewMemoryCache(nil)
+	}
+
 	// Create authenticator
 	grantType := "client_credentials" // Default to app-only auth
 	if config.Username != "" && config.Password != "" {
@@ -333,6 +358,7 @@ func NewClientWithContext(ctx context.Context, config *Config) (*Reddit, error) 
 		grantType,
 		config.Logger,
 		nil, // Use real clock
+		tokenCache,
 	)
 	if err != nil {
 		return nil, &AuthError{Message: "failed to create authenticator", Err: err}
@@ -414,7 +440,7 @@ func (r *Reddit) Me(ctx context.Context) (*types.AccountData, error) {
 	err = r.httpClient.Do(req, &result)
 	if err != nil {
 		// Check if this is a 401 error, invalidate token and retry once
-		if r.handleAuthError(err) {
+		if r.handleAuthErrorWithContext(ctx, err) {
 			// Token invalidated, recreate request with fresh token
 			req, err = r.httpClient.NewRequest(ctx, http.MethodGet, MeURL, nil)
 			if err != nil {
@@ -487,7 +513,7 @@ func (r *Reddit) GetSubreddit(ctx context.Context, name string) (*types.Subreddi
 	err = r.httpClient.Do(req, &result)
 	if err != nil {
 		// Check if this is a 401 error, invalidate token and retry once
-		if r.handleAuthError(err) {
+		if r.handleAuthErrorWithContext(ctx, err) {
 			// Token invalidated, recreate request with fresh token
 			req, err = r.httpClient.NewRequest(ctx, http.MethodGet, path, nil)
 			if err != nil {
@@ -594,7 +620,7 @@ func (r *Reddit) getPosts(ctx context.Context, request *types.PostsRequest, sort
 	var result types.Thing
 	err = r.httpClient.Do(httpReq, &result)
 	if err != nil {
-		if r.handleAuthError(err) {
+		if r.handleAuthErrorWithContext(ctx, err) {
 			httpReq, reqErr := r.httpClient.NewRequest(ctx, http.MethodGet, path, nil, params)
 			if reqErr != nil {
 				return nil, wrapDoError(reqErr, "create request", path)
@@ -692,7 +718,7 @@ func (r *Reddit) GetComments(ctx context.Context, request *types.CommentsRequest
 
 	result, err := r.httpClient.DoThingArray(httpReq)
 	if err != nil {
-		if r.handleAuthError(err) {
+		if r.handleAuthErrorWithContext(ctx, err) {
 			httpReq, reqErr := r.httpClient.NewRequest(ctx, http.MethodGet, path, nil, params)
 			if reqErr != nil {
 				return nil, wrapDoError(reqErr, "create request", path)
@@ -962,7 +988,7 @@ func (r *Reddit) GetMoreComments(ctx context.Context, request *types.MoreComment
 	// Make authenticated request to morechildren endpoint
 	things, err := r.httpClient.DoMoreChildren(req)
 	if err != nil {
-		if r.handleAuthError(err) {
+		if r.handleAuthErrorWithContext(ctx, err) {
 			req, reqErr := r.httpClient.NewRequest(ctx, http.MethodPost, MoreChildrenURL, strings.NewReader(payload))
 			if reqErr != nil {
 				return nil, wrapDoError(reqErr, "create request", MoreChildrenURL)
@@ -1043,6 +1069,14 @@ func (r *Reddit) addAuthHeaders(ctx context.Context, req *http.Request) error {
 // Returns true if the error was a 401 and the token was invalidated, signaling that a retry may succeed.
 // Returns false if the error was not auth-related or if retry is not recommended.
 func (r *Reddit) handleAuthError(err error) bool {
+	return r.handleAuthErrorWithContext(context.Background(), err)
+}
+
+// handleAuthErrorWithContext detects 401 Unauthorized errors and invalidates the cached token.
+// It accepts a context for request tracing.
+// Returns true if the error was a 401 and the token was invalidated, signaling that a retry may succeed.
+// Returns false if the error was not auth-related or if retry is not recommended.
+func (r *Reddit) handleAuthErrorWithContext(ctx context.Context, err error) bool {
 	if err == nil {
 		return false
 	}
@@ -1051,7 +1085,7 @@ func (r *Reddit) handleAuthError(err error) bool {
 	if apiErr, ok := mapAPIError(err); ok {
 		if apiErr.StatusCode == http.StatusUnauthorized {
 			// Token is invalid, clear the cache
-			r.auth.InvalidateToken()
+			r.auth.InvalidateToken(ctx)
 			return true
 		}
 	}

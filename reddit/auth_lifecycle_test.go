@@ -14,6 +14,7 @@ import (
 
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/auth"
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/cache"
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/clock"
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/testutil"
 )
@@ -155,6 +156,7 @@ func TestTokenRefreshTimingEdgeCases(t *testing.T) {
 				mu.Unlock()
 
 				// Create authenticator directly with mock clock
+				testCache := cache.NewMemoryCache(mockClock)
 				a, err := auth.NewAuthenticator(
 					&http.Client{Timeout: 30 * time.Second},
 					"", "", // no username/password for client_credentials
@@ -165,6 +167,7 @@ func TestTokenRefreshTimingEdgeCases(t *testing.T) {
 					"client_credentials",
 					nil, // logger
 					mockClock,
+					testCache,
 				)
 				testutil.AssertNoError(t, err)
 
@@ -250,6 +253,8 @@ func TestConcurrentTokenRefreshRaceCondition(t *testing.T) {
 		mockClock := clock.NewMockClock(time.Time{})
 
 		// Create authenticator directly with mock clock
+		testCache := cache.NewMemoryCache(mockClock)
+
 		authenticator, err := auth.NewAuthenticator(
 			&http.Client{Timeout: 30 * time.Second},
 			"", "", // no username/password for client_credentials
@@ -260,6 +265,7 @@ func TestConcurrentTokenRefreshRaceCondition(t *testing.T) {
 			"client_credentials",
 			nil, // logger
 			mockClock,
+			testCache,
 		)
 		testutil.AssertNoError(t, err)
 
@@ -528,6 +534,8 @@ func TestTokenCacheInvalidation(t *testing.T) {
 		mockClock := clock.NewMockClock(time.Time{})
 
 		// Create authenticator directly with mock clock
+		testCache := cache.NewMemoryCache(mockClock)
+
 		authenticator, err := auth.NewAuthenticator(
 			&http.Client{Timeout: 30 * time.Second},
 			"", "", // no username/password for client_credentials
@@ -538,6 +546,7 @@ func TestTokenCacheInvalidation(t *testing.T) {
 			"client_credentials",
 			nil, // logger
 			mockClock,
+			testCache,
 		)
 		testutil.AssertNoError(t, err)
 
@@ -560,7 +569,7 @@ func TestTokenCacheInvalidation(t *testing.T) {
 		mu.Unlock()
 
 		// Invalidate cache and make request with revoked token - should trigger new token refresh
-		authenticator.InvalidateToken()
+		authenticator.InvalidateToken(context.Background())
 		_, err = authenticator.GetToken(context.Background())
 		testutil.AssertNoError(t, err)
 		t.Logf("Token with revoked token succeeded (new token obtained)")
@@ -638,6 +647,8 @@ func TestMultiClientAuthBehavior(t *testing.T) {
 		auths := make([]*auth.Authenticator, numClients)
 
 		for i := 0; i < numClients; i++ {
+			testCache := cache.NewMemoryCache(mockClock)
+
 			authenticator, err := auth.NewAuthenticator(
 				&http.Client{Timeout: 30 * time.Second},
 				"", "", // no username/password for client_credentials
@@ -648,6 +659,7 @@ func TestMultiClientAuthBehavior(t *testing.T) {
 				"client_credentials",
 				nil, // logger
 				mockClock,
+				testCache,
 			)
 			testutil.AssertNoError(t, err)
 			auths[i] = authenticator
@@ -758,6 +770,8 @@ func TestAuthSystemClockManipulation(t *testing.T) {
 		mockClock := clock.NewMockClock(time.Time{})
 
 		// Create authenticator directly with mock clock
+		testCache := cache.NewMemoryCache(mockClock)
+
 		authenticator, err := auth.NewAuthenticator(
 			&http.Client{Timeout: 30 * time.Second},
 			"", "", // no username/password for client_credentials
@@ -768,6 +782,7 @@ func TestAuthSystemClockManipulation(t *testing.T) {
 			"client_credentials",
 			nil, // logger
 			mockClock,
+			testCache,
 		)
 		testutil.AssertNoError(t, err)
 

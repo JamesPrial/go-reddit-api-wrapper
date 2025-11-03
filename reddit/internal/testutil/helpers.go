@@ -245,7 +245,7 @@ func (m *MockTokenProvider) GetToken(ctx context.Context) (string, error) {
 // InvalidateToken increments the invalidate call counters.
 // This implements the TokenProvider interface.
 // The call count is tracked atomically and can be retrieved with InvalidateCallCount().
-func (m *MockTokenProvider) InvalidateToken() {
+func (m *MockTokenProvider) InvalidateToken(ctx context.Context) {
 	m.invalidateCalls.Add(1)
 	// Update legacy field for backward compatibility
 	m.InvalidateCount++

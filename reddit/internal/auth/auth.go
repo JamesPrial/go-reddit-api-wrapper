@@ -10,10 +10,10 @@ import (
 	"net/url"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/reqid"
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/cache"
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/clock"
 )
 
@@ -23,12 +23,6 @@ const (
 	maxResponseBodySize   = 10 * 1024 * 1024   // 10MB
 	maxTokenExpirySeconds = 365 * 24 * 60 * 60 // 1 year in seconds
 )
-
-// tokenCache holds cached token data immutably
-type tokenCache struct {
-	token  string
-	expiry time.Time
-}
 
 // Authenticator handles retrieving an access token from the Reddit API.
 type Authenticator struct {
@@ -42,21 +36,26 @@ type Authenticator struct {
 	logger       *slog.Logger
 	clock        clock.Clock // Time abstraction for testing
 
-	// Token cache using atomic pointer for lock-free reads
-	cachedToken atomic.Pointer[tokenCache]
+	cache cache.Cache // Token cache
+
 	// Mutex to prevent concurrent token refreshes
 	tokenMu sync.Mutex
 }
 
 // NewAuthenticator creates a new authenticator.
 // If a nil clock is provided, a real clock will be used.
-func NewAuthenticator(httpClient *http.Client, username, password, clientID, clientSecret, userAgent, baseURL, grantType string, logger *slog.Logger, clk clock.Clock) (*Authenticator, error) {
+// If a nil tokenCache is provided, a memory cache will be used.
+func NewAuthenticator(httpClient *http.Client, username, password, clientID, clientSecret, userAgent, baseURL, grantType string, logger *slog.Logger, clk clock.Clock, tokenCache cache.Cache) (*Authenticator, error) {
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}
 
 	if clk == nil {
 		clk = clock.NewRealClock()
+	}
+
+	if tokenCache == nil {
+		tokenCache = cache.NewMemoryCache(clk)
 	}
 
 	parsedURL, err := url.Parse(baseURL)
@@ -91,6 +90,7 @@ func NewAuthenticator(httpClient *http.Client, username, password, clientID, cli
 		formData:     &form,
 		logger:       logger,
 		clock:        clk,
+		cache:        tokenCache,
 	}, nil
 }
 
@@ -107,19 +107,16 @@ func (a *Authenticator) GetToken(ctx context.Context) (string, error) {
 	requestID := reqid.FromContext(ctx)
 
 	// Check cache first - lock-free read
-	if cached := a.cachedToken.Load(); cached != nil {
-		// Capture the current time once for consistent comparison
-		now := a.clock.Now()
-		if now.Before(cached.expiry) {
-			if a.logger != nil {
-				attrs := []slog.Attr{slog.Time("expires_at", cached.expiry)}
-				if requestID != "" {
-					attrs = append(attrs, slog.String("request_id", requestID))
-				}
-				a.logger.LogAttrs(ctx, slog.LevelDebug, "using cached reddit token", attrs...)
+	token, expiry, found, err := a.cache.Get(ctx)
+	if err == nil && found {
+		if a.logger != nil {
+			attrs := []slog.Attr{slog.Time("expires_at", expiry)}
+			if requestID != "" {
+				attrs = append(attrs, slog.String("request_id", requestID))
 			}
-			return cached.token, nil
+			a.logger.LogAttrs(ctx, slog.LevelDebug, "using cached reddit token", attrs...)
 		}
+		return token, nil
 	}
 
 	// Cache miss or expired, need to refresh
@@ -128,18 +125,16 @@ func (a *Authenticator) GetToken(ctx context.Context) (string, error) {
 	defer a.tokenMu.Unlock()
 
 	// Double-check cache after acquiring lock - another goroutine might have refreshed
-	if cached := a.cachedToken.Load(); cached != nil {
-		now := a.clock.Now()
-		if now.Before(cached.expiry) {
-			if a.logger != nil {
-				attrs := []slog.Attr{slog.Time("expires_at", cached.expiry)}
-				if requestID != "" {
-					attrs = append(attrs, slog.String("request_id", requestID))
-				}
-				a.logger.LogAttrs(ctx, slog.LevelDebug, "using cached reddit token (after lock)", attrs...)
+	token, expiry, found, err = a.cache.Get(ctx)
+	if err == nil && found {
+		if a.logger != nil {
+			attrs := []slog.Attr{slog.Time("expires_at", expiry)}
+			if requestID != "" {
+				attrs = append(attrs, slog.String("request_id", requestID))
 			}
-			return cached.token, nil
+			a.logger.LogAttrs(ctx, slog.LevelDebug, "using cached reddit token (after lock)", attrs...)
 		}
+		return token, nil
 	}
 
 	// Definitely need to fetch new token
@@ -233,11 +228,19 @@ func (a *Authenticator) GetToken(ctx context.Context) (string, error) {
 	}
 
 	expiryDuration := time.Duration(float64(actualExpiry) * cacheRatio)
+	cacheExpiry := a.clock.Now().Add(expiryDuration)
 
-	a.cachedToken.Store(&tokenCache{
-		token:  tokenResp.AccessToken,
-		expiry: a.clock.Now().Add(expiryDuration),
-	})
+	// Store in cache
+	if err := a.cache.Set(ctx, tokenResp.AccessToken, cacheExpiry); err != nil {
+		// Log warning but don't fail the request - we have the token
+		if a.logger != nil {
+			attrs := []slog.Attr{slog.String("error", err.Error())}
+			if requestID != "" {
+				attrs = append(attrs, slog.String("request_id", requestID))
+			}
+			a.logger.LogAttrs(ctx, slog.LevelWarn, "failed to cache token", attrs...)
+		}
+	}
 
 	a.logAuthSuccess(ctx, requestID, duration, tokenResp)
 
@@ -245,10 +248,17 @@ func (a *Authenticator) GetToken(ctx context.Context) (string, error) {
 }
 
 // InvalidateToken clears the cached token, forcing a fresh token fetch on next GetToken call
-func (a *Authenticator) InvalidateToken() {
-	a.tokenMu.Lock()
-	defer a.tokenMu.Unlock()
-	a.cachedToken.Store(nil)
+func (a *Authenticator) InvalidateToken(ctx context.Context) {
+	if err := a.cache.Invalidate(ctx); err != nil {
+		if a.logger != nil {
+			requestID := reqid.FromContext(ctx)
+			attrs := []slog.Attr{slog.String("error", err.Error())}
+			if requestID != "" {
+				attrs = append(attrs, slog.String("request_id", requestID))
+			}
+			a.logger.LogAttrs(ctx, slog.LevelWarn, "failed to invalidate token cache", attrs...)
+		}
+	}
 }
 
 func (a *Authenticator) logAuthRequest(ctx context.Context) {

@@ -77,7 +77,7 @@ func (m *mockTokenProvider) GetToken(ctx context.Context) (string, error) {
 	return m.token, nil
 }
 
-func (m *mockTokenProvider) InvalidateToken() {
+func (m *mockTokenProvider) InvalidateToken(ctx context.Context) {
 	m.invalidateCalls.Add(1)
 }
 
