@@ -1,6 +1,7 @@
 package testutil
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -208,7 +209,7 @@ func TestDefaultAccount(t *testing.T) {
 func TestMockTokenProvider(t *testing.T) {
 	// Test successful token retrieval
 	mock := &MockTokenProvider{Token: "test-token"}
-	token, err := mock.GetToken(nil)
+	token, err := mock.GetToken(context.Background())
 
 	AssertNoError(t, err)
 	if token != "test-token" {
@@ -217,18 +218,18 @@ func TestMockTokenProvider(t *testing.T) {
 
 	// Test error case
 	mockErr := &MockTokenProvider{Err: errors.New("auth failed")}
-	_, err = mockErr.GetToken(nil)
+	_, err = mockErr.GetToken(context.Background())
 
 	AssertError(t, err)
 	AssertStringContains(t, err.Error(), "auth failed")
 
 	// Test InvalidateToken tracking
-	mock.InvalidateToken()
+	mock.InvalidateToken(context.Background())
 	if mock.InvalidateCount != 1 {
 		t.Errorf("Expected InvalidateCount 1, got %d", mock.InvalidateCount)
 	}
 
-	mock.InvalidateToken()
+	mock.InvalidateToken(context.Background())
 	if mock.InvalidateCount != 2 {
 		t.Errorf("Expected InvalidateCount 2, got %d", mock.InvalidateCount)
 	}
