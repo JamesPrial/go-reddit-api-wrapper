@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"time"
 )
 
 const PREFIX_LENGTH = 3  // Length of kind prefixes like "t1_"
@@ -402,4 +403,9 @@ type CommentsResponse struct {
 	MoreIDs        []string // IDs of additional comments that can be loaded
 	AfterFullname  string   // Reddit fullname (e.g. "t1_abc123") of last comment for next page
 	BeforeFullname string   // Reddit fullname (e.g. "t1_abc123") of first comment for prev page
+}
+
+type OAuthToken struct {
+	Token  string    `json:"token"`
+	Expiry time.Time `json:"expiry"`
 }
