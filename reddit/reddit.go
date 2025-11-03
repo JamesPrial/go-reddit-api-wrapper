@@ -323,8 +323,8 @@ func NewClientWithContext(ctx context.Context, config *Config) (*Reddit, error) 
 		return nil, translateValidationError(err)
 	}
 
-	// Create token cache based on config
-	var tokenCache cache.Cache
+	// Create token cache based`` on config
+	var tokenCache auth.Cache
 	if config.TokenCachePath != "" {
 		var cacheErr error
 		tokenCache, cacheErr = cache.NewFileCache(config.TokenCachePath, nil)

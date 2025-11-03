@@ -15,29 +15,18 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/clock"
 )
 
-// Cache defines the interface for token caching with optional persistence.
-// Implementations must be thread-safe for concurrent access.
-type Cache interface {
-	// Get retrieves a cached token if it exists and has not expired, nil if not found.
-	// Returns the token if found, nil if not found, and any error if the operation fails.
-	Get(ctx context.Context) (*types.OAuthToken, error)
-
-	// Set stores a token with its expiry time.
-	// The context can be used for cancellation during persistence operations.
-	Set(ctx context.Context, token *types.OAuthToken) error
-
-	// Invalidate clears the cached token, forcing a fresh token fetch on next Get.
-	Invalidate(ctx context.Context) error
+type OAuthToken struct {
+	Token  string    `json:"token"`
+	Expiry time.Time `json:"expiry"`
 }
 
 // MemoryCache is a simple in-memory token cache with no persistence.
 // Thread-safe using atomic operations for lock-free reads and writes.
 type MemoryCache struct {
-	token atomic.Pointer[types.OAuthToken]
+	token atomic.Pointer[OAuthToken]
 	clock clock.Clock
 }
 
@@ -52,39 +41,40 @@ func NewMemoryCache(clk clock.Clock) *MemoryCache {
 }
 
 // Get retrieves the cached token if it exists and is not expired.
-func (m *MemoryCache) Get(ctx context.Context) (*types.OAuthToken, error) {
-	// Check context cancellation
+func (m *MemoryCache) Get(ctx context.Context) (string, time.Time, bool, error) {
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return "", time.Time{}, false, err
 	}
 
 	loaded := m.token.Load()
 	if loaded == nil {
-		return nil, nil
+		return "", time.Time{}, false, nil
 	}
 
 	// Check if token has expired
 	if m.clock.Now().After(loaded.Expiry) {
-		return nil, nil
+		return "", time.Time{}, false, nil
 	}
 
-	return loaded, nil
+	return loaded.Token, loaded.Expiry, true, nil
+
 }
 
 // Set stores a token with its expiry time.
-func (m *MemoryCache) Set(ctx context.Context, token *types.OAuthToken) error {
-	// Check context cancellation
+func (m *MemoryCache) Set(ctx context.Context, token string, expiry time.Time) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 
-	m.token.Store(token)
+	m.token.Store(&OAuthToken{
+		Token:  token,
+		Expiry: expiry,
+	})
 	return nil
 }
 
 // Invalidate clears the cached token.
 func (m *MemoryCache) Invalidate(ctx context.Context) error {
-	// Check context cancellation
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -93,13 +83,36 @@ func (m *MemoryCache) Invalidate(ctx context.Context) error {
 	return nil
 }
 
-// FileCache persists tokens to a JSON file for across-process token reuse.
-// Thread-safe using mutex protection.
 type FileCache struct {
-	mu       sync.RWMutex
+	token    atomic.Pointer[OAuthToken] // Lock-free reads
+	writeMu  sync.Mutex                 // Only for coordinating writes
 	filePath string
-	token    *types.OAuthToken
 	clock    clock.Clock
+}
+
+func (f *FileCache) Get(ctx context.Context) (string, time.Time, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return "", time.Time{}, false, err
+	}
+
+	loaded := f.token.Load()
+	if loaded == nil || f.clock.Now().After(loaded.Expiry) {
+		return "", time.Time{}, false, nil
+	}
+	return loaded.Token, loaded.Expiry, true, nil
+}
+
+func (f *FileCache) Set(ctx context.Context, token string, expiry time.Time) error {
+	newToken := &OAuthToken{Token: token, Expiry: expiry}
+
+	// Update memory immediately (visible to readers)
+	f.token.Store(newToken)
+
+	// Serialize file writes (but don't block readers)
+	f.writeMu.Lock()
+	defer f.writeMu.Unlock()
+
+	return f.saveToFile()
 }
 
 // NewFileCache creates a new file-backed token cache.
@@ -135,51 +148,6 @@ func NewFileCache(filePath string, clk clock.Clock) (*FileCache, error) {
 	return cache, nil
 }
 
-// Get retrieves the cached token if it exists and is not expired.
-func (f *FileCache) Get(ctx context.Context) (*types.OAuthToken, error) {
-	// Check context cancellation
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-
-	if f.token == nil {
-		return nil, nil
-	}
-
-	// Check if token has expired
-	if f.clock.Now().After(f.token.Expiry) {
-		return nil, nil
-	}
-
-	return f.token, nil
-}
-
-// Set stores a token with its expiry time and persists it to the file.
-func (f *FileCache) Set(ctx context.Context, token *types.OAuthToken) error {
-	// Check context before acquiring lock (Issue 2: Context cancellation)
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	default:
-	}
-
-	f.mu.Lock()
-	defer f.mu.Unlock()
-
-	// Check again after acquiring lock
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-
-	f.token = token
-
-	// Persist to file
-	return f.saveToFile()
-}
-
 // Invalidate clears the cached token and removes the persisted file.
 func (f *FileCache) Invalidate(ctx context.Context) error {
 	// Check context before acquiring lock (Issue 2: Context cancellation)
@@ -187,24 +155,18 @@ func (f *FileCache) Invalidate(ctx context.Context) error {
 		return err
 	}
 
-	f.mu.Lock()
-	defer f.mu.Unlock()
+	f.writeMu.Lock()
+	defer f.writeMu.Unlock()
 
 	// Check again after acquiring lock
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 
-	f.token = nil
+	f.token.Store(nil)
 
 	// Remove persisted file
 	return f.deleteFile()
-}
-
-// cacheData represents the JSON structure for persisted tokens.
-type cacheData struct {
-	Token  string    `json:"token"`
-	Expiry time.Time `json:"expiry"`
 }
 
 // loadFromFile attempts to load a token from the cache file.
@@ -271,7 +233,7 @@ func (f *FileCache) loadFromFile() error {
 	}
 
 	// Parse JSON
-	var cd cacheData
+	var cd OAuthToken
 	if err := json.Unmarshal(data, &cd); err != nil {
 		return &CacheError{Operation: "load", Path: f.filePath, Err: fmt.Errorf("failed to parse cache file: %w", err)}
 	}
@@ -287,10 +249,10 @@ func (f *FileCache) loadFromFile() error {
 	}
 
 	// Load into cache
-	f.token = &types.OAuthToken{
+	f.token.Store(&OAuthToken{
 		Token:  cd.Token,
 		Expiry: cd.Expiry,
-	}
+	})
 
 	return nil
 }
@@ -302,7 +264,8 @@ func (f *FileCache) loadFromFile() error {
 // Issue 3: Use a flag to prevent unnecessary cleanup after successful rename.
 func (f *FileCache) saveToFile() error {
 	// If token is nil, nothing to save
-	if f.token == nil {
+	token := f.token.Load()
+	if token == nil {
 		return nil
 	}
 
@@ -332,9 +295,9 @@ func (f *FileCache) saveToFile() error {
 
 	// Write JSON to temp file
 	encoder := json.NewEncoder(tmpFile)
-	if err := encoder.Encode(cacheData{
-		Token:  f.token.Token,
-		Expiry: f.token.Expiry,
+	if err := encoder.Encode(OAuthToken{
+		Token:  token.Token,
+		Expiry: token.Expiry,
 	}); err != nil {
 		tmpFile.Close()
 		return &CacheError{Operation: "save", Path: f.filePath, Err: fmt.Errorf("failed to write cache file: %w", err)}

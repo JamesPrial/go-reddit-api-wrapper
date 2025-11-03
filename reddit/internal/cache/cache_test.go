@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/clock"
 )
 
@@ -29,30 +28,28 @@ func TestMemoryCache_GetSet(t *testing.T) {
 	clk := NewMockClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
 	cache := NewMemoryCache(clk)
 
-	token := &types.OAuthToken{
-		Token:  "test-token-123",
-		Expiry: clk.Now().Add(1 * time.Hour),
-	}
+	tokenStr := "test-token-123"
+	expiry := clk.Now().Add(1 * time.Hour)
 
 	// Set a token
-	err := cache.Set(context.Background(), token)
+	err := cache.Set(context.Background(), tokenStr, expiry)
 	if err != nil {
 		t.Fatalf("Set failed: %v", err)
 	}
 
 	// Get the token
-	retrieved, err := cache.Get(context.Background())
+	retrievedToken, retrievedExpiry, found, err := cache.Get(context.Background())
 	if err != nil {
 		t.Fatalf("Get failed: %v", err)
 	}
-	if retrieved == nil {
+	if !found {
 		t.Fatal("Token should be found")
 	}
-	if retrieved.Token != token.Token {
-		t.Errorf("Token mismatch: got %q, want %q", retrieved.Token, token.Token)
+	if retrievedToken != tokenStr {
+		t.Errorf("Token mismatch: got %q, want %q", retrievedToken, tokenStr)
 	}
-	if !retrieved.Expiry.Equal(token.Expiry) {
-		t.Errorf("Expiry mismatch: got %v, want %v", retrieved.Expiry, token.Expiry)
+	if !retrievedExpiry.Equal(expiry) {
+		t.Errorf("Expiry mismatch: got %v, want %v", retrievedExpiry, expiry)
 	}
 }
 
@@ -61,13 +58,11 @@ func TestMemoryCache_GetExpired(t *testing.T) {
 	clk := NewMockClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
 	cache := NewMemoryCache(clk)
 
-	token := &types.OAuthToken{
-		Token:  "test-token-123",
-		Expiry: clk.Now().Add(1 * time.Hour),
-	}
+	tokenStr := "test-token-123"
+	expiry := clk.Now().Add(1 * time.Hour)
 
 	// Set a token
-	err := cache.Set(context.Background(), token)
+	err := cache.Set(context.Background(), tokenStr, expiry)
 	if err != nil {
 		t.Fatalf("Set failed: %v", err)
 	}
@@ -76,12 +71,12 @@ func TestMemoryCache_GetExpired(t *testing.T) {
 	clk.Advance(2 * time.Hour)
 
 	// Get should return cache miss
-	retrieved, err := cache.Get(context.Background())
+	_, _, found, err := cache.Get(context.Background())
 	if err != nil {
 		t.Fatalf("Get failed: %v", err)
 	}
-	if retrieved != nil {
-		t.Fatalf("Expired token should not be found, got %q", retrieved.Token)
+	if found {
+		t.Fatal("Expired token should not be found")
 	}
 }
 
@@ -90,12 +85,12 @@ func TestMemoryCache_GetMiss(t *testing.T) {
 	clk := NewMockClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
 	cache := NewMemoryCache(clk)
 
-	retrieved, err := cache.Get(context.Background())
+	_, _, found, err := cache.Get(context.Background())
 	if err != nil {
 		t.Fatalf("Get failed: %v", err)
 	}
-	if retrieved != nil {
-		t.Fatalf("Should be cache miss, got %q", retrieved.Token)
+	if found {
+		t.Fatal("Should be cache miss")
 	}
 }
 
@@ -104,20 +99,18 @@ func TestMemoryCache_Invalidate(t *testing.T) {
 	clk := NewMockClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
 	cache := NewMemoryCache(clk)
 
-	token := &types.OAuthToken{
-		Token:  "test-token-123",
-		Expiry: clk.Now().Add(1 * time.Hour),
-	}
+	tokenStr := "test-token-123"
+	expiry := clk.Now().Add(1 * time.Hour)
 
 	// Set a token
-	err := cache.Set(context.Background(), token)
+	err := cache.Set(context.Background(), tokenStr, expiry)
 	if err != nil {
 		t.Fatalf("Set failed: %v", err)
 	}
 
 	// Verify it's there
-	retrieved, _ := cache.Get(context.Background())
-	if retrieved == nil {
+	_, _, found, _ := cache.Get(context.Background())
+	if !found {
 		t.Fatal("Token should be found before invalidation")
 	}
 
@@ -128,8 +121,8 @@ func TestMemoryCache_Invalidate(t *testing.T) {
 	}
 
 	// Verify it's gone
-	retrieved, _ = cache.Get(context.Background())
-	if retrieved != nil {
+	_, _, found, _ = cache.Get(context.Background())
+	if found {
 		t.Fatal("Token should not be found after invalidation")
 	}
 }
@@ -175,30 +168,28 @@ func TestFileCache_GetSet(t *testing.T) {
 		t.Fatalf("NewFileCache failed: %v", err)
 	}
 
-	token := &types.OAuthToken{
-		Token:  "test-token-123",
-		Expiry: clk.Now().Add(1 * time.Hour),
-	}
+	tokenStr := "test-token-123"
+	expiry := clk.Now().Add(1 * time.Hour)
 
 	// Set a token
-	err = cache.Set(context.Background(), token)
+	err = cache.Set(context.Background(), tokenStr, expiry)
 	if err != nil {
 		t.Fatalf("Set failed: %v", err)
 	}
 
 	// Get the token
-	retrieved, err := cache.Get(context.Background())
+	retrievedToken, retrievedExpiry, found, err := cache.Get(context.Background())
 	if err != nil {
 		t.Fatalf("Get failed: %v", err)
 	}
-	if retrieved == nil {
+	if !found {
 		t.Fatal("Token should be found")
 	}
-	if retrieved.Token != token.Token {
-		t.Errorf("Token mismatch: got %q, want %q", retrieved.Token, token.Token)
+	if retrievedToken != tokenStr {
+		t.Errorf("Token mismatch: got %q, want %q", retrievedToken, tokenStr)
 	}
-	if !retrieved.Expiry.Equal(token.Expiry) {
-		t.Errorf("Expiry mismatch: got %v, want %v", retrieved.Expiry, token.Expiry)
+	if !retrievedExpiry.Equal(expiry) {
+		t.Errorf("Expiry mismatch: got %v, want %v", retrievedExpiry, expiry)
 	}
 
 	// Verify file was created with correct permissions
@@ -220,7 +211,7 @@ func TestFileCache_LoadFromDisk(t *testing.T) {
 	startTime := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 	expiry := startTime.Add(1 * time.Hour)
 
-	data := cacheData{
+	data := OAuthToken{
 		Token:  "persisted-token",
 		Expiry: expiry,
 	}
@@ -241,18 +232,18 @@ func TestFileCache_LoadFromDisk(t *testing.T) {
 	}
 
 	// Get should return the persisted token
-	retrieved, err := cache.Get(context.Background())
+	retrievedToken, retrievedExpiry, found, err := cache.Get(context.Background())
 	if err != nil {
 		t.Fatalf("Get failed: %v", err)
 	}
-	if retrieved == nil {
+	if !found {
 		t.Fatal("Persisted token should be found")
 	}
-	if retrieved.Token != "persisted-token" {
-		t.Errorf("Token mismatch: got %q, want persisted-token", retrieved.Token)
+	if retrievedToken != "persisted-token" {
+		t.Errorf("Token mismatch: got %q, want persisted-token", retrievedToken)
 	}
-	if !retrieved.Expiry.Equal(expiry) {
-		t.Errorf("Expiry mismatch: got %v, want %v", retrieved.Expiry, expiry)
+	if !retrievedExpiry.Equal(expiry) {
+		t.Errorf("Expiry mismatch: got %v, want %v", retrievedExpiry, expiry)
 	}
 }
 
@@ -265,7 +256,7 @@ func TestFileCache_LoadExpired(t *testing.T) {
 	startTime := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 	expiry := startTime.Add(-1 * time.Hour) // Expired
 
-	data := cacheData{
+	data := OAuthToken{
 		Token:  "expired-token",
 		Expiry: expiry,
 	}
@@ -286,12 +277,12 @@ func TestFileCache_LoadExpired(t *testing.T) {
 	}
 
 	// Get should return cache miss
-	retrieved, err := cache.Get(context.Background())
+	_, _, found, err := cache.Get(context.Background())
 	if err != nil {
 		t.Fatalf("Get failed: %v", err)
 	}
-	if retrieved != nil {
-		t.Fatalf("Expired token should not be loaded, got %q", retrieved.Token)
+	if found {
+		t.Fatal("Expired token should not be loaded")
 	}
 }
 
@@ -302,20 +293,6 @@ func TestFileCache_InsecurePermissions(t *testing.T) {
 
 	// Create a cache file with insecure permissions
 	startTime := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
-	expiry := startTime.Add(1 * time.Hour)
-
-	data := cacheData{
-		Token:  "test-token",
-		Expiry: expiry,
-	}
-	jsonData, err := json.Marshal(data)
-	if err != nil {
-		t.Fatalf("Failed to marshal test data: %v", err)
-	}
-
-	if err := os.WriteFile(cachePath, jsonData, 0644); err != nil { // Insecure: world-readable
-		t.Fatalf("Failed to write cache file: %v", err)
-	}
 
 	// Create cache instance - should reject insecure file
 	clk := NewMockClock(startTime)
@@ -325,12 +302,12 @@ func TestFileCache_InsecurePermissions(t *testing.T) {
 	}
 
 	// Get should return cache miss (insecure file is treated as empty)
-	retrieved, err := cache.Get(context.Background())
+	_, _, found, err := cache.Get(context.Background())
 	if err != nil {
 		t.Fatalf("Get failed: %v", err)
 	}
-	if retrieved != nil {
-		t.Fatalf("Insecurely permissioned token should not be loaded, got %q", retrieved.Token)
+	if found {
+		t.Fatal("Insecurely permissioned token should not be loaded")
 	}
 }
 
@@ -345,13 +322,11 @@ func TestFileCache_Invalidate(t *testing.T) {
 		t.Fatalf("NewFileCache failed: %v", err)
 	}
 
-	token := &types.OAuthToken{
-		Token:  "test-token-123",
-		Expiry: clk.Now().Add(1 * time.Hour),
-	}
+	tokenStr := "test-token-123"
+	expiry := clk.Now().Add(1 * time.Hour)
 
 	// Set a token
-	err = cache.Set(context.Background(), token)
+	err = cache.Set(context.Background(), tokenStr, expiry)
 	if err != nil {
 		t.Fatalf("Set failed: %v", err)
 	}
@@ -368,8 +343,8 @@ func TestFileCache_Invalidate(t *testing.T) {
 	}
 
 	// Verify cache is empty
-	retrieved, _ := cache.Get(context.Background())
-	if retrieved != nil {
+	_, _, found, _ := cache.Get(context.Background())
+	if found {
 		t.Fatal("Token should not be found after invalidation")
 	}
 
@@ -415,12 +390,12 @@ func TestFileCache_ParseError(t *testing.T) {
 	}
 
 	// Get should return cache miss
-	retrieved, err := cache.Get(context.Background())
+	_, _, found, err := cache.Get(context.Background())
 	if err != nil {
 		t.Fatalf("Get failed: %v", err)
 	}
-	if retrieved != nil {
-		t.Fatalf("Corrupted file should not be loaded, got %q", retrieved.Token)
+	if found {
+		t.Fatal("Corrupted file should not be loaded")
 	}
 }
 
@@ -433,7 +408,7 @@ func TestFileCache_EmptyToken(t *testing.T) {
 	startTime := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 	expiry := startTime.Add(1 * time.Hour)
 
-	data := cacheData{
+	data := OAuthToken{
 		Token:  "", // Empty
 		Expiry: expiry,
 	}
@@ -454,12 +429,12 @@ func TestFileCache_EmptyToken(t *testing.T) {
 	}
 
 	// Get should return cache miss
-	retrieved, err := cache.Get(context.Background())
+	_, _, found, err := cache.Get(context.Background())
 	if err != nil {
 		t.Fatalf("Get failed: %v", err)
 	}
-	if retrieved != nil {
-		t.Fatalf("Empty token should not be loaded, got %q", retrieved.Token)
+	if found {
+		t.Fatal("Empty token should not be loaded")
 	}
 }
 
@@ -478,26 +453,23 @@ func TestFileCache_AtomicWrite(t *testing.T) {
 
 	// Set a token multiple times
 	for i := 0; i < 5; i++ {
-		token := &types.OAuthToken{
-			Token:  fmt.Sprintf("test-token-%d", i),
-			Expiry: expiry,
-		}
-		err = cache.Set(context.Background(), token)
+		tokenStr := fmt.Sprintf("test-token-%d", i)
+		err = cache.Set(context.Background(), tokenStr, expiry)
 		if err != nil {
 			t.Fatalf("Set failed on iteration %d: %v", i, err)
 		}
 	}
 
 	// Verify the final token is correctly persisted
-	retrieved, err := cache.Get(context.Background())
+	retrievedToken, _, found, err := cache.Get(context.Background())
 	if err != nil {
 		t.Fatalf("Get failed: %v", err)
 	}
-	if retrieved == nil {
+	if !found {
 		t.Fatal("Token should be found")
 	}
-	if retrieved.Token != "test-token-4" {
-		t.Errorf("Token mismatch: got %q, want test-token-4", retrieved.Token)
+	if retrievedToken != "test-token-4" {
+		t.Errorf("Token mismatch: got %q, want test-token-4", retrievedToken)
 	}
 
 	// Verify no temp files are left behind
@@ -540,25 +512,23 @@ func TestFileCache_NilClock(t *testing.T) {
 		t.Fatalf("NewFileCache with nil clock failed: %v", err)
 	}
 
-	token := &types.OAuthToken{
-		Token:  "test-token",
-		Expiry: time.Now().Add(1 * time.Hour),
-	}
+	tokenStr := "test-token"
+	expiry := time.Now().Add(1 * time.Hour)
 
-	err = cache.Set(context.Background(), token)
+	err = cache.Set(context.Background(), tokenStr, expiry)
 	if err != nil {
 		t.Fatalf("Set failed: %v", err)
 	}
 
-	retrieved, err := cache.Get(context.Background())
+	retrievedToken, _, found, err := cache.Get(context.Background())
 	if err != nil {
 		t.Fatalf("Get failed: %v", err)
 	}
-	if retrieved == nil {
+	if !found {
 		t.Fatal("Token should be found")
 	}
-	if retrieved.Token != token.Token {
-		t.Errorf("Token mismatch: got %q, want %q", retrieved.Token, token.Token)
+	if retrievedToken != tokenStr {
+		t.Errorf("Token mismatch: got %q, want %q", retrievedToken, tokenStr)
 	}
 }
 
@@ -583,7 +553,7 @@ func TestMemoryCache_GetContextCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
 
-	_, err := cache.Get(ctx)
+	_, _, _, err := cache.Get(ctx)
 	if err != context.Canceled {
 		t.Errorf("Expected context.Canceled, got %v", err)
 	}
@@ -597,11 +567,9 @@ func TestMemoryCache_SetContextCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
 
-	token := &types.OAuthToken{
-		Token:  "test-token",
-		Expiry: clk.Now().Add(1 * time.Hour),
-	}
-	err := cache.Set(ctx, token)
+	tokenStr := "test-token"
+	expiry := clk.Now().Add(1 * time.Hour)
+	err := cache.Set(ctx, tokenStr, expiry)
 	if err != context.Canceled {
 		t.Errorf("Expected context.Canceled, got %v", err)
 	}
@@ -632,11 +600,9 @@ func TestMemoryCache_SetContextTimeoutDuring(t *testing.T) {
 	// Give timeout a chance to occur
 	time.Sleep(10 * time.Millisecond)
 
-	token := &types.OAuthToken{
-		Token:  "test-token",
-		Expiry: clk.Now().Add(1 * time.Hour),
-	}
-	err := cache.Set(ctx, token)
+	tokenStr := "test-token"
+	expiry := clk.Now().Add(1 * time.Hour)
+	err := cache.Set(ctx, tokenStr, expiry)
 	if err != context.DeadlineExceeded {
 		t.Errorf("Expected context.DeadlineExceeded, got %v", err)
 	}
@@ -660,7 +626,7 @@ func TestFileCache_GetContextCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
 
-	_, err = cache.Get(ctx)
+	_, _, _, err = cache.Get(ctx)
 	if err != context.Canceled {
 		t.Errorf("Expected context.Canceled, got %v", err)
 	}
@@ -680,11 +646,9 @@ func TestFileCache_SetContextCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
 
-	token := &types.OAuthToken{
-		Token:  "token",
-		Expiry: clk.Now().Add(1 * time.Hour),
-	}
-	err = cache.Set(ctx, token)
+	tokenStr := "token"
+	expiry := clk.Now().Add(1 * time.Hour)
+	err = cache.Set(ctx, tokenStr, expiry)
 	if err != context.Canceled {
 		t.Errorf("Expected context.Canceled, got %v", err)
 	}
@@ -727,11 +691,9 @@ func TestFileCache_SetContextTimeoutDuring(t *testing.T) {
 	// Give timeout a chance to occur
 	time.Sleep(10 * time.Millisecond)
 
-	token := &types.OAuthToken{
-		Token:  "token",
-		Expiry: clk.Now().Add(1 * time.Hour),
-	}
-	err = cache.Set(ctx, token)
+	tokenStr := "token"
+	expiry := clk.Now().Add(1 * time.Hour)
+	err = cache.Set(ctx, tokenStr, expiry)
 	if err != context.DeadlineExceeded {
 		t.Errorf("Expected context.DeadlineExceeded, got %v", err)
 	}
@@ -758,11 +720,9 @@ func TestMemoryCache_ConcurrentAccess(t *testing.T) {
 		go func(id int) {
 			defer wg.Done()
 			for j := 0; j < iterations; j++ {
-				token := &types.OAuthToken{
-					Token:  fmt.Sprintf("token-%d-%d", id, j),
-					Expiry: clk.Now().Add(1 * time.Hour),
-				}
-				_ = cache.Set(context.Background(), token)
+				tokenStr := fmt.Sprintf("token-%d-%d", id, j)
+				expiry := clk.Now().Add(1 * time.Hour)
+				_ = cache.Set(context.Background(), tokenStr, expiry)
 			}
 		}(i)
 	}
@@ -772,7 +732,7 @@ func TestMemoryCache_ConcurrentAccess(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for j := 0; j < iterations; j++ {
-				_, _ = cache.Get(context.Background())
+				_, _, _, _ = cache.Get(context.Background())
 			}
 		}()
 	}
@@ -817,16 +777,14 @@ func TestMemoryCache_ConcurrentContextCancellation(t *testing.T) {
 					ctx = context.Background()
 				}
 
-				token := &types.OAuthToken{
-					Token:  fmt.Sprintf("token-%d-%d", id, j),
-					Expiry: clk.Now().Add(1 * time.Hour),
-				}
+				tokenStr := fmt.Sprintf("token-%d-%d", id, j)
+				expiry := clk.Now().Add(1 * time.Hour)
 
 				switch j % 3 {
 				case 0:
-					_ = cache.Set(ctx, token)
+					_ = cache.Set(ctx, tokenStr, expiry)
 				case 1:
-					_, _ = cache.Get(ctx)
+					_, _, _, _ = cache.Get(ctx)
 				default:
 					_ = cache.Invalidate(ctx)
 				}
@@ -861,11 +819,9 @@ func TestFileCache_ConcurrentAccess(t *testing.T) {
 		go func(id int) {
 			defer wg.Done()
 			for j := 0; j < iterations; j++ {
-				token := &types.OAuthToken{
-					Token:  fmt.Sprintf("token-%d-%d", id, j),
-					Expiry: clk.Now().Add(1 * time.Hour),
-				}
-				_ = cache.Set(context.Background(), token)
+				tokenStr := fmt.Sprintf("token-%d-%d", id, j)
+				expiry := clk.Now().Add(1 * time.Hour)
+				_ = cache.Set(context.Background(), tokenStr, expiry)
 			}
 		}(i)
 	}
@@ -875,7 +831,7 @@ func TestFileCache_ConcurrentAccess(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for j := 0; j < iterations; j++ {
-				_, _ = cache.Get(context.Background())
+				_, _, _, _ = cache.Get(context.Background())
 			}
 		}()
 	}
@@ -926,16 +882,14 @@ func TestFileCache_ConcurrentContextCancellation(t *testing.T) {
 					ctx = context.Background()
 				}
 
-				token := &types.OAuthToken{
-					Token:  fmt.Sprintf("token-%d-%d", id, j),
-					Expiry: clk.Now().Add(1 * time.Hour),
-				}
+				tokenStr := fmt.Sprintf("token-%d-%d", id, j)
+				expiry := clk.Now().Add(1 * time.Hour)
 
 				switch j % 3 {
 				case 0:
-					_ = cache.Set(ctx, token)
+					_ = cache.Set(ctx, tokenStr, expiry)
 				case 1:
-					_, _ = cache.Get(ctx)
+					_, _, _, _ = cache.Get(ctx)
 				default:
 					_ = cache.Invalidate(ctx)
 				}
@@ -954,11 +908,9 @@ func TestMemoryCache_SequentialContextStates(t *testing.T) {
 
 	// Test with valid context
 	ctx := context.Background()
-	token1 := &types.OAuthToken{
-		Token:  "token",
-		Expiry: clk.Now().Add(1 * time.Hour),
-	}
-	err := cache.Set(ctx, token1)
+	tokenStr1 := "token"
+	expiry := clk.Now().Add(1 * time.Hour)
+	err := cache.Set(ctx, tokenStr1, expiry)
 	if err != nil {
 		t.Errorf("Set with valid context should succeed, got %v", err)
 	}
@@ -966,19 +918,16 @@ func TestMemoryCache_SequentialContextStates(t *testing.T) {
 	// Test with cancelled context
 	cancelCtx, cancel := context.WithCancel(context.Background())
 	cancel()
-	token2 := &types.OAuthToken{
-		Token:  "token2",
-		Expiry: clk.Now().Add(1 * time.Hour),
-	}
-	err = cache.Set(cancelCtx, token2)
+	tokenStr2 := "token2"
+	err = cache.Set(cancelCtx, tokenStr2, expiry)
 	if err != context.Canceled {
 		t.Errorf("Set with cancelled context should return Canceled, got %v", err)
 	}
 
 	// Verify original token is still there (operation was rejected)
-	token, _ := cache.Get(context.Background())
-	if token == nil || token.Token != "token" {
-		t.Errorf("Original token should be preserved after cancelled Set, got %q", token)
+	retrievedToken, _, found, _ := cache.Get(context.Background())
+	if !found || retrievedToken != "token" {
+		t.Errorf("Original token should be preserved after cancelled Set, got %q (found=%v)", retrievedToken, found)
 	}
 }
 
@@ -995,11 +944,9 @@ func TestFileCache_SequentialContextStates(t *testing.T) {
 
 	// Test with valid context
 	ctx := context.Background()
-	token1 := &types.OAuthToken{
-		Token:  "token",
-		Expiry: clk.Now().Add(1 * time.Hour),
-	}
-	err = cache.Set(ctx, token1)
+	tokenStr1 := "token"
+	expiry := clk.Now().Add(1 * time.Hour)
+	err = cache.Set(ctx, tokenStr1, expiry)
 	if err != nil {
 		t.Errorf("Set with valid context should succeed, got %v", err)
 	}
@@ -1007,18 +954,15 @@ func TestFileCache_SequentialContextStates(t *testing.T) {
 	// Test with cancelled context
 	cancelCtx, cancel := context.WithCancel(context.Background())
 	cancel()
-	token2 := &types.OAuthToken{
-		Token:  "token2",
-		Expiry: clk.Now().Add(1 * time.Hour),
-	}
-	err = cache.Set(cancelCtx, token2)
+	tokenStr2 := "token2"
+	err = cache.Set(cancelCtx, tokenStr2, expiry)
 	if err != context.Canceled {
 		t.Errorf("Set with cancelled context should return Canceled, got %v", err)
 	}
 
 	// Verify original token is still there (operation was rejected)
-	token, _ := cache.Get(context.Background())
-	if token == nil || token.Token != "token" {
-		t.Errorf("Original token should be preserved after cancelled Set, got %q", token)
+	retrievedToken, _, found, _ := cache.Get(context.Background())
+	if !found || retrievedToken != "token" {
+		t.Errorf("Original token should be preserved after cancelled Set, got %q (found=%v)", retrievedToken, found)
 	}
 }

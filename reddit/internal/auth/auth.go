@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/reqid"
-	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/cache"
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/clock"
 )
@@ -24,6 +23,21 @@ const (
 	maxResponseBodySize   = 10 * 1024 * 1024   // 10MB
 	maxTokenExpirySeconds = 365 * 24 * 60 * 60 // 1 year in seconds
 )
+
+// Cache defines the interface for token caching with optional persistence.
+// Implementations must be thread-safe for concurrent access.
+type Cache interface {
+	// Get retrieves a cached token if it exists and has not expired, nil if not found.
+	// Returns the token if found, nil if not found, and any error if the operation fails.
+	Get(ctx context.Context) (string, time.Time, bool, error)
+
+	// Set stores a token with its expiry time.
+	// The context can be used for cancellation during persistence operations.
+	Set(ctx context.Context, token string, expiry time.Time) error
+
+	// Invalidate clears the cached token, forcing a fresh token fetch on next Get.
+	Invalidate(ctx context.Context) error
+}
 
 // Authenticator handles retrieving an access token from the Reddit API.
 type Authenticator struct {
@@ -37,7 +51,7 @@ type Authenticator struct {
 	logger       *slog.Logger
 	clock        clock.Clock // Time abstraction for testing
 
-	cache cache.Cache // Token cache
+	cache Cache // Token cache
 
 	// Mutex to prevent concurrent token refreshes
 	tokenMu sync.Mutex
@@ -46,7 +60,7 @@ type Authenticator struct {
 // NewAuthenticator creates a new authenticator.
 // If a nil clock is provided, a real clock will be used.
 // If a nil tokenCache is provided, a memory cache will be used.
-func NewAuthenticator(httpClient *http.Client, username, password, clientID, clientSecret, userAgent, baseURL, grantType string, logger *slog.Logger, clk clock.Clock, tokenCache cache.Cache) (*Authenticator, error) {
+func NewAuthenticator(httpClient *http.Client, username, password, clientID, clientSecret, userAgent, baseURL, grantType string, logger *slog.Logger, clk clock.Clock, tokenCache Cache) (*Authenticator, error) {
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}
@@ -108,19 +122,19 @@ func (a *Authenticator) GetToken(ctx context.Context) (string, error) {
 	requestID := reqid.FromContext(ctx)
 
 	// Check cache first - lock-free read
-	cached, err := a.cache.Get(ctx)
+	cachedToken, expiry, found, err := a.cache.Get(ctx)
 	if err != nil {
 		return "", err
 	}
-	if cached != nil {
+	if found {
 		if a.logger != nil {
-			attrs := []slog.Attr{slog.Time("expires_at", cached.Expiry)}
+			attrs := []slog.Attr{slog.Time("expires_at", expiry)}
 			if requestID != "" {
 				attrs = append(attrs, slog.String("request_id", requestID))
 			}
 			a.logger.LogAttrs(ctx, slog.LevelDebug, "using cached reddit token", attrs...)
 		}
-		return cached.Token, nil
+		return cachedToken, nil
 	}
 
 	// Cache miss or expired, need to refresh
@@ -129,19 +143,19 @@ func (a *Authenticator) GetToken(ctx context.Context) (string, error) {
 	defer a.tokenMu.Unlock()
 
 	// Double-check cache after acquiring lock - another goroutine might have refreshed
-	cached, err = a.cache.Get(ctx)
+	cachedToken, expiry, found, err = a.cache.Get(ctx)
 	if err != nil {
 		return "", err
 	}
-	if cached != nil {
+	if found {
 		if a.logger != nil {
-			attrs := []slog.Attr{slog.Time("expires_at", cached.Expiry)}
+			attrs := []slog.Attr{slog.Time("expires_at", expiry)}
 			if requestID != "" {
 				attrs = append(attrs, slog.String("request_id", requestID))
 			}
 			a.logger.LogAttrs(ctx, slog.LevelDebug, "using cached reddit token (after lock)", attrs...)
 		}
-		return cached.Token, nil
+		return cachedToken, nil
 	}
 
 	// Definitely need to fetch new token
@@ -238,10 +252,7 @@ func (a *Authenticator) GetToken(ctx context.Context) (string, error) {
 	cacheExpiry := a.clock.Now().Add(expiryDuration)
 
 	// Store in cache
-	if err := a.cache.Set(ctx, &types.OAuthToken{
-		Token:  tokenResp.AccessToken,
-		Expiry: cacheExpiry,
-	}); err != nil {
+	if err := a.cache.Set(ctx, tokenResp.AccessToken, cacheExpiry); err != nil {
 		// Log warning but don't fail the request - we have the token
 		if a.logger != nil {
 			attrs := []slog.Attr{slog.String("error", err.Error())}

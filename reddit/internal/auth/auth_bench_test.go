@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/cache"
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/clock"
 )
@@ -45,10 +44,7 @@ func BenchmarkAuth_GetToken_Cached(b *testing.B) {
 	}
 
 	// Pre-populate cache with a valid token that won't expire during the benchmark
-	_ = testCache.Set(context.Background(), &types.OAuthToken{
-		Token:  "cached-token-12345",
-		Expiry: mockClock.Now().Add(1 * time.Hour),
-	})
+	_ = testCache.Set(context.Background(), "cached-token-12345", time.Now().Add(1*time.Hour))
 
 	ctx := context.Background()
 	b.ReportAllocs()
@@ -151,10 +147,7 @@ func BenchmarkAuth_GetToken_Concurrent_Cached(b *testing.B) {
 			}
 
 			// Pre-populate cache with a valid token
-			_ = testCache.Set(context.Background(), &types.OAuthToken{
-				Token:  "cached-token-concurrent",
-				Expiry: mockClock.Now().Add(1 * time.Hour),
-			})
+			_ = testCache.Set(context.Background(), "cached-token-concurrent", time.Now().Add(1*time.Hour))
 
 			ctx := context.Background()
 			b.ReportAllocs()
@@ -343,10 +336,7 @@ func BenchmarkAuth_InvalidateToken(b *testing.B) {
 	}
 
 	// Pre-populate cache
-	_ = testCache.Set(context.Background(), &types.OAuthToken{
-		Token:  "token-to-invalidate",
-		Expiry: mockClock.Now().Add(1 * time.Hour),
-	})
+	_ = testCache.Set(context.Background(), "token-to-invalidate", time.Now().Add(1*time.Hour))
 
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -354,10 +344,7 @@ func BenchmarkAuth_InvalidateToken(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		auth.InvalidateToken(context.Background())
 		// Re-populate cache for next iteration
-		_ = testCache.Set(context.Background(), &types.OAuthToken{
-			Token:  "token-to-invalidate",
-			Expiry: mockClock.Now().Add(1 * time.Hour),
-		})
+		_ = testCache.Set(context.Background(), "token-to-invalidate", time.Now().Add(1*time.Hour))
 	}
 }
 
@@ -390,10 +377,7 @@ func BenchmarkAuth_InvalidateToken_Concurrent(b *testing.B) {
 	}
 
 	// Pre-populate cache
-	_ = testCache.Set(context.Background(), &types.OAuthToken{
-		Token:  "token-to-invalidate",
-		Expiry: mockClock.Now().Add(1 * time.Hour),
-	})
+	_ = testCache.Set(context.Background(), "token-to-invalidate", time.Now().Add(1*time.Hour))
 
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -449,10 +433,7 @@ func BenchmarkAuth_DoubleCheckedLocking(b *testing.B) {
 
 			if tt.scenario == "first_check" {
 				// Pre-populate cache so first check succeeds
-				_ = testCache.Set(ctx, &types.OAuthToken{
-					Token:  "cached-token",
-					Expiry: mockClock.Now().Add(1 * time.Hour),
-				})
+				_ = testCache.Set(ctx, "cached-token", time.Now().Add(1*time.Hour))
 			} else if tt.scenario == "second_check" {
 				// Simulate scenario where another goroutine refreshed between checks
 				// We'll let the first GetToken populate the cache
