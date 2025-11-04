@@ -168,12 +168,7 @@ type Config struct {
 type TokenProvider interface {
 	// GetToken returns a valid access token for making authenticated requests.
 	// It should handle token refresh automatically if the token is expired.
-	GetToken(ctx context.Context) (string, error)
-
-	// InvalidateToken clears any cached token, forcing a fresh token fetch on next GetToken call.
-	// This is useful when a token has been revoked or is known to be invalid.
-	// The context is used for request tracing via request IDs.
-	InvalidateToken(ctx context.Context)
+	GetToken(ctx context.Context) (string, time.Time, error)
 }
 
 // HTTPClient defines the behavior required from the internal HTTP client.
@@ -237,6 +232,19 @@ type Parser interface {
 	ParseThing(ctx context.Context, thing *types.Thing) (any, error)
 	ExtractPosts(ctx context.Context, thing *types.Thing) ([]*types.Post, error)
 	ExtractPostAndComments(ctx context.Context, things []*types.Thing) (*types.CommentsResponse, error)
+}
+
+type TokenCache interface {
+	// Get retrieves a cached token if it exists and has not expired, nil if not found.
+	// Returns the token if found, nil if not found, and any error if the operation fails.
+	Get(ctx context.Context) (string, time.Time, bool, error)
+
+	// Set stores a token with its expiry time.
+	// The context can be used for cancellation during persistence operations.
+	Set(ctx context.Context, token string, expiry time.Time) error
+
+	// Invalidate clears the cached token, forcing a fresh token fetch on next Get.
+	Invalidate(ctx context.Context) error
 }
 
 // Reddit is the main Reddit API client.
@@ -324,7 +332,7 @@ func NewClientWithContext(ctx context.Context, config *Config) (*Reddit, error) 
 	}
 
 	// Create token cache based`` on config
-	var tokenCache auth.Cache
+	var tokenCache TokenCache
 	if config.TokenCachePath != "" {
 		var cacheErr error
 		tokenCache, cacheErr = cache.NewFileCache(config.TokenCachePath, nil)
@@ -358,14 +366,27 @@ func NewClientWithContext(ctx context.Context, config *Config) (*Reddit, error) 
 		grantType,
 		config.Logger,
 		nil, // Use real clock
-		tokenCache,
 	)
 	if err != nil {
 		return nil, &AuthError{Message: "failed to create authenticator", Err: err}
 	}
 
+	token, expiry, found, err := tokenCache.Get(ctx)
+	if err != nil {
+		return nil, &ConfigError{Message: "failed to get token from cache"}
+	}
+	if found && expiry.After(time.Now()) || !found {
+		token, expiry, err = authenticator.GetToken(ctx)
+		if err != nil {
+			return nil, &AuthError{Message: "failed to get token from cache"}
+		}
+		if err := tokenCache.Set(ctx, token, expiry); err != nil {
+			return nil, &ConfigError{Message: "failed to set token in cache"}
+		}
+	}
+
 	// Validate that we can get a token before creating the client
-	_, err = authenticator.GetToken(ctx)
+	_, _, err = authenticator.GetToken(ctx)
 	if err != nil {
 		return nil, &AuthError{Message: "failed to authenticate", Err: err}
 	}
