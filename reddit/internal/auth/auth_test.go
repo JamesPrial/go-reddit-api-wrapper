@@ -12,7 +12,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/cache"
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/testutil"
 )
 
@@ -186,7 +185,6 @@ func TestNewAuthenticator(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			testCache := cache.NewMemoryCache(nil)
 			a, err := NewAuthenticator(
 				tt.client,
 				tt.username,
@@ -198,7 +196,6 @@ func TestNewAuthenticator(t *testing.T) {
 				tt.grantType,
 				nil,
 				nil, // Use real clock
-				testCache,
 			)
 
 			if tt.wantErr {
@@ -429,7 +426,6 @@ func TestAuthenticator_GetToken(t *testing.T) {
 				defer server.Close()
 			}
 
-			testCache := cache.NewMemoryCache(nil)
 			a, err := NewAuthenticator(
 				server.Client(),
 				tt.username,
@@ -441,11 +437,10 @@ func TestAuthenticator_GetToken(t *testing.T) {
 				tt.grantType,
 				tt.logger,
 				nil, // Use real clock
-				testCache,
 			)
 			testutil.AssertNoError(t, err)
 
-			token, err := a.GetToken(context.Background())
+			token, _, err := a.GetToken(context.Background())
 
 			if tt.wantErr {
 				testutil.AssertError(t, err)
@@ -469,14 +464,13 @@ func TestAuthenticator_GetToken(t *testing.T) {
 		}))
 		defer server.Close()
 
-		testCache := cache.NewMemoryCache(nil)
-		a, err := NewAuthenticator(http.DefaultClient, "", "", "id", "secret", "agent", server.URL, "creds", nil, nil, testCache) // Use real clock
+		a, err := NewAuthenticator(http.DefaultClient, "", "", "id", "secret", "agent", server.URL, "creds", nil, nil) // Use real clock
 		testutil.AssertNoError(t, err)
 
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel() // Cancel context immediately
 
-		_, err = a.GetToken(ctx)
+		_, _, err = a.GetToken(ctx)
 		testutil.AssertError(t, err)
 
 		if !errors.Is(err, context.Canceled) {
