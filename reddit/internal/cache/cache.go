@@ -47,7 +47,7 @@ func NewMemoryCache(clk clock.Clock) *MemoryCache {
 }
 
 // Get retrieves the cached token if it exists and is not expired.
-func (m *MemoryCache) Get(ctx context.Context) (string, time.Time, bool, error) {
+func (m *MemoryCache) Get(ctx context.Context) (token string, expiry time.Time, found bool, err error) {
 	if err := ctx.Err(); err != nil {
 		return "", time.Time{}, false, err
 	}
@@ -96,7 +96,7 @@ type FileCache struct {
 	clock    clock.Clock
 }
 
-func (f *FileCache) Get(ctx context.Context) (string, time.Time, bool, error) {
+func (f *FileCache) Get(ctx context.Context) (token string, expiry time.Time, found bool, err error) {
 	if err := ctx.Err(); err != nil {
 		return "", time.Time{}, false, err
 	}
