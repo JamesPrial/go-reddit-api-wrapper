@@ -24,7 +24,7 @@ const (
 	CACHE_FILE_DIRECTORY_PERMISSIONS = 0700
 )
 
-type OAuthToken struct {
+type oauthToken struct {
 	Token  string    `json:"token"`
 	Expiry time.Time `json:"expiry"`
 }
@@ -32,7 +32,7 @@ type OAuthToken struct {
 // MemoryCache is a simple in-memory token cache with no persistence.
 // Thread-safe using atomic operations for lock-free reads and writes.
 type MemoryCache struct {
-	token atomic.Pointer[OAuthToken]
+	token atomic.Pointer[oauthToken]
 	clock clock.Clock
 }
 
@@ -72,7 +72,7 @@ func (m *MemoryCache) Set(ctx context.Context, token string, expiry time.Time) e
 		return err
 	}
 
-	m.token.Store(&OAuthToken{
+	m.token.Store(&oauthToken{
 		Token:  token,
 		Expiry: expiry,
 	})
@@ -90,7 +90,7 @@ func (m *MemoryCache) Invalidate(ctx context.Context) error {
 }
 
 type FileCache struct {
-	token    atomic.Pointer[OAuthToken] // Lock-free reads
+	token    atomic.Pointer[oauthToken] // Lock-free reads
 	writeMu  sync.Mutex                 // Only for coordinating writes
 	filePath string
 	clock    clock.Clock
@@ -109,7 +109,7 @@ func (f *FileCache) Get(ctx context.Context) (string, time.Time, bool, error) {
 }
 
 func (f *FileCache) Set(ctx context.Context, token string, expiry time.Time) error {
-	newToken := &OAuthToken{Token: token, Expiry: expiry}
+	newToken := &oauthToken{Token: token, Expiry: expiry}
 
 	// Update memory immediately (visible to readers)
 	f.token.Store(newToken)
@@ -128,9 +128,9 @@ func (f *FileCache) Set(ctx context.Context, token string, expiry time.Time) err
 // Errors are returned only if the path is invalid or directory creation fails.
 // Existing cache files are loaded transparently, and load failures are treated
 // as cache misses without error.
-func NewFileCache(filePath string, clk clock.Clock) (*FileCache, error) {
+func NewFileCache(filePath string, clk clock.Clock) (cache *FileCache, found bool, token string, expiry time.Time, err error) {
 	if filePath == "" {
-		return nil, &CacheError{Operation: "create", Err: fmt.Errorf("cache path cannot be empty")}
+		return nil, false, "", time.Time{}, &CacheError{Operation: "create", Err: fmt.Errorf("cache path cannot be empty")}
 	}
 
 	if clk == nil {
@@ -140,24 +140,17 @@ func NewFileCache(filePath string, clk clock.Clock) (*FileCache, error) {
 	// Validate parent directory exists and create if needed
 	dir := filepath.Dir(filePath)
 	if err := os.MkdirAll(dir, CACHE_FILE_DIRECTORY_PERMISSIONS); err != nil {
-		return nil, &CacheError{Operation: "create", Path: filePath, Err: fmt.Errorf("failed to create cache directory: %w", err)}
+		return nil, false, "", time.Time{}, &CacheError{Operation: "create", Path: filePath, Err: fmt.Errorf("failed to create cache directory: %w", err)}
 	}
 
-	cache := &FileCache{
+	cache = &FileCache{
 		filePath: filePath,
 		clock:    clk,
 	}
 
 	// Try to load existing token from file (non-fatal failure)
-	loaded, err := cache.loadFromFile()
-	if err != nil {
-		return nil, err
-	}
-	if !loaded {
-		return cache, nil
-	}
-
-	return cache, nil
+	found, token, expiry, err = cache.loadFromFile()
+	return cache, found, token, expiry, err
 }
 
 // Invalidate clears the cached token and removes the persisted file.
@@ -191,20 +184,20 @@ func (f *FileCache) Invalidate(ctx context.Context) error {
 //
 // If any validation fails, the cache is treated as a miss.
 // This method should only be called during initialization.
-func (f *FileCache) loadFromFile() (bool, error) {
+func (f *FileCache) loadFromFile() (found bool, token string, expiry time.Time, err error) {
 	// Check if file exists
 	fileInfo, err := os.Lstat(f.filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return false, nil // No cache file, this is normal for first use
+			return false, "", time.Time{}, nil // No cache file, this is normal for first use
 		}
-		return false, &CacheError{Operation: "load", Path: f.filePath, Err: fmt.Errorf("failed to stat cache file: %w", err)}
+		return false, "", time.Time{}, &CacheError{Operation: "load", Path: f.filePath, Err: fmt.Errorf("failed to stat cache file: %w", err)}
 	}
 
 	// Validate file permissions (0600 = owner can read/write, no one else)
 	// Check that group and other bits are not set
 	if mode := fileInfo.Mode(); (mode & ^fs.FileMode(CACHE_FILE_PERMISSIONS)) != 0 {
-		return false, &CacheError{Operation: "load", Path: f.filePath, Err: fmt.Errorf("cache file has insecure permissions: %o (expected 0600)", mode.Perm())}
+		return false, "", time.Time{}, &CacheError{Operation: "load", Path: f.filePath, Err: fmt.Errorf("cache file has insecure permissions: %o (expected 0600)", mode.Perm())}
 	}
 
 	// Validate file ownership on Unix systems
@@ -212,7 +205,7 @@ func (f *FileCache) loadFromFile() (bool, error) {
 		if stat, ok := fileInfo.Sys().(*syscall.Stat_t); ok {
 			currentUser, err := user.Current()
 			if err != nil {
-				return false, &CacheError{
+				return false, "", time.Time{}, &CacheError{
 					Operation: "load",
 					Path:      f.filePath,
 					Err:       fmt.Errorf("failed to get current user for ownership check: %w", err),
@@ -221,7 +214,7 @@ func (f *FileCache) loadFromFile() (bool, error) {
 
 			currentUID, err := strconv.Atoi(currentUser.Uid)
 			if err != nil {
-				return false, &CacheError{
+				return false, "", time.Time{}, &CacheError{
 					Operation: "load",
 					Path:      f.filePath,
 					Err:       fmt.Errorf("failed to parse current user UID: %w", err),
@@ -229,7 +222,7 @@ func (f *FileCache) loadFromFile() (bool, error) {
 			}
 
 			if stat.Uid != uint32(currentUID) {
-				return false, &CacheError{
+				return false, "", time.Time{}, &CacheError{
 					Operation: "load",
 					Path:      f.filePath,
 					Err:       fmt.Errorf("cache file is owned by UID %d, expected %d", stat.Uid, currentUID),
@@ -241,32 +234,32 @@ func (f *FileCache) loadFromFile() (bool, error) {
 	// Read file contents
 	data, err := os.ReadFile(f.filePath)
 	if err != nil {
-		return false, &CacheError{Operation: "load", Path: f.filePath, Err: fmt.Errorf("failed to read cache file: %w", err)}
+		return false, "", time.Time{}, &CacheError{Operation: "load", Path: f.filePath, Err: fmt.Errorf("failed to read cache file: %w", err)}
 	}
 
 	// Parse JSON
-	var cd OAuthToken
+	var cd oauthToken
 	if err := json.Unmarshal(data, &cd); err != nil {
-		return false, &CacheError{Operation: "load", Path: f.filePath, Err: fmt.Errorf("failed to parse cache file: %w", err)}
+		return false, "", time.Time{}, &CacheError{Operation: "load", Path: f.filePath, Err: fmt.Errorf("failed to parse cache file: %w", err)}
 	}
 
 	// Validate token is not empty
 	if cd.Token == "" {
-		return false, &CacheError{Operation: "load", Path: f.filePath, Err: fmt.Errorf("cached token is empty")}
+		return false, "", time.Time{}, &CacheError{Operation: "load", Path: f.filePath, Err: fmt.Errorf("cached token is empty")}
 	}
 
 	// Validate token has not expired
 	if f.clock.Now().After(cd.Expiry) {
-		return false, &CacheError{Operation: "load", Path: f.filePath, Err: fmt.Errorf("cached token has expired")}
+		return false, "", time.Time{}, &CacheError{Operation: "load", Path: f.filePath, Err: fmt.Errorf("cached token has expired")}
 	}
 
 	// Load into cache
-	f.token.Store(&OAuthToken{
+	f.token.Store(&oauthToken{
 		Token:  cd.Token,
 		Expiry: cd.Expiry,
 	})
 
-	return true, nil
+	return true, cd.Token, cd.Expiry, nil
 }
 
 // saveToFile persists the current token to the cache file atomically.
@@ -307,7 +300,7 @@ func (f *FileCache) saveToFile() error {
 
 	// Write JSON to temp file
 	encoder := json.NewEncoder(tmpFile)
-	if err := encoder.Encode(OAuthToken{
+	if err := encoder.Encode(oauthToken{
 		Token:  token.Token,
 		Expiry: token.Expiry,
 	}); err != nil {
