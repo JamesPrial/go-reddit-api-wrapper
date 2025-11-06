@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -17,6 +18,7 @@ import (
 	"time"
 
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/clock"
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/reqid"
 )
 
 const (
@@ -32,33 +34,41 @@ type oauthToken struct {
 // MemoryCache is a simple in-memory token cache with no persistence.
 // Thread-safe using atomic operations for lock-free reads and writes.
 type MemoryCache struct {
-	token atomic.Pointer[oauthToken]
-	clock clock.Clock
+	token  atomic.Pointer[oauthToken]
+	logger *slog.Logger
+	clock  clock.Clock
 }
 
 // NewMemoryCache creates a new memory-based token cache.
 // If clock is nil, a real clock will be used.
-func NewMemoryCache(clk clock.Clock) *MemoryCache {
+func NewMemoryCache(clk clock.Clock, logger *slog.Logger) *MemoryCache {
 	if clk == nil {
 		clk = clock.NewRealClock()
 	}
-	return &MemoryCache{clock: clk}
+	return &MemoryCache{clock: clk, logger: logger}
 	// Note: atomic.Pointer zero value is nil, no explicit initialization needed
 }
 
 // Get retrieves the cached token if it exists and is not expired.
 func (m *MemoryCache) Get(ctx context.Context) (token string, expiry time.Time, found bool, err error) {
 	if err := ctx.Err(); err != nil {
+		m.logger.LogAttrs(ctx, slog.LevelDebug, "context cancelled while getting token from memory cache",
+			slog.String("error", err.Error()),
+			slog.String("request_id", reqid.FromContext(ctx)))
 		return "", time.Time{}, false, err
 	}
 
 	loaded := m.token.Load()
 	if loaded == nil {
+		m.logger.LogAttrs(ctx, slog.LevelDebug, "no token found in memory cache",
+			slog.String("request_id", reqid.FromContext(ctx)))
 		return "", time.Time{}, false, nil
 	}
 
 	// Check if token has expired
 	if m.clock.Now().After(loaded.Expiry) {
+		m.logger.LogAttrs(ctx, slog.LevelDebug, "token has expired in memory cache",
+			slog.String("request_id", reqid.FromContext(ctx)))
 		return "", time.Time{}, false, nil
 	}
 
@@ -69,7 +79,10 @@ func (m *MemoryCache) Get(ctx context.Context) (token string, expiry time.Time, 
 // Set stores a token with its expiry time.
 func (m *MemoryCache) Set(ctx context.Context, token string, expiry time.Time) error {
 	if err := ctx.Err(); err != nil {
-		return err
+		m.logger.LogAttrs(ctx, slog.LevelDebug, "context cancelled while setting token in memory cache",
+			slog.String("error", err.Error()),
+			slog.String("request_id", reqid.FromContext(ctx)))
+		return &CacheError{Operation: "set", Err: err, RequestID: reqid.FromContext(ctx)}
 	}
 
 	m.token.Store(&oauthToken{
@@ -82,10 +95,15 @@ func (m *MemoryCache) Set(ctx context.Context, token string, expiry time.Time) e
 // Invalidate clears the cached token.
 func (m *MemoryCache) Invalidate(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
-		return err
+		m.logger.LogAttrs(ctx, slog.LevelDebug, "context cancelled while invalidating token in memory cache",
+			slog.String("error", err.Error()),
+			slog.String("request_id", reqid.FromContext(ctx)))
+		return &CacheError{Operation: "invalidate", Err: err, RequestID: reqid.FromContext(ctx)}
 	}
 
 	m.token.Store(nil)
+	m.logger.LogAttrs(ctx, slog.LevelDebug, "token invalidated in memory cache",
+		slog.String("request_id", reqid.FromContext(ctx)))
 	return nil
 }
 
@@ -94,21 +112,36 @@ type FileCache struct {
 	writeMu  sync.Mutex                 // Only for coordinating writes
 	filePath string
 	clock    clock.Clock
+	logger   *slog.Logger
 }
 
 func (f *FileCache) Get(ctx context.Context) (token string, expiry time.Time, found bool, err error) {
 	if err := ctx.Err(); err != nil {
-		return "", time.Time{}, false, err
+		f.logger.LogAttrs(ctx, slog.LevelDebug, "context cancelled while getting token from file cache",
+			slog.String("error", err.Error()),
+			slog.String("request_id", reqid.FromContext(ctx)))
+		return "", time.Time{}, false, &CacheError{Operation: "get", Err: err, RequestID: reqid.FromContext(ctx)}
 	}
 
 	loaded := f.token.Load()
 	if loaded == nil || f.clock.Now().After(loaded.Expiry) {
+		f.logger.LogAttrs(ctx, slog.LevelDebug, "no token found in file cache",
+			slog.String("request_id", reqid.FromContext(ctx)))
 		return "", time.Time{}, false, nil
 	}
+	f.logger.LogAttrs(ctx, slog.LevelDebug, "token found in file cache",
+		slog.String("request_id", reqid.FromContext(ctx)))
 	return loaded.Token, loaded.Expiry, true, nil
 }
 
 func (f *FileCache) Set(ctx context.Context, token string, expiry time.Time) error {
+	if err := ctx.Err(); err != nil {
+		f.logger.LogAttrs(ctx, slog.LevelDebug, "context cancelled while setting token in file cache",
+			slog.String("error", err.Error()),
+			slog.String("request_id", reqid.FromContext(ctx)))
+		return &CacheError{Operation: "set", Err: err, RequestID: reqid.FromContext(ctx)}
+	}
+
 	newToken := &oauthToken{Token: token, Expiry: expiry}
 
 	// Update memory immediately (visible to readers)
@@ -118,7 +151,10 @@ func (f *FileCache) Set(ctx context.Context, token string, expiry time.Time) err
 	f.writeMu.Lock()
 	defer f.writeMu.Unlock()
 
-	return f.saveToFile()
+	f.logger.LogAttrs(ctx, slog.LevelDebug, "writeMu Acquired",
+		slog.String("request_id", reqid.FromContext(ctx)))
+	err := f.saveToFile(ctx)
+	return err
 }
 
 // NewFileCache creates a new file-backed token cache.
@@ -128,7 +164,7 @@ func (f *FileCache) Set(ctx context.Context, token string, expiry time.Time) err
 // Errors are returned only if the path is invalid or directory creation fails.
 // Existing cache files are loaded transparently, and load failures are treated
 // as cache misses without error.
-func NewFileCache(filePath string, clk clock.Clock) (cache *FileCache, found bool, token string, expiry time.Time, err error) {
+func NewFileCache(ctx context.Context, filePath string, clk clock.Clock) (cache *FileCache, found bool, token string, expiry time.Time, err error) {
 	if filePath == "" {
 		return nil, false, "", time.Time{}, &CacheError{Operation: "create", Err: fmt.Errorf("cache path cannot be empty")}
 	}
@@ -149,7 +185,7 @@ func NewFileCache(filePath string, clk clock.Clock) (cache *FileCache, found boo
 	}
 
 	// Try to load existing token from file (non-fatal failure)
-	found, token, expiry, err = cache.loadFromFile()
+	found, token, expiry, err = cache.loadFromFile(ctx)
 	return cache, found, token, expiry, err
 }
 
@@ -157,7 +193,10 @@ func NewFileCache(filePath string, clk clock.Clock) (cache *FileCache, found boo
 func (f *FileCache) Invalidate(ctx context.Context) error {
 	// Check context before acquiring lock (Issue 2: Context cancellation)
 	if err := ctx.Err(); err != nil {
-		return err
+		f.logger.LogAttrs(ctx, slog.LevelDebug, "context cancelled while invalidating token in file cache",
+			slog.String("error", err.Error()),
+			slog.String("request_id", reqid.FromContext(ctx)))
+		return &CacheError{Operation: "invalidate", Err: err, RequestID: reqid.FromContext(ctx)}
 	}
 
 	f.writeMu.Lock()
@@ -165,13 +204,16 @@ func (f *FileCache) Invalidate(ctx context.Context) error {
 
 	// Check again after acquiring lock
 	if err := ctx.Err(); err != nil {
-		return err
+		f.logger.LogAttrs(ctx, slog.LevelDebug, "context cancelled while invalidating token in file cache",
+			slog.String("error", err.Error()),
+			slog.String("request_id", reqid.FromContext(ctx)))
+		return &CacheError{Operation: "invalidate", Err: err, RequestID: reqid.FromContext(ctx)}
 	}
 
 	f.token.Store(nil)
 
 	// Remove persisted file
-	return f.deleteFile()
+	return f.deleteFile(ctx)
 }
 
 // loadFromFile attempts to load a token from the cache file.
@@ -184,7 +226,7 @@ func (f *FileCache) Invalidate(ctx context.Context) error {
 //
 // If any validation fails, the cache is treated as a miss.
 // This method should only be called during initialization.
-func (f *FileCache) loadFromFile() (found bool, token string, expiry time.Time, err error) {
+func (f *FileCache) loadFromFile(ctx context.Context) (found bool, token string, expiry time.Time, err error) {
 	// Check if file exists
 	fileInfo, err := os.Lstat(f.filePath)
 	if err != nil {
@@ -193,7 +235,12 @@ func (f *FileCache) loadFromFile() (found bool, token string, expiry time.Time, 
 		}
 		return false, "", time.Time{}, &CacheError{Operation: "load", Path: f.filePath, Err: fmt.Errorf("failed to stat cache file: %w", err)}
 	}
-
+	f.logger.LogAttrs(ctx, slog.LevelDebug, "fileInfo",
+		slog.String("name", fileInfo.Name()),
+		slog.String("size", strconv.FormatInt(fileInfo.Size(), 10)),
+		slog.String("mode", fileInfo.Mode().String()),
+		slog.String("modTime", fileInfo.ModTime().String()),
+		slog.String("request_id", reqid.FromContext(ctx)))
 	// Validate file permissions (0600 = owner can read/write, no one else)
 	// Check that group and other bits are not set
 	if mode := fileInfo.Mode(); (mode & ^fs.FileMode(CACHE_FILE_PERMISSIONS)) != 0 {
@@ -267,7 +314,7 @@ func (f *FileCache) loadFromFile() (found bool, token string, expiry time.Time, 
 // syncs to disk, and then atomically renames it to the cache file.
 // This ensures the cache file is never in a partially-written state.
 // Issue 3: Use a flag to prevent unnecessary cleanup after successful rename.
-func (f *FileCache) saveToFile() error {
+func (f *FileCache) saveToFile(ctx context.Context) error {
 	// If token is nil, nothing to save
 	token := f.token.Load()
 	if token == nil {
@@ -283,6 +330,9 @@ func (f *FileCache) saveToFile() error {
 	}
 
 	tmpName := tmpFile.Name()
+	f.logger.LogAttrs(ctx, slog.LevelDebug, "tmpName",
+		slog.String("name", tmpName),
+		slog.String("request_id", reqid.FromContext(ctx)))
 	shouldCleanup := true
 
 	// Issue 3: Defer cleanup with a flag to prevent removing successfully renamed files
@@ -324,15 +374,21 @@ func (f *FileCache) saveToFile() error {
 		return &CacheError{Operation: "save", Path: f.filePath, Err: fmt.Errorf("failed to rename cache file: %w", err)}
 	}
 
+	f.logger.LogAttrs(ctx, slog.LevelDebug, "cache file created",
+		slog.String("name", f.filePath),
+		slog.String("request_id", reqid.FromContext(ctx)))
 	shouldCleanup = false // Don't clean up after successful rename
 	return nil
 }
 
 // deleteFile removes the cache file.
 // Returns nil if the file doesn't exist (non-fatal).
-func (f *FileCache) deleteFile() error {
+func (f *FileCache) deleteFile(ctx context.Context) error {
 	if err := os.Remove(f.filePath); err != nil && !os.IsNotExist(err) {
 		return &CacheError{Operation: "delete", Path: f.filePath, Err: fmt.Errorf("failed to delete cache file: %w", err)}
 	}
+	f.logger.LogAttrs(ctx, slog.LevelDebug, "cache file deleted",
+		slog.String("name", f.filePath),
+		slog.String("request_id", reqid.FromContext(ctx)))
 	return nil
 }
