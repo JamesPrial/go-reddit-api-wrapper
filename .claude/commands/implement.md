@@ -1,6 +1,3 @@
-# Create the command file
-mkdir -p .claude/commands
-cat > .claude/commands/implement.md << 'EOF'
 ---
 description: Implement a feature using coordinated subagents workflow - plan, write, review, test, and commit
 ---
@@ -27,28 +24,49 @@ You MUST follow this exact workflow pattern:
    - Each code-writer should focus on their specific component
    - Wait for all writers to complete before proceeding
 
-### Phase 3: Code Review
-3. Use code-reviewer subagents to review the written code:
-   - Run code-reviewer subagent on all modified files
-   - Document all issues found (critical, warnings, suggestions)
-   - Create a prioritized list of fixes needed
+### Phase 3: Initial Code Review
+3. Use code-reviewer subagents to review ALL the written code:
+   - Run code-reviewer subagent on EVERY modified file
+   - Document ALL issues found (critical, warnings, suggestions)
+   - Create a comprehensive, prioritized list of fixes needed
 
-### Phase 4: Iteration Loop
-4. IF code review found issues:
-   - Use code-writer subagents to fix the identified issues
-   - Run code-reviewer subagents again on the fixes
-   - REPEAT this cycle until code-reviewer finds NO critical issues
+### Phase 4: MANDATORY Review-Fix Iteration Loop
+
+**THIS IS CRITICAL - YOU MUST ITERATE UNTIL CLEAN:**
+
+4a. **IF ANY issues were found in the review:**
+   - Use code-writer subagents to fix ALL identified issues
+   - WAIT for all fixes to be written
+
+4b. **THEN run code-reviewer subagents AGAIN:**
+   - Review ALL files that were just fixed
+   - Check if the fixes resolved the issues
+   - Check if new issues were introduced
+
+4c. **REPEAT steps 4a-4b until:**
+   - Code-reviewer finds ZERO critical issues
+   - Code-reviewer finds ZERO warnings
+   - Code-reviewer confirms all suggestions have been addressed or explicitly deferred
+   - **DO NOT PROCEED to testing until this condition is met**
+
+**Important Notes for Phase 4:**
+- This is NOT a one-time review-fix-done process
+- You MUST iterate: write → review → fix → review → fix → review... until clean
+- Each iteration should show measurable improvement
+- Track iteration count and remaining issues after each cycle
+- If stuck in a loop (3+ iterations with same issues), escalate to user
 
 ### Phase 5: Testing
-5. Once code passes review:
+5. Once code passes ALL review iterations (ZERO issues remaining):
    - Use the test-runner subagent to run all relevant tests
    - IF tests fail:
-     - Analyze failures
-     - Use code-writer to fix failing tests
+     - Analyze failures thoroughly
+     - Use code-writer subagents to fix failing tests
+     - Re-run code-reviewer subagents on the test fixes
      - Re-run tests until all pass
 
 ### Phase 6: Git Operations
-6. ONLY after all tests pass:
+6. ONLY after all tests pass AND code review is clean:
    - Use git-ops subagent to:
      - Stage all changes
      - Create a descriptive commit message
@@ -57,10 +75,26 @@ You MUST follow this exact workflow pattern:
 
 ## Critical Requirements
 
-- **Parallel execution**: Code-writers MUST work in parallel, not sequentially
+- **Parallel execution**: Code-writers MUST work in parallel when possible, not sequentially
 - **No skipping steps**: Every phase must complete before moving to the next
-- **Iteration**: MUST iterate on review feedback until resolved
+- **MANDATORY iteration**: MUST iterate on review feedback until COMPLETELY resolved
+- **Zero-tolerance gate**: Code review must find ZERO issues before proceeding
 - **Testing gate**: MUST NOT commit until all tests pass
-- **Clear communication**: Report progress after each phase
+- **Clear communication**: Report progress after each phase and iteration
+
+## Example Iteration Report Format
+
+After each review-fix cycle, report status like this:
+
+```
+Iteration 1: Found 12 issues (5 critical, 4 warnings, 3 suggestions)
+→ Using code-writer to fix all 12 issues...
+
+Iteration 2: Found 3 issues (0 critical, 2 warnings, 1 suggestion)
+→ Using code-writer to fix remaining 3 issues...
+
+Iteration 3: Found 0 issues - CODE REVIEW CLEAN ✓
+→ Proceeding to testing phase...
+```
 
 Begin implementation now following this workflow.
