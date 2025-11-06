@@ -344,23 +344,6 @@ config := &graw.Config{
 
 The client logs request method, URL, status, duration, and rate limit headers. When debug logging is enabled, response bodies are included up to `LogBodyLimit` bytes.
 
-## Running the Examples
-
-```bash
-export REDDIT_CLIENT_ID="your-client-id"
-export REDDIT_CLIENT_SECRET="your-client-secret"
-# Optional for user authentication:
-export REDDIT_USERNAME="your-username"
-export REDDIT_PASSWORD="your-password"
-
-# Run basic example
-go run ./cmd/examples/basic
-
-# Run specific examples (see cmd/examples/ directory)
-go run ./cmd/examples/monitor
-go run ./cmd/examples/analyzer
-```
-
 ## Performance Testing & Benchmarks
 
 This project includes comprehensive benchmark suites to measure performance characteristics:
@@ -700,8 +683,6 @@ func robustFetch(ctx context.Context, client *graw.Reddit, subreddit string) {
     }
 }
 ```
-
-For complete working examples, see the `cmd/examples/` directory.
 
 ## Error Handling
 

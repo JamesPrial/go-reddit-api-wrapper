@@ -51,11 +51,6 @@ go test -bench=. ./storage/sqlite/internal
 # Build HTTP API server
 go build -o reddit-server ./cmd/server/
 
-# Build all example applications (if they exist)
-go build -o reddit-example-basic ./cmd/examples/basic
-go build -o reddit-example-monitor ./cmd/examples/monitor
-go build -o reddit-example-analyzer ./cmd/examples/analyzer
-
 # Build frontend backend server
 cd frontend/server && go build -o reddit-frontend-server .
 
@@ -99,21 +94,6 @@ go run ./cmd/server/
 
 # Server will be available at http://localhost:8080
 # API endpoints are under /api/v1/
-```
-
-### Running the Examples
-```bash
-# Set required environment variables
-export REDDIT_CLIENT_ID="your-client-id"
-export REDDIT_CLIENT_SECRET="your-client-secret"
-# Optional for user auth:
-export REDDIT_USERNAME="your-username"
-export REDDIT_PASSWORD="your-password"
-
-# Run examples (note: these don't exist yet)
-go run ./cmd/examples/basic
-go run ./cmd/examples/monitor
-go run ./cmd/examples/analyzer
 ```
 
 ### Running the Frontend Application
@@ -267,7 +247,7 @@ ALWAYS PROACTIVELY use the Task tool and available subagents to break down compl
 - **Mocking**: Mock HTTP clients and mock clock enable deterministic testing without network calls or time delays
 - **Benchmarks**: `internal/*_bench_test.go` measure performance of hot paths (HTTP operations, buffer pooling, DB queries)
 - **Test utilities**: `internal/testutil/` provides builders, assertions, and mock servers for complex test scenarios
-- **CI Pipeline**: GitHub Actions runs `go vet`, tests with `-race` and `-cover` flags, builds all examples, and runs benchmarks
+- **CI Pipeline**: GitHub Actions runs `go vet`, tests with `-race` and `-cover` flags, and runs benchmarks
 - **Coverage**: Aim for comprehensive coverage of error paths and edge cases
 
 ### Important Testing Notes
