@@ -3,10 +3,10 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/reqid"
@@ -36,14 +36,25 @@ func (s *Server) writeError(w http.ResponseWriter, statusCode int, message strin
 		Error:     message,
 		RequestID: requestID,
 	}
-	json.NewEncoder(w).Encode(resp)
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		s.logger.Error("failed to encode error response",
+			"error", err.Error(),
+			"request_id", requestID,
+			"status_code", statusCode,
+		)
+	}
 }
 
 // writeJSON writes a JSON response with proper headers.
 func (s *Server) writeJSON(w http.ResponseWriter, statusCode int, data any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
-	json.NewEncoder(w).Encode(data)
+	if err := json.NewEncoder(w).Encode(data); err != nil {
+		s.logger.Error("failed to encode JSON response",
+			"error", err.Error(),
+			"status_code", statusCode,
+		)
+	}
 }
 
 // HealthHandler handles GET /health requests.
@@ -71,7 +82,7 @@ func (s *Server) GetHotHandler(w http.ResponseWriter, r *http.Request) {
 
 	subreddit := r.PathValue("subreddit")
 	if subreddit == "" {
-		s.writeError(w, http.StatusBadRequest, "subreddit is required", reqid.FromContext(r.Context()))
+		s.writeError(w, http.StatusBadRequest, "subreddit is required", reqid.FromContext(ctx))
 		return
 	}
 
@@ -122,7 +133,7 @@ func (s *Server) GetNewHandler(w http.ResponseWriter, r *http.Request) {
 
 	subreddit := r.PathValue("subreddit")
 	if subreddit == "" {
-		s.writeError(w, http.StatusBadRequest, "subreddit is required", reqid.FromContext(r.Context()))
+		s.writeError(w, http.StatusBadRequest, "subreddit is required", reqid.FromContext(ctx))
 		return
 	}
 
@@ -161,7 +172,7 @@ func (s *Server) GetNewHandler(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusOK, result)
 }
 
-// GetCommentsHandler handles GET /api/v1/posts/{postId}/comments requests.
+// GetCommentsHandler handles GET /api/v1/r/{subreddit}/posts/{postId}/comments requests.
 func (s *Server) GetCommentsHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		s.writeError(w, http.StatusMethodNotAllowed, "method not allowed", reqid.FromContext(r.Context()))
@@ -171,9 +182,15 @@ func (s *Server) GetCommentsHandler(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
+	subreddit := r.PathValue("subreddit")
+	if subreddit == "" {
+		s.writeError(w, http.StatusBadRequest, "subreddit is required", reqid.FromContext(ctx))
+		return
+	}
+
 	postID := r.PathValue("postId")
 	if postID == "" {
-		s.writeError(w, http.StatusBadRequest, "postId is required", reqid.FromContext(r.Context()))
+		s.writeError(w, http.StatusBadRequest, "postId is required", reqid.FromContext(ctx))
 		return
 	}
 
@@ -183,7 +200,8 @@ func (s *Server) GetCommentsHandler(w http.ResponseWriter, r *http.Request) {
 	before := r.URL.Query().Get("before")
 
 	request := &types.CommentsRequest{
-		PostID: postID,
+		Subreddit: subreddit,
+		PostID:    postID,
 		Pagination: types.Pagination{
 			Limit:  limit,
 			After:  after,
@@ -247,7 +265,7 @@ func (s *Server) GetSubredditHandler(w http.ResponseWriter, r *http.Request) {
 
 	subreddit := r.PathValue("subreddit")
 	if subreddit == "" {
-		s.writeError(w, http.StatusBadRequest, "subreddit is required", reqid.FromContext(r.Context()))
+		s.writeError(w, http.StatusBadRequest, "subreddit is required", reqid.FromContext(ctx))
 		return
 	}
 
@@ -288,28 +306,54 @@ func (s *Server) handleRedditError(w http.ResponseWriter, err error, requestID s
 		"request_id", requestID,
 	)
 
-	// Check error type and return appropriate status code
-	// For now, return 500 for all errors
-	// In production, you'd want to inspect the error type more carefully
 	var statusCode int
 	var message string
+
+	// Use proper error type assertions instead of string matching
+	var authErr *graw.AuthError
+	var validationErr *graw.ValidationError
+	var apiErr *graw.APIError
+	var rateLimitErr *graw.RateLimitError
+	var networkErr *graw.NetworkError
 
 	switch {
 	case err == nil:
 		statusCode = http.StatusOK
 		message = "success"
-	case strings.Contains(err.Error(), "auth error") || strings.Contains(err.Error(), "401"):
+	case errors.As(err, &authErr):
 		statusCode = http.StatusUnauthorized
 		message = "authentication failed"
-	case strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "404"):
-		statusCode = http.StatusNotFound
-		message = "not found"
-	case strings.Contains(err.Error(), "validation error"):
+	case errors.As(err, &validationErr):
 		statusCode = http.StatusBadRequest
 		message = "invalid request"
-	case strings.Contains(err.Error(), "rate limit"):
+	case errors.As(err, &rateLimitErr):
 		statusCode = http.StatusTooManyRequests
 		message = "rate limited by Reddit API"
+	case errors.As(err, &apiErr):
+		// Map Reddit API status codes to appropriate HTTP responses
+		switch apiErr.StatusCode {
+		case http.StatusNotFound:
+			statusCode = http.StatusNotFound
+			message = "not found"
+		case http.StatusForbidden:
+			statusCode = http.StatusForbidden
+			message = "forbidden"
+		case http.StatusUnauthorized:
+			statusCode = http.StatusUnauthorized
+			message = "authentication failed"
+		case http.StatusBadRequest:
+			statusCode = http.StatusBadRequest
+			message = "invalid request"
+		case http.StatusTooManyRequests:
+			statusCode = http.StatusTooManyRequests
+			message = "rate limited by Reddit API"
+		default:
+			statusCode = http.StatusInternalServerError
+			message = "Reddit API error"
+		}
+	case errors.As(err, &networkErr):
+		statusCode = http.StatusServiceUnavailable
+		message = "service temporarily unavailable"
 	default:
 		statusCode = http.StatusInternalServerError
 		message = "internal server error"

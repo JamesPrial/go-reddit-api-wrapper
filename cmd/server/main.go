@@ -58,7 +58,7 @@ func main() {
 	mux.HandleFunc("GET /api/v1/r/{subreddit}/hot", apiServer.GetHotHandler)
 	mux.HandleFunc("GET /api/v1/r/{subreddit}/new", apiServer.GetNewHandler)
 	mux.HandleFunc("GET /api/v1/r/{subreddit}/about", apiServer.GetSubredditHandler)
-	mux.HandleFunc("GET /api/v1/posts/{postId}/comments", apiServer.GetCommentsHandler)
+	mux.HandleFunc("GET /api/v1/r/{subreddit}/posts/{postId}/comments", apiServer.GetCommentsHandler)
 	mux.HandleFunc("GET /api/v1/me", apiServer.GetMeHandler)
 
 	logger.Info("routes registered")

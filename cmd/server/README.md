@@ -142,10 +142,10 @@ Get information about a subreddit.
 ### Get Comments
 
 ```
-GET /api/v1/posts/{postId}/comments
+GET /api/v1/r/{subreddit}/posts/{postId}/comments
 ```
 
-Get comments on a specific post.
+Get comments on a specific post. Both subreddit and postId are required path parameters.
 
 **Query Parameters:**
 - `limit` (optional, default: 25, max: 100) - Number of comments to return
@@ -261,8 +261,8 @@ curl http://localhost:8080/api/v1/r/golang/hot?limit=5
 # Get subreddit info
 curl http://localhost:8080/api/v1/r/golang/about
 
-# Get comments on a post (replace with real post ID)
-curl http://localhost:8080/api/v1/posts/abc123/comments?limit=10
+# Get comments on a post (replace with real subreddit and post ID)
+curl http://localhost:8080/api/v1/r/golang/posts/abc123/comments?limit=10
 ```
 
 ## Development
