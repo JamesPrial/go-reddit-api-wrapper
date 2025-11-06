@@ -4,6 +4,7 @@ package testutil
 import (
 	"context"
 	"sync/atomic"
+	"time"
 
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 )
@@ -198,7 +199,7 @@ func DefaultAccount() *types.AccountData {
 }
 
 // MockTokenProvider is a simple implementation of the TokenProvider interface for testing.
-// It returns a configurable token and error, allowing tests to simulate both successful
+// It returns a configurable token, expiry time, and error, allowing tests to simulate both successful
 // and failed authentication scenarios.
 //
 // Call tracking is thread-safe using atomic counters. Use GetCallCount() and InvalidateCallCount()
@@ -207,12 +208,12 @@ func DefaultAccount() *types.AccountData {
 // Example:
 //
 //	// Successful auth
-//	mockAuth := &testutil.MockTokenProvider{Token: "valid-token"}
-//	token, err := mockAuth.GetToken(ctx)
+//	mockAuth := &testutil.MockTokenProvider{Token: "valid-token", Expiry: time.Now().Add(1*time.Hour)}
+//	token, expiry, err := mockAuth.GetToken(ctx)
 //
 //	// Failed auth
 //	mockAuth := &testutil.MockTokenProvider{Err: errors.New("auth failed")}
-//	token, err := mockAuth.GetToken(ctx)
+//	token, expiry, err := mockAuth.GetToken(ctx)
 //
 //	// Check call counts
 //	getCount := mockAuth.GetCallCount()
@@ -220,6 +221,8 @@ func DefaultAccount() *types.AccountData {
 type MockTokenProvider struct {
 	// Token is the token to return from GetToken
 	Token string
+	// Expiry is the expiry time to return from GetToken
+	Expiry time.Time
 	// Err is the error to return from GetToken (if set, Token is ignored)
 	Err error
 	// InvalidateCount tracks how many times InvalidateToken was called (deprecated, use InvalidateCallCount())
@@ -231,24 +234,25 @@ type MockTokenProvider struct {
 	invalidateCalls atomic.Int32
 }
 
-// GetToken returns the configured token or error.
+// GetToken returns the configured token, expiry time, or error.
 // This implements the TokenProvider interface.
 // The call count is tracked atomically and can be retrieved with GetCallCount().
-func (m *MockTokenProvider) GetToken(ctx context.Context) (string, error) {
+func (m *MockTokenProvider) GetToken(ctx context.Context) (string, time.Time, error) {
 	m.getCalls.Add(1)
 	if m.Err != nil {
-		return "", m.Err
+		return "", time.Time{}, m.Err
 	}
-	return m.Token, nil
+	return m.Token, m.Expiry, nil
 }
 
 // InvalidateToken increments the invalidate call counters.
 // This implements the TokenProvider interface.
 // The call count is tracked atomically and can be retrieved with InvalidateCallCount().
-func (m *MockTokenProvider) InvalidateToken(ctx context.Context) {
+func (m *MockTokenProvider) InvalidateToken(ctx context.Context) error {
 	m.invalidateCalls.Add(1)
 	// Update legacy field for backward compatibility
 	m.InvalidateCount++
+	return nil
 }
 
 // GetCallCount returns the number of times GetToken was called.

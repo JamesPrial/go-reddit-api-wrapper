@@ -14,7 +14,6 @@ import (
 
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/auth"
-	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/cache"
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/client"
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/clock"
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/parse"
@@ -795,7 +794,6 @@ func createTestRedditClient(b *testing.B, serverURL string) *Reddit {
 	}))
 	b.Cleanup(func() { authServer.Close() })
 
-	testCache := cache.NewMemoryCache(mockClock)
 	authenticator, err := auth.NewAuthenticator(
 		httpClient,
 		"",
@@ -807,7 +805,6 @@ func createTestRedditClient(b *testing.B, serverURL string) *Reddit {
 		"client_credentials",
 		logger,
 		mockClock,
-		testCache,
 	)
 	if err != nil {
 		b.Fatalf("failed to create authenticator: %v", err)
@@ -815,7 +812,7 @@ func createTestRedditClient(b *testing.B, serverURL string) *Reddit {
 
 	// Pre-populate auth cache to avoid auth overhead in benchmarks
 	// Call GetToken once to cache the token
-	_, err = authenticator.GetToken(context.Background())
+	_, _, err = authenticator.GetToken(context.Background())
 	if err != nil {
 		b.Fatalf("failed to pre-populate auth cache: %v", err)
 	}

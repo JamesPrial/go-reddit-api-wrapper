@@ -3,9 +3,12 @@ package cache
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -23,10 +26,15 @@ func NewMockClock(t time.Time) *mockClock {
 	return &mockClock{clock.NewMockClock(t)}
 }
 
+// discardLogger returns a logger that discards all output (useful for tests).
+func discardLogger() *slog.Logger {
+	return slog.New(slog.DiscardHandler)
+}
+
 // TestMemoryCache_GetSet tests basic get/set operations.
 func TestMemoryCache_GetSet(t *testing.T) {
 	clk := NewMockClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
-	cache := NewMemoryCache(clk)
+	cache := NewMemoryCache(clk, discardLogger())
 
 	tokenStr := "test-token-123"
 	expiry := clk.Now().Add(1 * time.Hour)
@@ -56,7 +64,7 @@ func TestMemoryCache_GetSet(t *testing.T) {
 // TestMemoryCache_GetExpired tests that expired tokens are treated as cache misses.
 func TestMemoryCache_GetExpired(t *testing.T) {
 	clk := NewMockClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
-	cache := NewMemoryCache(clk)
+	cache := NewMemoryCache(clk, discardLogger())
 
 	tokenStr := "test-token-123"
 	expiry := clk.Now().Add(1 * time.Hour)
@@ -83,7 +91,7 @@ func TestMemoryCache_GetExpired(t *testing.T) {
 // TestMemoryCache_GetMiss tests cache miss when no token is set.
 func TestMemoryCache_GetMiss(t *testing.T) {
 	clk := NewMockClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
-	cache := NewMemoryCache(clk)
+	cache := NewMemoryCache(clk, discardLogger())
 
 	_, _, found, err := cache.Get(context.Background())
 	if err != nil {
@@ -97,7 +105,7 @@ func TestMemoryCache_GetMiss(t *testing.T) {
 // TestMemoryCache_Invalidate tests clearing the cache.
 func TestMemoryCache_Invalidate(t *testing.T) {
 	clk := NewMockClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
-	cache := NewMemoryCache(clk)
+	cache := NewMemoryCache(clk, discardLogger())
 
 	tokenStr := "test-token-123"
 	expiry := clk.Now().Add(1 * time.Hour)
@@ -133,7 +141,7 @@ func TestFileCache_CreateDirectory(t *testing.T) {
 	cachePath := filepath.Join(tmpDir, "subdir1", "subdir2", "cache.json")
 
 	clk := NewMockClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
-	cache, err := NewFileCache(cachePath, clk)
+	cache, _, _, _, err := NewFileCache(context.Background(), cachePath, clk)
 	if err != nil {
 		t.Fatalf("NewFileCache failed: %v", err)
 	}
@@ -163,7 +171,7 @@ func TestFileCache_GetSet(t *testing.T) {
 	cachePath := filepath.Join(tmpDir, "cache.json")
 
 	clk := NewMockClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
-	cache, err := NewFileCache(cachePath, clk)
+	cache, _, _, _, err := NewFileCache(context.Background(), cachePath, clk)
 	if err != nil {
 		t.Fatalf("NewFileCache failed: %v", err)
 	}
@@ -211,7 +219,7 @@ func TestFileCache_LoadFromDisk(t *testing.T) {
 	startTime := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 	expiry := startTime.Add(1 * time.Hour)
 
-	data := OAuthToken{
+	data := oauthToken{
 		Token:  "persisted-token",
 		Expiry: expiry,
 	}
@@ -226,7 +234,7 @@ func TestFileCache_LoadFromDisk(t *testing.T) {
 
 	// Create cache instance and verify it loads the persisted token
 	clk := NewMockClock(startTime)
-	cache, err := NewFileCache(cachePath, clk)
+	cache, _, _, _, err := NewFileCache(context.Background(), cachePath, clk)
 	if err != nil {
 		t.Fatalf("NewFileCache failed: %v", err)
 	}
@@ -256,7 +264,7 @@ func TestFileCache_LoadExpired(t *testing.T) {
 	startTime := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 	expiry := startTime.Add(-1 * time.Hour) // Expired
 
-	data := OAuthToken{
+	data := oauthToken{
 		Token:  "expired-token",
 		Expiry: expiry,
 	}
@@ -271,7 +279,7 @@ func TestFileCache_LoadExpired(t *testing.T) {
 
 	// Create cache instance - should not load expired token
 	clk := NewMockClock(startTime)
-	cache, err := NewFileCache(cachePath, clk)
+	cache, _, _, _, err := NewFileCache(context.Background(), cachePath, clk)
 	if err != nil {
 		t.Fatalf("NewFileCache failed: %v", err)
 	}
@@ -291,23 +299,44 @@ func TestFileCache_InsecurePermissions(t *testing.T) {
 	tmpDir := t.TempDir()
 	cachePath := filepath.Join(tmpDir, "cache.json")
 
-	// Create a cache file with insecure permissions
 	startTime := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	expiry := startTime.Add(1 * time.Hour)
+
+	// Create a cache file with valid token data but INSECURE permissions
+	data := oauthToken{
+		Token:  "test-token",
+		Expiry: expiry,
+	}
+	jsonData, err := json.Marshal(data)
+	if err != nil {
+		t.Fatalf("Failed to marshal test data: %v", err)
+	}
+
+	// Write with insecure permissions (world-readable 0644)
+	if err := os.WriteFile(cachePath, jsonData, 0644); err != nil {
+		t.Fatalf("Failed to write cache file: %v", err)
+	}
 
 	// Create cache instance - should reject insecure file
 	clk := NewMockClock(startTime)
-	cache, err := NewFileCache(cachePath, clk)
-	if err != nil {
-		t.Fatalf("NewFileCache failed: %v", err)
+	_, found, _, _, err := NewFileCache(context.Background(), cachePath, clk)
+
+	// Should return an error for insecure permissions
+	if err == nil {
+		t.Fatal("NewFileCache should error on insecure permissions")
 	}
 
-	// Get should return cache miss (insecure file is treated as empty)
-	_, _, found, err := cache.Get(context.Background())
-	if err != nil {
-		t.Fatalf("Get failed: %v", err)
+	var ce *CacheError
+	if !errors.As(err, &ce) {
+		t.Fatalf("Error should be CacheError, got %T", err)
 	}
+
+	if !strings.Contains(ce.Error(), "insecure permissions") {
+		t.Errorf("Error should mention insecure permissions, got: %v", err)
+	}
+
 	if found {
-		t.Fatal("Insecurely permissioned token should not be loaded")
+		t.Error("Should not return found=true for insecurely permissioned file")
 	}
 }
 
@@ -317,7 +346,7 @@ func TestFileCache_Invalidate(t *testing.T) {
 	cachePath := filepath.Join(tmpDir, "cache.json")
 
 	clk := NewMockClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
-	cache, err := NewFileCache(cachePath, clk)
+	cache, _, _, _, err := NewFileCache(context.Background(), cachePath, clk)
 	if err != nil {
 		t.Fatalf("NewFileCache failed: %v", err)
 	}
@@ -360,7 +389,7 @@ func TestFileCache_InvalidateNonExistent(t *testing.T) {
 	cachePath := filepath.Join(tmpDir, "cache.json")
 
 	clk := NewMockClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
-	cache, err := NewFileCache(cachePath, clk)
+	cache, _, _, _, err := NewFileCache(context.Background(), cachePath, clk)
 	if err != nil {
 		t.Fatalf("NewFileCache failed: %v", err)
 	}
@@ -384,7 +413,7 @@ func TestFileCache_ParseError(t *testing.T) {
 
 	// Create cache instance - should handle parse error gracefully
 	clk := NewMockClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
-	cache, err := NewFileCache(cachePath, clk)
+	cache, _, _, _, err := NewFileCache(context.Background(), cachePath, clk)
 	if err != nil {
 		t.Fatalf("NewFileCache should not error on corrupted file: %v", err)
 	}
@@ -408,7 +437,7 @@ func TestFileCache_EmptyToken(t *testing.T) {
 	startTime := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 	expiry := startTime.Add(1 * time.Hour)
 
-	data := OAuthToken{
+	data := oauthToken{
 		Token:  "", // Empty
 		Expiry: expiry,
 	}
@@ -423,7 +452,7 @@ func TestFileCache_EmptyToken(t *testing.T) {
 
 	// Create cache instance - should reject empty token
 	clk := NewMockClock(startTime)
-	cache, err := NewFileCache(cachePath, clk)
+	cache, _, _, _, err := NewFileCache(context.Background(), cachePath, clk)
 	if err != nil {
 		t.Fatalf("NewFileCache failed: %v", err)
 	}
@@ -444,7 +473,7 @@ func TestFileCache_AtomicWrite(t *testing.T) {
 	cachePath := filepath.Join(tmpDir, "cache.json")
 
 	clk := NewMockClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
-	cache, err := NewFileCache(cachePath, clk)
+	cache, _, _, _, err := NewFileCache(context.Background(), cachePath, clk)
 	if err != nil {
 		t.Fatalf("NewFileCache failed: %v", err)
 	}
@@ -452,7 +481,7 @@ func TestFileCache_AtomicWrite(t *testing.T) {
 	expiry := clk.Now().Add(1 * time.Hour)
 
 	// Set a token multiple times
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		tokenStr := fmt.Sprintf("test-token-%d", i)
 		err = cache.Set(context.Background(), tokenStr, expiry)
 		if err != nil {
@@ -487,7 +516,7 @@ func TestFileCache_AtomicWrite(t *testing.T) {
 // TestFileCache_InvalidPathEmpty tests error handling for empty path.
 func TestFileCache_InvalidPathEmpty(t *testing.T) {
 	clk := NewMockClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
-	_, err := NewFileCache("", clk)
+	_, _, _, _, err := NewFileCache(context.Background(), "", clk)
 	if err == nil {
 		t.Fatal("NewFileCache should error on empty path")
 	}
@@ -507,7 +536,7 @@ func TestFileCache_NilClock(t *testing.T) {
 	cachePath := filepath.Join(tmpDir, "cache.json")
 
 	// Create with nil clock (should default to RealClock)
-	cache, err := NewFileCache(cachePath, nil)
+	cache, _, _, _, err := NewFileCache(context.Background(), cachePath, nil)
 	if err != nil {
 		t.Fatalf("NewFileCache with nil clock failed: %v", err)
 	}
@@ -548,13 +577,13 @@ func AsError(err error, target **CacheError) bool {
 // TestMemoryCache_GetContextCanceled tests that Get respects context cancellation.
 func TestMemoryCache_GetContextCanceled(t *testing.T) {
 	clk := NewMockClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
-	cache := NewMemoryCache(clk)
+	cache := NewMemoryCache(clk, discardLogger())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
 
 	_, _, _, err := cache.Get(ctx)
-	if err != context.Canceled {
+	if !errors.Is(err, context.Canceled) {
 		t.Errorf("Expected context.Canceled, got %v", err)
 	}
 }
@@ -562,7 +591,7 @@ func TestMemoryCache_GetContextCanceled(t *testing.T) {
 // TestMemoryCache_SetContextCanceled tests that Set respects context cancellation.
 func TestMemoryCache_SetContextCanceled(t *testing.T) {
 	clk := NewMockClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
-	cache := NewMemoryCache(clk)
+	cache := NewMemoryCache(clk, discardLogger())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
@@ -570,7 +599,7 @@ func TestMemoryCache_SetContextCanceled(t *testing.T) {
 	tokenStr := "test-token"
 	expiry := clk.Now().Add(1 * time.Hour)
 	err := cache.Set(ctx, tokenStr, expiry)
-	if err != context.Canceled {
+	if !errors.Is(err, context.Canceled) {
 		t.Errorf("Expected context.Canceled, got %v", err)
 	}
 }
@@ -578,13 +607,13 @@ func TestMemoryCache_SetContextCanceled(t *testing.T) {
 // TestMemoryCache_InvalidateContextCanceled tests that Invalidate respects context cancellation.
 func TestMemoryCache_InvalidateContextCanceled(t *testing.T) {
 	clk := NewMockClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
-	cache := NewMemoryCache(clk)
+	cache := NewMemoryCache(clk, discardLogger())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
 
 	err := cache.Invalidate(ctx)
-	if err != context.Canceled {
+	if !errors.Is(err, context.Canceled) {
 		t.Errorf("Expected context.Canceled, got %v", err)
 	}
 }
@@ -592,7 +621,7 @@ func TestMemoryCache_InvalidateContextCanceled(t *testing.T) {
 // TestMemoryCache_SetContextTimeoutDuring tests context timeout during Set operation.
 func TestMemoryCache_SetContextTimeoutDuring(t *testing.T) {
 	clk := NewMockClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
-	cache := NewMemoryCache(clk)
+	cache := NewMemoryCache(clk, discardLogger())
 
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Microsecond)
 	defer cancel()
@@ -603,7 +632,7 @@ func TestMemoryCache_SetContextTimeoutDuring(t *testing.T) {
 	tokenStr := "test-token"
 	expiry := clk.Now().Add(1 * time.Hour)
 	err := cache.Set(ctx, tokenStr, expiry)
-	if err != context.DeadlineExceeded {
+	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Errorf("Expected context.DeadlineExceeded, got %v", err)
 	}
 }
@@ -618,7 +647,7 @@ func TestFileCache_GetContextCanceled(t *testing.T) {
 	filePath := filepath.Join(tmpDir, "cache.json")
 
 	clk := NewMockClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
-	cache, err := NewFileCache(filePath, clk)
+	cache, _, _, _, err := NewFileCache(context.Background(), filePath, clk)
 	if err != nil {
 		t.Fatalf("Failed to create cache: %v", err)
 	}
@@ -627,7 +656,7 @@ func TestFileCache_GetContextCanceled(t *testing.T) {
 	cancel() // Cancel immediately
 
 	_, _, _, err = cache.Get(ctx)
-	if err != context.Canceled {
+	if !errors.Is(err, context.Canceled) {
 		t.Errorf("Expected context.Canceled, got %v", err)
 	}
 }
@@ -638,7 +667,7 @@ func TestFileCache_SetContextCanceled(t *testing.T) {
 	filePath := filepath.Join(tmpDir, "cache.json")
 
 	clk := NewMockClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
-	cache, err := NewFileCache(filePath, clk)
+	cache, _, _, _, err := NewFileCache(context.Background(), filePath, clk)
 	if err != nil {
 		t.Fatalf("Failed to create cache: %v", err)
 	}
@@ -649,7 +678,7 @@ func TestFileCache_SetContextCanceled(t *testing.T) {
 	tokenStr := "token"
 	expiry := clk.Now().Add(1 * time.Hour)
 	err = cache.Set(ctx, tokenStr, expiry)
-	if err != context.Canceled {
+	if !errors.Is(err, context.Canceled) {
 		t.Errorf("Expected context.Canceled, got %v", err)
 	}
 }
@@ -660,7 +689,7 @@ func TestFileCache_InvalidateContextCanceled(t *testing.T) {
 	filePath := filepath.Join(tmpDir, "cache.json")
 
 	clk := NewMockClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
-	cache, err := NewFileCache(filePath, clk)
+	cache, _, _, _, err := NewFileCache(context.Background(), filePath, clk)
 	if err != nil {
 		t.Fatalf("Failed to create cache: %v", err)
 	}
@@ -669,7 +698,7 @@ func TestFileCache_InvalidateContextCanceled(t *testing.T) {
 	cancel() // Cancel immediately
 
 	err = cache.Invalidate(ctx)
-	if err != context.Canceled {
+	if !errors.Is(err, context.Canceled) {
 		t.Errorf("Expected context.Canceled, got %v", err)
 	}
 }
@@ -680,7 +709,7 @@ func TestFileCache_SetContextTimeoutDuring(t *testing.T) {
 	filePath := filepath.Join(tmpDir, "cache.json")
 
 	clk := NewMockClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
-	cache, err := NewFileCache(filePath, clk)
+	cache, _, _, _, err := NewFileCache(context.Background(), filePath, clk)
 	if err != nil {
 		t.Fatalf("Failed to create cache: %v", err)
 	}
@@ -694,7 +723,7 @@ func TestFileCache_SetContextTimeoutDuring(t *testing.T) {
 	tokenStr := "token"
 	expiry := clk.Now().Add(1 * time.Hour)
 	err = cache.Set(ctx, tokenStr, expiry)
-	if err != context.DeadlineExceeded {
+	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Errorf("Expected context.DeadlineExceeded, got %v", err)
 	}
 }
@@ -707,7 +736,7 @@ func TestFileCache_SetContextTimeoutDuring(t *testing.T) {
 // This test uses the race detector to ensure thread-safety.
 func TestMemoryCache_ConcurrentAccess(t *testing.T) {
 	clk := NewMockClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
-	cache := NewMemoryCache(clk)
+	cache := NewMemoryCache(clk, discardLogger())
 
 	const goroutines = 100
 	const iterations = 100
@@ -716,10 +745,10 @@ func TestMemoryCache_ConcurrentAccess(t *testing.T) {
 	wg.Add(goroutines * 3) // Writers, readers, invalidators
 
 	// Writers: concurrently set tokens
-	for i := 0; i < goroutines; i++ {
+	for i := range goroutines {
 		go func(id int) {
 			defer wg.Done()
-			for j := 0; j < iterations; j++ {
+			for j := range iterations {
 				tokenStr := fmt.Sprintf("token-%d-%d", id, j)
 				expiry := clk.Now().Add(1 * time.Hour)
 				_ = cache.Set(context.Background(), tokenStr, expiry)
@@ -728,20 +757,20 @@ func TestMemoryCache_ConcurrentAccess(t *testing.T) {
 	}
 
 	// Readers: concurrently read tokens
-	for i := 0; i < goroutines; i++ {
+	for range goroutines {
 		go func() {
 			defer wg.Done()
-			for j := 0; j < iterations; j++ {
+			for range iterations {
 				_, _, _, _ = cache.Get(context.Background())
 			}
 		}()
 	}
 
 	// Invalidators: concurrently invalidate cache
-	for i := 0; i < goroutines; i++ {
+	for range goroutines {
 		go func() {
 			defer wg.Done()
-			for j := 0; j < iterations; j++ {
+			for range iterations {
 				_ = cache.Invalidate(context.Background())
 			}
 		}()
@@ -754,7 +783,7 @@ func TestMemoryCache_ConcurrentAccess(t *testing.T) {
 // TestMemoryCache_ConcurrentContextCancellation tests MemoryCache with concurrent operations and context cancellation.
 func TestMemoryCache_ConcurrentContextCancellation(t *testing.T) {
 	clk := NewMockClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
-	cache := NewMemoryCache(clk)
+	cache := NewMemoryCache(clk, discardLogger())
 
 	const goroutines = 50
 	const iterations = 50
@@ -763,10 +792,10 @@ func TestMemoryCache_ConcurrentContextCancellation(t *testing.T) {
 	wg.Add(goroutines)
 
 	// Each goroutine performs operations with cancellable contexts
-	for i := 0; i < goroutines; i++ {
+	for i := range goroutines {
 		go func(id int) {
 			defer wg.Done()
-			for j := 0; j < iterations; j++ {
+			for j := range iterations {
 				// Randomly use cancelled contexts to test cancellation handling
 				var ctx context.Context
 				if j%3 == 0 {
@@ -803,7 +832,7 @@ func TestFileCache_ConcurrentAccess(t *testing.T) {
 	filePath := filepath.Join(tmpDir, "cache.json")
 
 	clk := NewMockClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
-	cache, err := NewFileCache(filePath, clk)
+	cache, _, _, _, err := NewFileCache(context.Background(), filePath, clk)
 	if err != nil {
 		t.Fatalf("Failed to create cache: %v", err)
 	}
@@ -815,10 +844,10 @@ func TestFileCache_ConcurrentAccess(t *testing.T) {
 	wg.Add(goroutines * 3)
 
 	// Writers: concurrently write tokens to file
-	for i := 0; i < goroutines; i++ {
+	for i := range goroutines {
 		go func(id int) {
 			defer wg.Done()
-			for j := 0; j < iterations; j++ {
+			for j := range iterations {
 				tokenStr := fmt.Sprintf("token-%d-%d", id, j)
 				expiry := clk.Now().Add(1 * time.Hour)
 				_ = cache.Set(context.Background(), tokenStr, expiry)
@@ -827,20 +856,20 @@ func TestFileCache_ConcurrentAccess(t *testing.T) {
 	}
 
 	// Readers: concurrently read tokens
-	for i := 0; i < goroutines; i++ {
+	for range goroutines {
 		go func() {
 			defer wg.Done()
-			for j := 0; j < iterations; j++ {
+			for range iterations {
 				_, _, _, _ = cache.Get(context.Background())
 			}
 		}()
 	}
 
 	// Invalidators: concurrently invalidate cache
-	for i := 0; i < goroutines; i++ {
+	for range goroutines {
 		go func() {
 			defer wg.Done()
-			for j := 0; j < iterations; j++ {
+			for range iterations {
 				_ = cache.Invalidate(context.Background())
 			}
 		}()
@@ -856,7 +885,7 @@ func TestFileCache_ConcurrentContextCancellation(t *testing.T) {
 	filePath := filepath.Join(tmpDir, "cache.json")
 
 	clk := NewMockClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
-	cache, err := NewFileCache(filePath, clk)
+	cache, _, _, _, err := NewFileCache(context.Background(), filePath, clk)
 	if err != nil {
 		t.Fatalf("Failed to create cache: %v", err)
 	}
@@ -868,10 +897,10 @@ func TestFileCache_ConcurrentContextCancellation(t *testing.T) {
 	wg.Add(goroutines)
 
 	// Each goroutine performs operations with cancellable contexts
-	for i := 0; i < goroutines; i++ {
+	for i := range goroutines {
 		go func(id int) {
 			defer wg.Done()
-			for j := 0; j < iterations; j++ {
+			for j := range iterations {
 				// Randomly use cancelled contexts to test cancellation handling
 				var ctx context.Context
 				if j%3 == 0 {
@@ -904,7 +933,7 @@ func TestFileCache_ConcurrentContextCancellation(t *testing.T) {
 // TestMemoryCache_SequentialContextStates tests context behavior across sequential operations.
 func TestMemoryCache_SequentialContextStates(t *testing.T) {
 	clk := NewMockClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
-	cache := NewMemoryCache(clk)
+	cache := NewMemoryCache(clk, discardLogger())
 
 	// Test with valid context
 	ctx := context.Background()
@@ -920,7 +949,7 @@ func TestMemoryCache_SequentialContextStates(t *testing.T) {
 	cancel()
 	tokenStr2 := "token2"
 	err = cache.Set(cancelCtx, tokenStr2, expiry)
-	if err != context.Canceled {
+	if !errors.Is(err, context.Canceled) {
 		t.Errorf("Set with cancelled context should return Canceled, got %v", err)
 	}
 
@@ -937,7 +966,7 @@ func TestFileCache_SequentialContextStates(t *testing.T) {
 	filePath := filepath.Join(tmpDir, "cache.json")
 
 	clk := NewMockClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
-	cache, err := NewFileCache(filePath, clk)
+	cache, _, _, _, err := NewFileCache(context.Background(), filePath, clk)
 	if err != nil {
 		t.Fatalf("Failed to create cache: %v", err)
 	}
@@ -956,7 +985,7 @@ func TestFileCache_SequentialContextStates(t *testing.T) {
 	cancel()
 	tokenStr2 := "token2"
 	err = cache.Set(cancelCtx, tokenStr2, expiry)
-	if err != context.Canceled {
+	if !errors.Is(err, context.Canceled) {
 		t.Errorf("Set with cancelled context should return Canceled, got %v", err)
 	}
 

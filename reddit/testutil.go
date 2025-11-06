@@ -41,7 +41,7 @@ func NewTestClient(mockServer *testutil.MockServer) *Reddit {
 
 	return &Reddit{
 		httpClient: internalClient,
-		auth:       &testutil.MockTokenProvider{Token: "test_token"},
+		auth:       &testutil.MockTokenProvider{Token: "test_token", Expiry: time.Now().Add(1 * time.Hour)},
 		parser:     parse.NewParser(nil),
 		validator:  validator.NewValidator(),
 	}
@@ -112,7 +112,7 @@ func NewTestClientWithURL(baseURL string) *Reddit {
 
 	return &Reddit{
 		httpClient: internalClient,
-		auth:       &testutil.MockTokenProvider{Token: "test_token"},
+		auth:       &testutil.MockTokenProvider{Token: "test_token", Expiry: time.Now().Add(1 * time.Hour)},
 		parser:     parse.NewParser(nil),
 		validator:  validator.NewValidator(),
 	}
@@ -177,7 +177,7 @@ func NewTestClientWithRateLimit(baseURL string, rateLimitConfig RateLimitConfig)
 
 	return &Reddit{
 		httpClient: internalClient,
-		auth:       &testutil.MockTokenProvider{Token: "test_token"},
+		auth:       &testutil.MockTokenProvider{Token: "test_token", Expiry: time.Now().Add(1 * time.Hour)},
 		parser:     parse.NewParser(nil),
 		validator:  validator.NewValidator(),
 	}

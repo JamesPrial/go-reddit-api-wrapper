@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/fs"
 	"log/slog"
 	"os"
 	"os/user"
@@ -41,9 +40,13 @@ type MemoryCache struct {
 
 // NewMemoryCache creates a new memory-based token cache.
 // If clock is nil, a real clock will be used.
+// If logger is nil, a discard logger will be used.
 func NewMemoryCache(clk clock.Clock, logger *slog.Logger) *MemoryCache {
 	if clk == nil {
 		clk = clock.NewRealClock()
+	}
+	if logger == nil {
+		logger = slog.New(slog.DiscardHandler)
 	}
 	return &MemoryCache{clock: clk, logger: logger}
 	// Note: atomic.Pointer zero value is nil, no explicit initialization needed
@@ -151,6 +154,14 @@ func (f *FileCache) Set(ctx context.Context, token string, expiry time.Time) err
 	f.writeMu.Lock()
 	defer f.writeMu.Unlock()
 
+	// Check again after acquiring lock
+	if err := ctx.Err(); err != nil {
+		f.logger.LogAttrs(ctx, slog.LevelDebug, "context cancelled after acquiring write lock",
+			slog.String("error", err.Error()),
+			slog.String("request_id", reqid.FromContext(ctx)))
+		return &CacheError{Operation: "set", Err: err, RequestID: reqid.FromContext(ctx)}
+	}
+
 	f.logger.LogAttrs(ctx, slog.LevelDebug, "writeMu Acquired",
 		slog.String("request_id", reqid.FromContext(ctx)))
 	err := f.saveToFile(ctx)
@@ -182,6 +193,7 @@ func NewFileCache(ctx context.Context, filePath string, clk clock.Clock) (cache 
 	cache = &FileCache{
 		filePath: filePath,
 		clock:    clk,
+		logger:   slog.New(slog.DiscardHandler),
 	}
 
 	// Try to load existing token from file (non-fatal failure)
@@ -224,7 +236,14 @@ func (f *FileCache) Invalidate(ctx context.Context) error {
 //   - File permissions are secure (owned by current user, no world access)
 //   - File ownership is validated on Unix systems (Issue 1: File ownership validation)
 //
-// If any validation fails, the cache is treated as a miss.
+// Validation errors (expired token, empty token, parse errors) are treated as cache misses
+// and logged but not returned as errors.
+// Only truly fatal conditions return errors:
+//   - File stat fails (permission issues)
+//   - File has insecure permissions
+//   - File has wrong ownership
+//   - File read fails
+//
 // This method should only be called during initialization.
 func (f *FileCache) loadFromFile(ctx context.Context) (found bool, token string, expiry time.Time, err error) {
 	// Check if file exists
@@ -242,9 +261,9 @@ func (f *FileCache) loadFromFile(ctx context.Context) (found bool, token string,
 		slog.String("modTime", fileInfo.ModTime().String()),
 		slog.String("request_id", reqid.FromContext(ctx)))
 	// Validate file permissions (0600 = owner can read/write, no one else)
-	// Check that group and other bits are not set
-	if mode := fileInfo.Mode(); (mode & ^fs.FileMode(CACHE_FILE_PERMISSIONS)) != 0 {
-		return false, "", time.Time{}, &CacheError{Operation: "load", Path: f.filePath, Err: fmt.Errorf("cache file has insecure permissions: %o (expected 0600)", mode.Perm())}
+	// Only check permission bits (0777), not file type bits
+	if mode := fileInfo.Mode().Perm(); mode != CACHE_FILE_PERMISSIONS {
+		return false, "", time.Time{}, &CacheError{Operation: "load", Path: f.filePath, Err: fmt.Errorf("cache file has insecure permissions: %o (expected 0600)", mode)}
 	}
 
 	// Validate file ownership on Unix systems
@@ -284,20 +303,31 @@ func (f *FileCache) loadFromFile(ctx context.Context) (found bool, token string,
 		return false, "", time.Time{}, &CacheError{Operation: "load", Path: f.filePath, Err: fmt.Errorf("failed to read cache file: %w", err)}
 	}
 
-	// Parse JSON
+	// Parse JSON - treat parse errors as cache misses (non-fatal)
 	var cd oauthToken
 	if err := json.Unmarshal(data, &cd); err != nil {
-		return false, "", time.Time{}, &CacheError{Operation: "load", Path: f.filePath, Err: fmt.Errorf("failed to parse cache file: %w", err)}
+		f.logger.LogAttrs(ctx, slog.LevelDebug, "failed to parse cache file, treating as cache miss",
+			slog.String("error", err.Error()),
+			slog.String("path", f.filePath),
+			slog.String("request_id", reqid.FromContext(ctx)))
+		return false, "", time.Time{}, nil
 	}
 
-	// Validate token is not empty
+	// Validate token is not empty - treat as cache miss (non-fatal)
 	if cd.Token == "" {
-		return false, "", time.Time{}, &CacheError{Operation: "load", Path: f.filePath, Err: fmt.Errorf("cached token is empty")}
+		f.logger.LogAttrs(ctx, slog.LevelDebug, "cached token is empty, treating as cache miss",
+			slog.String("path", f.filePath),
+			slog.String("request_id", reqid.FromContext(ctx)))
+		return false, "", time.Time{}, nil
 	}
 
-	// Validate token has not expired
+	// Validate token has not expired - treat as cache miss (non-fatal)
 	if f.clock.Now().After(cd.Expiry) {
-		return false, "", time.Time{}, &CacheError{Operation: "load", Path: f.filePath, Err: fmt.Errorf("cached token has expired")}
+		f.logger.LogAttrs(ctx, slog.LevelDebug, "cached token has expired, treating as cache miss",
+			slog.String("path", f.filePath),
+			slog.String("expiry", cd.Expiry.String()),
+			slog.String("request_id", reqid.FromContext(ctx)))
+		return false, "", time.Time{}, nil
 	}
 
 	// Load into cache

@@ -237,7 +237,7 @@ type Parser interface {
 type TokenCache interface {
 	// Get retrieves a cached token if it exists and has not expired, nil if not found.
 	// Returns the token if found, nil if not found, and any error if the operation fails.
-	Get(ctx context.Context) (string, time.Time, bool, error)
+	Get(ctx context.Context) (token string, expiry time.Time, found bool, err error)
 
 	// Set stores a token with its expiry time.
 	// The context can be used for cancellation during persistence operations.
@@ -266,6 +266,7 @@ type Reddit struct {
 	config     *Config
 	parser     Parser
 	validator  Validator
+	tokenCache TokenCache
 }
 
 // NewClient creates a new Reddit client with the provided configuration.
@@ -331,22 +332,18 @@ func NewClientWithContext(ctx context.Context, config *Config) (*Reddit, error) 
 		return nil, translateValidationError(err)
 	}
 
-	// Create token cache based`` on config
 	var tokenCache TokenCache
+	var found bool
+	var token string
+	var expiry time.Time
 	if config.TokenCachePath != "" {
-		var cacheErr error
-		tokenCache, cacheErr = cache.NewFileCache(config.TokenCachePath, nil)
-		if cacheErr != nil {
-			// Log warning but continue with memory cache
-			if config.Logger != nil {
-				config.Logger.LogAttrs(ctx, slog.LevelWarn, "failed to create file cache, using memory cache",
-					slog.String("path", config.TokenCachePath),
-					slog.String("error", cacheErr.Error()))
-			}
-			tokenCache = cache.NewMemoryCache(nil)
+		tokenCache, found, token, expiry, err = cache.NewFileCache(ctx, config.TokenCachePath, nil)
+		if err != nil {
+			return nil, &ConfigError{Field: "TokenCachePath", Message: fmt.Sprintf("failed to create file cache: %v", err)}
 		}
+
 	} else {
-		tokenCache = cache.NewMemoryCache(nil)
+		tokenCache = cache.NewMemoryCache(nil, config.Logger)
 	}
 
 	// Create authenticator
@@ -371,24 +368,18 @@ func NewClientWithContext(ctx context.Context, config *Config) (*Reddit, error) 
 		return nil, &AuthError{Message: "failed to create authenticator", Err: err}
 	}
 
-	token, expiry, found, err := tokenCache.Get(ctx)
+	token, expiry, found, err = tokenCache.Get(ctx)
 	if err != nil {
-		return nil, &ConfigError{Message: "failed to get token from cache"}
+		return nil, &ConfigError{Field: "TokenCachePath", Message: fmt.Sprintf("failed to get token from cache: %v", err)}
 	}
 	if found && expiry.After(time.Now()) || !found {
 		token, expiry, err = authenticator.GetToken(ctx)
 		if err != nil {
-			return nil, &AuthError{Message: "failed to get token from cache"}
+			return nil, &AuthError{Message: "failed to authenticate", Err: err}
 		}
 		if err := tokenCache.Set(ctx, token, expiry); err != nil {
-			return nil, &ConfigError{Message: "failed to set token in cache"}
+			return nil, &ConfigError{Field: "TokenCachePath", Message: fmt.Sprintf("failed to set token in cache: %v", err)}
 		}
-	}
-
-	// Validate that we can get a token before creating the client
-	_, _, err = authenticator.GetToken(ctx)
-	if err != nil {
-		return nil, &AuthError{Message: "failed to authenticate", Err: err}
 	}
 
 	// Create internal HTTP client
@@ -1078,6 +1069,8 @@ func buildPaginationParams(pagination *types.Pagination) url.Values {
 // addAuthHeaders adds authentication headers to a request.
 // This is called internally before each API request.
 func (r *Reddit) addAuthHeaders(ctx context.Context, req *http.Request) error {
+	token, expiry, found, err := r.tokenCache.Get(ctx)
+	token, expiry, err := r.auth.GetToken(ctx)
 	token, err := r.auth.GetToken(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to get auth token: %w", err)

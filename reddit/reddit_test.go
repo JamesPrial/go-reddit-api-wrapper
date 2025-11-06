@@ -18,6 +18,7 @@ import (
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/client"
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/parse"
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/cache"
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/validator"
 )
 
@@ -61,26 +62,6 @@ func (m *mockHTTPClient) DoMoreChildren(req *http.Request) ([]*types.Thing, erro
 	return nil, nil
 }
 
-// mockTokenProvider implements the TokenProvider interface for testing
-type mockTokenProvider struct {
-	token           string
-	err             error
-	getCalls        atomic.Int32
-	invalidateCalls atomic.Int32
-}
-
-func (m *mockTokenProvider) GetToken(ctx context.Context) (string, error) {
-	m.getCalls.Add(1)
-	if m.err != nil {
-		return "", m.err
-	}
-	return m.token, nil
-}
-
-func (m *mockTokenProvider) InvalidateToken(ctx context.Context) {
-	m.invalidateCalls.Add(1)
-}
-
 type stubParser struct {
 	parseThingFunc             func(ctx context.Context, thing *types.Thing) (any, error)
 	extractPostsFunc           func(ctx context.Context, thing *types.Thing) ([]*types.Post, error)
@@ -115,6 +96,7 @@ func newTestClient(httpClient HTTPClient, auth TokenProvider) *Reddit {
 	return &Reddit{
 		httpClient: httpClient,
 		auth:       auth,
+		cache:      cache.NewMemoryCache(nil, nil),
 		config: &Config{
 			UserAgent: "test/1.0",
 			BaseURL:   "https://oauth.reddit.com/",
@@ -415,10 +397,7 @@ func TestGetHot_RetryOnUnauthorized(t *testing.T) {
 	if got := doCalls.Load(); got != 2 {
 		t.Fatalf("expected 2 Do calls, got %d", got)
 	}
-	if got := tp.invalidateCalls.Load(); got != 1 {
-		t.Fatalf("expected token to be invalidated once, got %d", got)
-	}
-	if got := tp.getCalls.Load(); got < 2 {
+if got := tp.getCalls.Load(); got < 2 {
 		t.Fatalf("expected GetToken called at least twice, got %d", got)
 	}
 }
@@ -460,10 +439,7 @@ func TestGetComments_RetryOnUnauthorized(t *testing.T) {
 	if got := doCalls.Load(); got != 2 {
 		t.Fatalf("expected 2 DoThingArray calls, got %d", got)
 	}
-	if got := tp.invalidateCalls.Load(); got != 1 {
-		t.Fatalf("expected token to be invalidated once, got %d", got)
-	}
-	if got := tp.getCalls.Load(); got < 2 {
+if got := tp.getCalls.Load(); got < 2 {
 		t.Fatalf("expected GetToken called at least twice, got %d", got)
 	}
 }
@@ -527,10 +503,7 @@ func TestGetMoreComments_RetryOnUnauthorized(t *testing.T) {
 	if got := doCalls.Load(); got != 2 {
 		t.Fatalf("expected 2 DoMoreChildren calls, got %d", got)
 	}
-	if got := tp.invalidateCalls.Load(); got != 1 {
-		t.Fatalf("expected token to be invalidated once, got %d", got)
-	}
-	if got := tp.getCalls.Load(); got < 2 {
+if got := tp.getCalls.Load(); got < 2 {
 		t.Fatalf("expected GetToken called at least twice, got %d", got)
 	}
 }
