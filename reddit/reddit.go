@@ -38,6 +38,7 @@ import (
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/reqid"
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/auth"
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/cache"
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/client"
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/parse"
 	validatorpkg "github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/validator"
@@ -154,6 +155,11 @@ type Config struct {
 	// Optional. If not specified, defaults to 100 requests/minute with burst of 10.
 	// Set RequestsPerMinute to a very high value (e.g., 100000) to effectively disable rate limiting for tests.
 	RateLimitConfig *RateLimitConfig
+
+	// TokenCachePath specifies where to persist OAuth tokens.
+	// If empty, tokens are cached in-memory only (default).
+	// Example: "/home/user/.cache/reddit-api/token.json"
+	TokenCachePath string
 }
 
 // TokenProvider defines the interface for retrieving an access token.
@@ -162,11 +168,7 @@ type Config struct {
 type TokenProvider interface {
 	// GetToken returns a valid access token for making authenticated requests.
 	// It should handle token refresh automatically if the token is expired.
-	GetToken(ctx context.Context) (string, error)
-
-	// InvalidateToken clears any cached token, forcing a fresh token fetch on next GetToken call.
-	// This is useful when a token has been revoked or is known to be invalid.
-	InvalidateToken()
+	GetToken(ctx context.Context) (string, time.Time, error)
 }
 
 // HTTPClient defines the behavior required from the internal HTTP client.
@@ -232,6 +234,19 @@ type Parser interface {
 	ExtractPostAndComments(ctx context.Context, things []*types.Thing) (*types.CommentsResponse, error)
 }
 
+type TokenCache interface {
+	// Get retrieves a cached token if it exists and has not expired, nil if not found.
+	// Returns the token if found, nil if not found, and any error if the operation fails.
+	Get(ctx context.Context) (token string, expiry time.Time, found bool, err error)
+
+	// Set stores a token with its expiry time.
+	// The context can be used for cancellation during persistence operations.
+	Set(ctx context.Context, token string, expiry time.Time) error
+
+	// Invalidate clears the cached token, forcing a fresh token fetch on next Get.
+	Invalidate(ctx context.Context) error
+}
+
 // Reddit is the main Reddit API client.
 // It provides methods for common Reddit operations like fetching posts, comments,
 // and subreddit information. The client is ready to use immediately after creation.
@@ -251,6 +266,7 @@ type Reddit struct {
 	config     *Config
 	parser     Parser
 	validator  Validator
+	tokenCache TokenCache
 }
 
 // NewClient creates a new Reddit client with the provided configuration.
@@ -316,6 +332,20 @@ func NewClientWithContext(ctx context.Context, config *Config) (*Reddit, error) 
 		return nil, translateValidationError(err)
 	}
 
+	var tokenCache TokenCache
+	var found bool
+	var token string
+	var expiry time.Time
+	if config.TokenCachePath != "" {
+		tokenCache, found, token, expiry, err = cache.NewFileCache(ctx, config.TokenCachePath, nil)
+		if err != nil {
+			return nil, &ConfigError{Field: "TokenCachePath", Message: fmt.Sprintf("failed to create file cache: %v", err)}
+		}
+
+	} else {
+		tokenCache = cache.NewMemoryCache(nil, config.Logger)
+	}
+
 	// Create authenticator
 	grantType := "client_credentials" // Default to app-only auth
 	if config.Username != "" && config.Password != "" {
@@ -338,10 +368,18 @@ func NewClientWithContext(ctx context.Context, config *Config) (*Reddit, error) 
 		return nil, &AuthError{Message: "failed to create authenticator", Err: err}
 	}
 
-	// Validate that we can get a token before creating the client
-	_, err = authenticator.GetToken(ctx)
+	token, expiry, found, err = tokenCache.Get(ctx)
 	if err != nil {
-		return nil, &AuthError{Message: "failed to authenticate", Err: err}
+		return nil, &ConfigError{Field: "TokenCachePath", Message: fmt.Sprintf("failed to get token from cache: %v", err)}
+	}
+	if found && expiry.After(time.Now()) || !found {
+		token, expiry, err = authenticator.GetToken(ctx)
+		if err != nil {
+			return nil, &AuthError{Message: "failed to authenticate", Err: err}
+		}
+		if err := tokenCache.Set(ctx, token, expiry); err != nil {
+			return nil, &ConfigError{Field: "TokenCachePath", Message: fmt.Sprintf("failed to set token in cache: %v", err)}
+		}
 	}
 
 	// Create internal HTTP client
@@ -382,6 +420,7 @@ func NewClientWithContext(ctx context.Context, config *Config) (*Reddit, error) 
 		config:     config,
 		parser:     parse.NewParser(config.Logger),
 		validator:  validatorpkg.NewValidator(),
+		tokenCache: tokenCache,
 	}, nil
 }
 
@@ -414,7 +453,7 @@ func (r *Reddit) Me(ctx context.Context) (*types.AccountData, error) {
 	err = r.httpClient.Do(req, &result)
 	if err != nil {
 		// Check if this is a 401 error, invalidate token and retry once
-		if r.handleAuthError(err) {
+		if r.handleAuthErrorWithContext(ctx, err) {
 			// Token invalidated, recreate request with fresh token
 			req, err = r.httpClient.NewRequest(ctx, http.MethodGet, MeURL, nil)
 			if err != nil {
@@ -487,7 +526,7 @@ func (r *Reddit) GetSubreddit(ctx context.Context, name string) (*types.Subreddi
 	err = r.httpClient.Do(req, &result)
 	if err != nil {
 		// Check if this is a 401 error, invalidate token and retry once
-		if r.handleAuthError(err) {
+		if r.handleAuthErrorWithContext(ctx, err) {
 			// Token invalidated, recreate request with fresh token
 			req, err = r.httpClient.NewRequest(ctx, http.MethodGet, path, nil)
 			if err != nil {
@@ -594,7 +633,7 @@ func (r *Reddit) getPosts(ctx context.Context, request *types.PostsRequest, sort
 	var result types.Thing
 	err = r.httpClient.Do(httpReq, &result)
 	if err != nil {
-		if r.handleAuthError(err) {
+		if r.handleAuthErrorWithContext(ctx, err) {
 			httpReq, reqErr := r.httpClient.NewRequest(ctx, http.MethodGet, path, nil, params)
 			if reqErr != nil {
 				return nil, wrapDoError(reqErr, "create request", path)
@@ -692,7 +731,7 @@ func (r *Reddit) GetComments(ctx context.Context, request *types.CommentsRequest
 
 	result, err := r.httpClient.DoThingArray(httpReq)
 	if err != nil {
-		if r.handleAuthError(err) {
+		if r.handleAuthErrorWithContext(ctx, err) {
 			httpReq, reqErr := r.httpClient.NewRequest(ctx, http.MethodGet, path, nil, params)
 			if reqErr != nil {
 				return nil, wrapDoError(reqErr, "create request", path)
@@ -962,7 +1001,7 @@ func (r *Reddit) GetMoreComments(ctx context.Context, request *types.MoreComment
 	// Make authenticated request to morechildren endpoint
 	things, err := r.httpClient.DoMoreChildren(req)
 	if err != nil {
-		if r.handleAuthError(err) {
+		if r.handleAuthErrorWithContext(ctx, err) {
 			req, reqErr := r.httpClient.NewRequest(ctx, http.MethodPost, MoreChildrenURL, strings.NewReader(payload))
 			if reqErr != nil {
 				return nil, wrapDoError(reqErr, "create request", MoreChildrenURL)
@@ -1031,9 +1070,18 @@ func buildPaginationParams(pagination *types.Pagination) url.Values {
 // addAuthHeaders adds authentication headers to a request.
 // This is called internally before each API request.
 func (r *Reddit) addAuthHeaders(ctx context.Context, req *http.Request) error {
-	token, err := r.auth.GetToken(ctx)
+	token, expiry, found, err := r.tokenCache.Get(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to get auth token: %w", err)
+		return fmt.Errorf("failed to get token from cache: %w", err)
+	}
+	if !found || expiry.Before(time.Now()) {
+		token, expiry, err = r.auth.GetToken(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to get auth token: %w", err)
+		}
+		if err := r.tokenCache.Set(ctx, token, expiry); err != nil {
+			return fmt.Errorf("failed to set token in cache: %w", err)
+		}
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	return nil
@@ -1043,6 +1091,14 @@ func (r *Reddit) addAuthHeaders(ctx context.Context, req *http.Request) error {
 // Returns true if the error was a 401 and the token was invalidated, signaling that a retry may succeed.
 // Returns false if the error was not auth-related or if retry is not recommended.
 func (r *Reddit) handleAuthError(err error) bool {
+	return r.handleAuthErrorWithContext(context.Background(), err)
+}
+
+// handleAuthErrorWithContext detects 401 Unauthorized errors and invalidates the cached token.
+// It accepts a context for request tracing.
+// Returns true if the error was a 401 and the token was invalidated, signaling that a retry may succeed.
+// Returns false if the error was not auth-related or if retry is not recommended.
+func (r *Reddit) handleAuthErrorWithContext(ctx context.Context, err error) bool {
 	if err == nil {
 		return false
 	}
@@ -1050,8 +1106,11 @@ func (r *Reddit) handleAuthError(err error) bool {
 	// Check if this is a 401 Unauthorized error
 	if apiErr, ok := mapAPIError(err); ok {
 		if apiErr.StatusCode == http.StatusUnauthorized {
-			// Token is invalid, clear the cache
-			r.auth.InvalidateToken()
+			if err := r.tokenCache.Invalidate(ctx); err != nil {
+				r.config.Logger.LogAttrs(ctx, slog.LevelError, "failed to invalidate token cache",
+					slog.String("error", err.Error()),
+					slog.String("request_id", reqid.FromContext(ctx)))
+			}
 			return true
 		}
 	}

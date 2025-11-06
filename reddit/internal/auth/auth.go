@@ -9,8 +9,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/reqid"
@@ -24,12 +22,6 @@ const (
 	maxTokenExpirySeconds = 365 * 24 * 60 * 60 // 1 year in seconds
 )
 
-// tokenCache holds cached token data immutably
-type tokenCache struct {
-	token  string
-	expiry time.Time
-}
-
 // Authenticator handles retrieving an access token from the Reddit API.
 type Authenticator struct {
 	client       *http.Client
@@ -42,10 +34,6 @@ type Authenticator struct {
 	logger       *slog.Logger
 	clock        clock.Clock // Time abstraction for testing
 
-	// Token cache using atomic pointer for lock-free reads
-	cachedToken atomic.Pointer[tokenCache]
-	// Mutex to prevent concurrent token refreshes
-	tokenMu sync.Mutex
 }
 
 // NewAuthenticator creates a new authenticator.
@@ -102,54 +90,16 @@ type tokenResponse struct {
 }
 
 // GetToken performs the password grant flow to get an access token.
-func (a *Authenticator) GetToken(ctx context.Context) (string, error) {
+func (a *Authenticator) GetToken(ctx context.Context) (string, time.Time, error) {
 	// Extract request ID at method entry for tracing
 	requestID := reqid.FromContext(ctx)
-
-	// Check cache first - lock-free read
-	if cached := a.cachedToken.Load(); cached != nil {
-		// Capture the current time once for consistent comparison
-		now := a.clock.Now()
-		if now.Before(cached.expiry) {
-			if a.logger != nil {
-				attrs := []slog.Attr{slog.Time("expires_at", cached.expiry)}
-				if requestID != "" {
-					attrs = append(attrs, slog.String("request_id", requestID))
-				}
-				a.logger.LogAttrs(ctx, slog.LevelDebug, "using cached reddit token", attrs...)
-			}
-			return cached.token, nil
-		}
-	}
-
-	// Cache miss or expired, need to refresh
-	// Use mutex to prevent concurrent refreshes
-	a.tokenMu.Lock()
-	defer a.tokenMu.Unlock()
-
-	// Double-check cache after acquiring lock - another goroutine might have refreshed
-	if cached := a.cachedToken.Load(); cached != nil {
-		now := a.clock.Now()
-		if now.Before(cached.expiry) {
-			if a.logger != nil {
-				attrs := []slog.Attr{slog.Time("expires_at", cached.expiry)}
-				if requestID != "" {
-					attrs = append(attrs, slog.String("request_id", requestID))
-				}
-				a.logger.LogAttrs(ctx, slog.LevelDebug, "using cached reddit token (after lock)", attrs...)
-			}
-			return cached.token, nil
-		}
-	}
-
-	// Definitely need to fetch new token
 	data := a.formData.Encode()
 	start := a.clock.Now()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.tokenURL.String(), strings.NewReader(data))
 	if err != nil {
 		a.logAuthError(ctx, requestID, "failed to create token request", err)
-		return "", &TokenError{Operation: "fetch", RequestID: requestID, Err: err}
+		return "", time.Time{}, &TokenError{Operation: "fetch", RequestID: requestID, Err: err}
 	}
 
 	req.SetBasicAuth(a.clientID, a.clientSecret)
@@ -161,7 +111,7 @@ func (a *Authenticator) GetToken(ctx context.Context) (string, error) {
 	resp, err := a.client.Do(req)
 	if err != nil {
 		a.logAuthError(ctx, requestID, "failed to execute token request", err)
-		return "", &TokenError{Operation: "fetch", RequestID: requestID, Err: err}
+		return "", time.Time{}, &TokenError{Operation: "fetch", RequestID: requestID, Err: err}
 	}
 	defer resp.Body.Close()
 
@@ -170,7 +120,7 @@ func (a *Authenticator) GetToken(ctx context.Context) (string, error) {
 	bodyBytes, err := io.ReadAll(limitedReader)
 	if err != nil {
 		a.logAuthError(ctx, requestID, "failed to read token response", err)
-		return "", &TokenError{Operation: "fetch", HTTPStatus: resp.StatusCode, RequestID: requestID, Err: err}
+		return "", time.Time{}, &TokenError{Operation: "fetch", HTTPStatus: resp.StatusCode, RequestID: requestID, Err: err}
 	}
 	// Check if we hit the size limit
 	if int64(len(bodyBytes)) == maxResponseBodySize {
@@ -179,7 +129,7 @@ func (a *Authenticator) GetToken(ctx context.Context) (string, error) {
 		if n, _ := resp.Body.Read(extraByte[:]); n > 0 {
 			err := fmt.Errorf("response body exceeded max size of %d bytes", maxResponseBodySize)
 			a.logAuthError(ctx, requestID, "response body too large", err)
-			return "", &TokenError{Operation: "fetch", HTTPStatus: resp.StatusCode, Body: string(bodyBytes[:1000]), RequestID: requestID, Err: err}
+			return "", time.Time{}, &TokenError{Operation: "fetch", HTTPStatus: resp.StatusCode, Body: string(bodyBytes[:1000]), RequestID: requestID, Err: err}
 		}
 	}
 
@@ -187,19 +137,19 @@ func (a *Authenticator) GetToken(ctx context.Context) (string, error) {
 	a.logAuthHTTPResult(ctx, requestID, resp.StatusCode, duration, bodyBytes)
 
 	if resp.StatusCode != http.StatusOK {
-		return "", &TokenError{Operation: "fetch", HTTPStatus: resp.StatusCode, Body: string(bodyBytes), RequestID: requestID}
+		return "", time.Time{}, &TokenError{Operation: "fetch", HTTPStatus: resp.StatusCode, Body: string(bodyBytes), RequestID: requestID}
 	}
 
 	var tokenResp tokenResponse
 	if err := json.Unmarshal(bodyBytes, &tokenResp); err != nil {
 		a.logAuthError(ctx, requestID, "failed to decode token response", err)
-		return "", &TokenError{Operation: "fetch", HTTPStatus: resp.StatusCode, Body: string(bodyBytes), RequestID: requestID, Err: err}
+		return "", time.Time{}, &TokenError{Operation: "fetch", HTTPStatus: resp.StatusCode, Body: string(bodyBytes), RequestID: requestID, Err: err}
 	}
 
 	if tokenResp.AccessToken == "" {
 		err := fmt.Errorf("access token was empty in response")
 		a.logAuthError(ctx, requestID, "received empty access token", err)
-		return "", &TokenError{Operation: "fetch", HTTPStatus: resp.StatusCode, Body: string(bodyBytes), RequestID: requestID, Err: err}
+		return "", time.Time{}, &TokenError{Operation: "fetch", HTTPStatus: resp.StatusCode, Body: string(bodyBytes), RequestID: requestID, Err: err}
 	}
 
 	// Validate ExpiresIn bounds to prevent integer overflow and invalid values
@@ -207,48 +157,23 @@ func (a *Authenticator) GetToken(ctx context.Context) (string, error) {
 	if tokenResp.ExpiresIn < 0 {
 		err := fmt.Errorf("invalid expires_in value: %d (cannot be negative)", tokenResp.ExpiresIn)
 		a.logAuthError(ctx, requestID, "received negative expires_in", err)
-		return "", &TokenError{Operation: "fetch", HTTPStatus: resp.StatusCode, Body: string(bodyBytes), RequestID: requestID, Err: err}
+		return "", time.Time{}, &TokenError{Operation: "fetch", HTTPStatus: resp.StatusCode, Body: string(bodyBytes), RequestID: requestID, Err: err}
 	}
 	if tokenResp.ExpiresIn > maxTokenExpirySeconds {
 		err := fmt.Errorf("invalid expires_in value: %d (exceeds maximum of %d seconds)", tokenResp.ExpiresIn, maxTokenExpirySeconds)
 		a.logAuthError(ctx, requestID, "received expires_in exceeding maximum", err)
-		return "", &TokenError{Operation: "fetch", HTTPStatus: resp.StatusCode, Body: string(bodyBytes), RequestID: requestID, Err: err}
+		return "", time.Time{}, &TokenError{Operation: "fetch", HTTPStatus: resp.StatusCode, Body: string(bodyBytes), RequestID: requestID, Err: err}
 	}
 
 	// Cache the token with tiered expiry thresholds based on token lifetime
 	// This ensures tokens refresh proactively before they actually expire
 	actualExpiry := time.Duration(tokenResp.ExpiresIn) * time.Second
-	var cacheRatio float64
 
-	// Tiered thresholds for different token lifetimes:
-	if actualExpiry > 60*time.Second {
-		// Long-lived tokens (>60s): 80% threshold (refresh with 20% lifetime remaining)
-		cacheRatio = 0.80
-	} else if actualExpiry >= 10*time.Second {
-		// Medium-lived tokens (10-60s): 50% threshold (refresh at half-life)
-		cacheRatio = 0.50
-	} else {
-		// Very short-lived tokens (<10s): 90% threshold (minimal margin)
-		cacheRatio = 0.90
-	}
-
-	expiryDuration := time.Duration(float64(actualExpiry) * cacheRatio)
-
-	a.cachedToken.Store(&tokenCache{
-		token:  tokenResp.AccessToken,
-		expiry: a.clock.Now().Add(expiryDuration),
-	})
+	expiry := a.clock.Now().Add(actualExpiry)
 
 	a.logAuthSuccess(ctx, requestID, duration, tokenResp)
 
-	return tokenResp.AccessToken, nil
-}
-
-// InvalidateToken clears the cached token, forcing a fresh token fetch on next GetToken call
-func (a *Authenticator) InvalidateToken() {
-	a.tokenMu.Lock()
-	defer a.tokenMu.Unlock()
-	a.cachedToken.Store(nil)
+	return tokenResp.AccessToken, expiry, nil
 }
 
 func (a *Authenticator) logAuthRequest(ctx context.Context) {

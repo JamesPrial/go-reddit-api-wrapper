@@ -12,7 +12,9 @@ import (
 	"time"
 
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/cache"
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/client"
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/clock"
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/parse"
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/testutil"
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/validator"
@@ -84,11 +86,13 @@ func TestRedditAPIClientUsage(t *testing.T) {
 	internalClient, err := client.NewClient(httpClient, server.URL(), "test/1.0", nil)
 	testutil.AssertNoError(t, err)
 
+	mockClock := clock.NewMockClock(time.Time{})
 	client := &Reddit{
 		httpClient: internalClient,
 		parser:     parse.NewParser(nil),
 		validator:  validator.NewValidator(),
 		auth:       &mockTokenProvider{token: "test_token"},
+		tokenCache: cache.NewMemoryCache(mockClock, nil),
 	}
 
 	ctx := context.Background()
@@ -268,11 +272,13 @@ func TestErrorHandlingInRealWorld(t *testing.T) {
 	internalClient, err := client.NewClient(httpClient, server.URL, "test/1.0", nil)
 	testutil.AssertNoError(t, err)
 
+	mockClock := clock.NewMockClock(time.Time{})
 	client := &Reddit{
 		httpClient: internalClient,
 		parser:     parse.NewParser(nil),
 		validator:  validator.NewValidator(),
 		auth:       &mockTokenProvider{token: "test_token"},
+		tokenCache: cache.NewMemoryCache(mockClock, nil),
 	}
 
 	ctx := context.Background()
@@ -354,11 +360,13 @@ func TestConcurrentRealWorldUsage(t *testing.T) {
 	internalClient, err := client.NewClient(httpClient, server.URL(), "test/1.0", nil)
 	testutil.AssertNoError(t, err)
 
+	mockClock := clock.NewMockClock(time.Time{})
 	client := &Reddit{
 		httpClient: internalClient,
 		parser:     parse.NewParser(nil),
 		validator:  validator.NewValidator(),
 		auth:       &mockTokenProvider{token: "test_token"},
+		tokenCache: cache.NewMemoryCache(mockClock, nil),
 	}
 
 	ctx := context.Background()
@@ -455,11 +463,13 @@ func TestLongRunningOperations(t *testing.T) {
 	internalClient, err := client.NewClient(httpClient, server.URL(), "test/1.0", nil)
 	testutil.AssertNoError(t, err)
 
+	mockClock := clock.NewMockClock(time.Time{})
 	client := &Reddit{
 		httpClient: internalClient,
 		parser:     parse.NewParser(nil),
 		validator:  validator.NewValidator(),
 		auth:       &mockTokenProvider{token: "test_token"},
+		tokenCache: cache.NewMemoryCache(mockClock, nil),
 	}
 
 	ctx := context.Background()

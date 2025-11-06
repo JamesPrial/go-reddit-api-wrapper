@@ -440,7 +440,7 @@ func TestAuthenticator_GetToken(t *testing.T) {
 			)
 			testutil.AssertNoError(t, err)
 
-			token, err := a.GetToken(context.Background())
+			token, _, err := a.GetToken(context.Background())
 
 			if tt.wantErr {
 				testutil.AssertError(t, err)
@@ -470,7 +470,7 @@ func TestAuthenticator_GetToken(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel() // Cancel context immediately
 
-		_, err = a.GetToken(ctx)
+		_, _, err = a.GetToken(ctx)
 		testutil.AssertError(t, err)
 
 		if !errors.Is(err, context.Canceled) {

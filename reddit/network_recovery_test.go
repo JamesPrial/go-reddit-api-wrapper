@@ -12,6 +12,7 @@ import (
 	"time"
 
 	httpclient "github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/client"
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/cache"
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/parse"
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/testutil"
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/validator"
@@ -58,6 +59,7 @@ func TestNetworkTimeoutRecovery(t *testing.T) {
 		parser:     parse.NewParser(nil),
 		validator:  validator.NewValidator(),
 		auth:       &mockTokenProvider{token: "test_token"},
+		tokenCache: cache.NewMemoryCache(nil, nil),
 	}
 
 	ctx := context.Background()
@@ -79,6 +81,7 @@ func TestNetworkTimeoutRecovery(t *testing.T) {
 		parser:     parse.NewParser(nil),
 		validator:  validator.NewValidator(),
 		auth:       &mockTokenProvider{token: "test_token"},
+		tokenCache: cache.NewMemoryCache(nil, nil),
 	}
 
 	// Second request should succeed
@@ -118,6 +121,7 @@ func TestConnectionRefusedRecovery(t *testing.T) {
 		parser:     parse.NewParser(nil),
 		validator:  validator.NewValidator(),
 		auth:       &mockTokenProvider{token: "test_token"},
+		tokenCache: cache.NewMemoryCache(nil, nil),
 	}
 
 	ctx := context.Background()
@@ -149,6 +153,7 @@ func TestConnectionRefusedRecovery(t *testing.T) {
 		parser:     parse.NewParser(nil),
 		validator:  validator.NewValidator(),
 		auth:       &mockTokenProvider{token: "test_token"},
+		tokenCache: cache.NewMemoryCache(nil, nil),
 	}
 
 	// Recovery request should succeed
@@ -174,6 +179,7 @@ func TestDNSFailureRecovery(t *testing.T) {
 		parser:     parse.NewParser(nil),
 		validator:  validator.NewValidator(),
 		auth:       &mockTokenProvider{token: "test_token"},
+		tokenCache: cache.NewMemoryCache(nil, nil),
 	}
 
 	ctx := context.Background()
@@ -208,6 +214,7 @@ func TestDNSFailureRecovery(t *testing.T) {
 		parser:     parse.NewParser(nil),
 		validator:  validator.NewValidator(),
 		auth:       &mockTokenProvider{token: "test_token"},
+		tokenCache: cache.NewMemoryCache(nil, nil),
 	}
 
 	// Recovery request should succeed
@@ -258,6 +265,7 @@ func TestHTTP5xxErrorRecovery(t *testing.T) {
 		parser:     parse.NewParser(nil),
 		validator:  validator.NewValidator(),
 		auth:       &mockTokenProvider{token: "test_token"},
+		tokenCache: cache.NewMemoryCache(nil, nil),
 	}
 
 	ctx := context.Background()
@@ -327,6 +335,7 @@ func TestHTTP429RateLimitRecovery(t *testing.T) {
 		parser:     parse.NewParser(nil),
 		validator:  validator.NewValidator(),
 		auth:       &mockTokenProvider{token: "test_token"},
+		tokenCache: cache.NewMemoryCache(nil, nil),
 	}
 
 	ctx := context.Background()
@@ -402,6 +411,7 @@ func TestPartialResponseRecovery(t *testing.T) {
 		parser:     parse.NewParser(nil),
 		validator:  validator.NewValidator(),
 		auth:       &mockTokenProvider{token: "test_token"},
+		tokenCache: cache.NewMemoryCache(nil, nil),
 	}
 
 	ctx := context.Background()
@@ -467,6 +477,7 @@ func TestIntermittentNetworkFailure(t *testing.T) {
 		parser:     parse.NewParser(nil),
 		validator:  validator.NewValidator(),
 		auth:       &mockTokenProvider{token: "test_token"},
+		tokenCache: cache.NewMemoryCache(nil, nil),
 	}
 
 	ctx := context.Background()
@@ -544,6 +555,7 @@ func TestNetworkRecoveryWithRetry(t *testing.T) {
 		parser:     parse.NewParser(nil),
 		validator:  validator.NewValidator(),
 		auth:       &mockTokenProvider{token: "test_token"},
+		tokenCache: cache.NewMemoryCache(nil, nil),
 	}
 
 	ctx := context.Background()
@@ -596,6 +608,7 @@ func TestContextCancellationDuringRecovery(t *testing.T) {
 		parser:     parse.NewParser(nil),
 		validator:  validator.NewValidator(),
 		auth:       &testutil.MockTokenProvider{Token: "test_token"},
+		tokenCache: cache.NewMemoryCache(nil, nil),
 	}
 
 	// Create context that cancels after 200ms

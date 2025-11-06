@@ -1,8 +1,10 @@
 package testutil
 
 import (
+	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 )
@@ -207,28 +209,31 @@ func TestDefaultAccount(t *testing.T) {
 // TestMockTokenProvider verifies MockTokenProvider implementation
 func TestMockTokenProvider(t *testing.T) {
 	// Test successful token retrieval
-	mock := &MockTokenProvider{Token: "test-token"}
-	token, err := mock.GetToken(nil)
+	mock := &MockTokenProvider{Token: "test-token", Expiry: time.Now().Add(1 * time.Hour)}
+	token, expiry, err := mock.GetToken(context.Background())
 
 	AssertNoError(t, err)
 	if token != "test-token" {
 		t.Errorf("Expected token 'test-token', got %q", token)
 	}
+	if expiry.IsZero() {
+		t.Errorf("Expected non-zero expiry time, got zero")
+	}
 
 	// Test error case
 	mockErr := &MockTokenProvider{Err: errors.New("auth failed")}
-	_, err = mockErr.GetToken(nil)
+	_, _, err = mockErr.GetToken(context.Background())
 
 	AssertError(t, err)
 	AssertStringContains(t, err.Error(), "auth failed")
 
 	// Test InvalidateToken tracking
-	mock.InvalidateToken()
+	mock.InvalidateToken(context.Background())
 	if mock.InvalidateCount != 1 {
 		t.Errorf("Expected InvalidateCount 1, got %d", mock.InvalidateCount)
 	}
 
-	mock.InvalidateToken()
+	mock.InvalidateToken(context.Background())
 	if mock.InvalidateCount != 2 {
 		t.Errorf("Expected InvalidateCount 2, got %d", mock.InvalidateCount)
 	}
