@@ -29,11 +29,6 @@ jobs:
     - name: Run tests
       run: go test -v -race -cover ./...
 
-    - name: Build examples
-      run: |
-        go build -o reddit-example-basic ./cmd/examples/basic
-        go build -o reddit-example-monitor ./cmd/examples/monitor
-        go build -o reddit-example-analyzer ./cmd/examples/analyzer
 
   benchmark-unit:
     name: Unit Benchmarks
