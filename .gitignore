@@ -48,6 +48,10 @@ example_binary
 reddit-example
 example
 
+# Server binaries
+reddit-server
+/server
+
 # Frontend server binaries
 frontend/server/reddit-server
 frontend/server/reddit-auth-server

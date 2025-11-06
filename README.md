@@ -86,6 +86,180 @@ config := &graw.Config{
 }
 ```
 
+## HTTP API Server
+
+This package includes a standalone HTTP API server that exposes Reddit API functionality through REST endpoints. Perfect for building web applications or microservices.
+
+### Quick Start
+
+```bash
+# Build the server
+go build -o reddit-server ./cmd/server/
+
+# Set required environment variables
+export REDDIT_CLIENT_ID="your-client-id"
+export REDDIT_CLIENT_SECRET="your-client-secret"
+
+# Optional: Configure for user authentication
+export REDDIT_USERNAME="your-username"
+export REDDIT_PASSWORD="your-password"
+
+# Optional: Configure server settings
+export PORT=8080
+export RATE_LIMIT=10
+export RATE_BURST=5
+export CORS_ORIGIN="*"
+
+# Run the server
+./reddit-server
+```
+
+Server will start on `http://localhost:8080` (or the port specified by `PORT` environment variable).
+
+### API Endpoints
+
+#### Health Check
+```bash
+GET /health
+
+Response: {"status": "ok"}
+```
+
+#### Get Hot Posts
+```bash
+GET /api/v1/r/{subreddit}/hot?limit=25&after=t3_abc123
+
+Query Parameters:
+  - limit: Number of posts to retrieve (max 100, default 25)
+  - after: Pagination cursor (fullname like "t3_abc123")
+  - before: Pagination cursor (fullname like "t3_abc123")
+
+Response:
+{
+  "posts": [...],
+  "pagination": {
+    "after": "t3_abc123",
+    "before": "t3_def456"
+  }
+}
+```
+
+#### Get New Posts
+```bash
+GET /api/v1/r/{subreddit}/new?limit=25
+
+Query Parameters: Same as /hot
+
+Response: Same structure as /hot
+```
+
+#### Get Post Comments
+```bash
+GET /api/v1/posts/{postId}/comments?limit=100
+
+Query Parameters:
+  - limit: Number of comments to retrieve (max 100, default 100)
+  - after: Pagination cursor (fullname like "t1_abc123")
+  - before: Pagination cursor (fullname like "t1_abc123")
+
+Response:
+{
+  "post": {...},
+  "comments": [...],
+  "more_ids": ["xyz789", ...],
+  "pagination": {
+    "after": "t1_abc123",
+    "before": "t1_def456"
+  }
+}
+```
+
+#### Get Subreddit Info
+```bash
+GET /api/v1/r/{subreddit}/about
+
+Response:
+{
+  "id": "...",
+  "name": "...",
+  "display_name": "golang",
+  "title": "The Go Programming Language",
+  "description": "...",
+  "subscribers": 123456,
+  ...
+}
+```
+
+#### Get User Info (requires user authentication)
+```bash
+GET /api/v1/me
+
+Response:
+{
+  "id": "...",
+  "name": "...",
+  "link_karma": 1234,
+  "comment_karma": 5678,
+  "created": 1234567890.0,
+  "is_gold": false,
+  ...
+}
+```
+
+### Features
+
+- **Rate Limiting**: Server-side rate limiting (configurable via `RATE_LIMIT` and `RATE_BURST`)
+- **CORS Support**: Cross-origin requests enabled (configurable via `CORS_ORIGIN`)
+- **Request Tracing**: Every request gets a unique request ID for debugging
+- **Structured Logging**: JSON logs with request details, timing, and status codes
+- **Graceful Shutdown**: Handles SIGINT/SIGTERM with connection draining
+- **Error Handling**: Consistent JSON error responses with proper HTTP status codes
+
+### Error Responses
+
+All errors return JSON with the following structure:
+
+```json
+{
+  "error": "error message describing what went wrong",
+  "request_id": "unique-request-id-for-tracing"
+}
+```
+
+HTTP status codes:
+- `400 Bad Request` - Invalid input parameters
+- `401 Unauthorized` - Authentication required or failed
+- `404 Not Found` - Resource not found
+- `429 Too Many Requests` - Rate limit exceeded
+- `500 Internal Server Error` - Server error
+
+### Docker Deployment
+
+```dockerfile
+FROM golang:1.24-alpine AS builder
+WORKDIR /app
+COPY . .
+RUN go build -o reddit-server ./cmd/server/
+
+FROM alpine:latest
+RUN apk --no-cache add ca-certificates
+WORKDIR /root/
+COPY --from=builder /app/reddit-server .
+EXPOSE 8080
+CMD ["./reddit-server"]
+```
+
+```bash
+# Build and run
+docker build -t reddit-api-server .
+docker run -p 8080:8080 \
+  -e REDDIT_CLIENT_ID="your-client-id" \
+  -e REDDIT_CLIENT_SECRET="your-client-secret" \
+  reddit-api-server
+```
+
+For detailed API documentation, see [`cmd/server/README.md`](cmd/server/README.md).
+
 ## API Reference
 
 ### Client Configuration

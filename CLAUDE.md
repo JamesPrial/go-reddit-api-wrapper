@@ -6,10 +6,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Go wrapper for the Reddit API providing OAuth2 authentication and a clean interface for common Reddit operations. The library supports both application-only and user authentication modes.
 
-The project consists of three main components:
+The project consists of four main components:
 1. **Reddit API Client** (`reddit/`, `pkg/types/`) - Core library for Reddit API interaction
 2. **Storage Layer** (`storage/`) - Database persistence with SQLite/PostgreSQL backends
-3. **Frontend Application** (`frontend/`) - Svelte web UI with Go backend for Reddit authentication
+3. **HTTP API Server** (`cmd/server/`) - Standalone REST API server exposing Reddit API functionality
+4. **Frontend Application** (`frontend/`) - Svelte web UI with Go backend for Reddit authentication
 
 Always use context7 when I need code generation, setup or configuration steps, or library/API documentation. This means you should automatically use the Context7 MCP tools to resolve library id and get library docs without me having to explicitly ask.
 
@@ -47,16 +48,19 @@ go test -bench=. ./storage/sqlite/internal
 
 ### Building
 ```bash
-# Build all example applications
+# Build HTTP API server
+go build -o reddit-server ./cmd/server/
+
+# Build all example applications (if they exist)
 go build -o reddit-example-basic ./cmd/examples/basic
 go build -o reddit-example-monitor ./cmd/examples/monitor
 go build -o reddit-example-analyzer ./cmd/examples/analyzer
 
 # Build frontend backend server
-cd frontend/server && go build -o reddit-server .
+cd frontend/server && go build -o reddit-frontend-server .
 
 # Build with race detection
-go build -race -o reddit-example ./cmd/examples/basic
+go build -race -o reddit-server ./cmd/server/
 ```
 
 ### Linting & Code Quality
@@ -74,6 +78,29 @@ go mod verify
 go mod tidy
 ```
 
+### Running the HTTP API Server
+```bash
+# Set required environment variables
+export REDDIT_CLIENT_ID="your-client-id"
+export REDDIT_CLIENT_SECRET="your-client-secret"
+
+# Optional for user authentication:
+export REDDIT_USERNAME="your-username"
+export REDDIT_PASSWORD="your-password"
+
+# Optional server configuration:
+export PORT=8080
+export RATE_LIMIT=10
+export RATE_BURST=5
+export CORS_ORIGIN="*"
+
+# Run the server
+go run ./cmd/server/
+
+# Server will be available at http://localhost:8080
+# API endpoints are under /api/v1/
+```
+
 ### Running the Examples
 ```bash
 # Set required environment variables
@@ -83,7 +110,7 @@ export REDDIT_CLIENT_SECRET="your-client-secret"
 export REDDIT_USERNAME="your-username"
 export REDDIT_PASSWORD="your-password"
 
-# Run examples
+# Run examples (note: these don't exist yet)
 go run ./cmd/examples/basic
 go run ./cmd/examples/monitor
 go run ./cmd/examples/analyzer
