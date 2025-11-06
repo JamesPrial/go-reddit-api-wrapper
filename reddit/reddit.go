@@ -1070,10 +1070,17 @@ func buildPaginationParams(pagination *types.Pagination) url.Values {
 // This is called internally before each API request.
 func (r *Reddit) addAuthHeaders(ctx context.Context, req *http.Request) error {
 	token, expiry, found, err := r.tokenCache.Get(ctx)
-	token, expiry, err := r.auth.GetToken(ctx)
-	token, err := r.auth.GetToken(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to get auth token: %w", err)
+		return fmt.Errorf("failed to get token from cache: %w", err)
+	}
+	if !found || expiry.Before(time.Now()) {
+		token, expiry, err = r.auth.GetToken(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to get auth token: %w", err)
+		}
+		if err := r.tokenCache.Set(ctx, token, expiry); err != nil {
+			return fmt.Errorf("failed to set token in cache: %w", err)
+		}
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	return nil
@@ -1098,8 +1105,11 @@ func (r *Reddit) handleAuthErrorWithContext(ctx context.Context, err error) bool
 	// Check if this is a 401 Unauthorized error
 	if apiErr, ok := mapAPIError(err); ok {
 		if apiErr.StatusCode == http.StatusUnauthorized {
-			// Token is invalid, clear the cache
-			r.auth.InvalidateToken(ctx)
+			if err := r.tokenCache.Invalidate(ctx); err != nil {
+				r.config.Logger.LogAttrs(ctx, slog.LevelError, "failed to invalidate token cache",
+					slog.String("error", err.Error()),
+					slog.String("request_id", reqid.FromContext(ctx)))
+			}
 			return true
 		}
 	}
