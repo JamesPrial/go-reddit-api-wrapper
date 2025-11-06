@@ -63,16 +63,24 @@ func FromEnv() (*Config, error) {
 	return cfg, nil
 }
 
-// Validate checks that all required configuration fields are set.
-// Returns an error if any required fields are missing or invalid.
-func (c *Config) Validate() error {
+// ValidateCredentials checks if required Reddit API authentication credentials are configured.
+// This must be called before creating a Reddit API client.
+// Returns an error if ClientID or ClientSecret is empty.
+func (c *Config) ValidateCredentials() error {
 	if c.ClientID == "" {
-		return fmt.Errorf("client ID is required")
+		return fmt.Errorf("client ID is required (set REDDIT_CLIENT_ID or use -client-id)")
 	}
 	if c.ClientSecret == "" {
-		return fmt.Errorf("client secret is required")
+		return fmt.Errorf("client secret is required (set REDDIT_CLIENT_SECRET or use -client-secret)")
 	}
+	return nil
+}
 
+// Validate checks that non-credential configuration fields are valid.
+// It validates output format and pagination limits.
+// For credential validation, use ValidateCredentials() instead.
+// Returns an error if any fields are invalid.
+func (c *Config) Validate() error {
 	if c.Limit < 1 || c.Limit > 100 {
 		return fmt.Errorf("limit must be between 1 and 100, got %d", c.Limit)
 	}

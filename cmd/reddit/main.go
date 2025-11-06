@@ -103,14 +103,7 @@ var (
 func main() {
 	flag.Parse()
 
-	// Load configuration from environment and apply flag overrides
-	cfg, err := loadConfig()
-	if err != nil {
-		printError("Configuration error", err)
-		os.Exit(ExitValidation)
-	}
-
-	// Get command and arguments
+	// Get command and arguments first (before loading config)
 	args := flag.Args()
 	if len(args) == 0 {
 		printUsage()
@@ -120,23 +113,25 @@ func main() {
 	command := args[0]
 	commandArgs := args[1:]
 
-	// Create client with a longer timeout for authentication
-	// Use 60s for client creation to allow slow auth, separate from command timeout
-	authCtx, authCancel := context.WithTimeout(context.Background(), 60*time.Second)
-	client, err := graw.NewClientWithContext(authCtx, cfg.ToRedditConfig())
-	authCancel()
-
-	if err != nil {
-		printError("authentication", err)
-		os.Exit(classifyError(err))
+	// Handle help command early without requiring authentication
+	if command == "help" || command == "-h" || command == "--help" || command == "-help" {
+		printUsage()
+		os.Exit(ExitOK)
 	}
 
-	// Create context with timeout for actual command execution
+	// Load configuration from environment and apply flag overrides
+	cfg, err := loadConfig()
+	if err != nil {
+		printError("Configuration error", err)
+		os.Exit(ExitValidation)
+	}
+
+	// Create context with timeout for command execution
 	cmdCtx, cmdCancel := context.WithTimeout(context.Background(), *flagTimeout)
 	defer cmdCancel()
 
-	// Execute command with shared client
-	if err := executeCommand(cmdCtx, cfg, command, commandArgs, client); err != nil {
+	// Execute command (handles auth and client creation internally)
+	if err := executeCommand(cmdCtx, cfg, command, commandArgs); err != nil {
 		exitCode := classifyError(err)
 		printError(command, err)
 		os.Exit(exitCode)
@@ -189,7 +184,7 @@ func loadConfig() (*config.Config, error) {
 		cfg.Debug = *flagDebug
 	}
 
-	// Validate required fields
+	// Validate configuration (but not credentials yet)
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
@@ -198,7 +193,22 @@ func loadConfig() (*config.Config, error) {
 }
 
 // executeCommand dispatches to the appropriate command handler.
-func executeCommand(ctx context.Context, cfg *config.Config, command string, args []string, client *graw.Reddit) error {
+func executeCommand(ctx context.Context, cfg *config.Config, command string, args []string) error {
+	// Validate credentials before creating client
+	if err := cfg.ValidateCredentials(); err != nil {
+		return err
+	}
+
+	// Create client with a longer timeout for authentication.
+	// The context is only needed during client creation, so we cancel immediately after.
+	authCtx, authCancel := context.WithTimeout(ctx, 60*time.Second)
+	client, err := graw.NewClientWithContext(authCtx, cfg.ToRedditConfig())
+	authCancel() // Safe to cancel - client creation is synchronous
+
+	if err != nil {
+		return err
+	}
+
 	switch command {
 	case "me":
 		return commandMe(ctx, cfg, client)
@@ -224,9 +234,6 @@ func executeCommand(ctx context.Context, cfg *config.Config, command string, arg
 			return fmt.Errorf("comments command requires 2 arguments: subreddit post-id")
 		}
 		return commandComments(ctx, cfg, client, args[0], args[1])
-	case "help", "-h", "--help", "-help":
-		printUsage()
-		return nil
 	default:
 		return fmt.Errorf("unknown command: %q", command)
 	}
@@ -315,10 +322,14 @@ func classifyError(err error) int {
 	}
 
 	// Check for specific error types
+	var configErr *graw.ConfigError
 	var validErr *graw.ValidationError
 	var authErr *graw.AuthError
 	var netErr *graw.NetworkError
 
+	if errors.As(err, &configErr) {
+		return ExitValidation
+	}
 	if errors.As(err, &validErr) {
 		return ExitValidation
 	}
