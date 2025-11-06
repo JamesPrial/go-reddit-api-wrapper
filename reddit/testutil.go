@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/cache"
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/client"
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/clock"
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/parse"
@@ -39,11 +40,13 @@ func NewTestClient(mockServer *testutil.MockServer) *Reddit {
 		panic("failed to create test HTTP client: " + err.Error())
 	}
 
+	mockClock := clock.NewMockClock(time.Time{})
 	return &Reddit{
 		httpClient: internalClient,
 		auth:       &testutil.MockTokenProvider{Token: "test_token", Expiry: time.Now().Add(1 * time.Hour)},
 		parser:     parse.NewParser(nil),
 		validator:  validator.NewValidator(),
+		tokenCache: cache.NewMemoryCache(mockClock, nil),
 	}
 }
 
@@ -69,11 +72,13 @@ func NewTestClient(mockServer *testutil.MockServer) *Reddit {
 //	_, err := client.GetHot(ctx, &types.PostsRequest{Subreddit: "golang"})
 //	// err will be related to authentication failure
 func NewTestClientWithMocks(authProvider TokenProvider, httpClient HTTPClient) *Reddit {
+	mockClock := clock.NewMockClock(time.Time{})
 	return &Reddit{
 		httpClient: httpClient,
 		auth:       authProvider,
 		parser:     parse.NewParser(nil),
 		validator:  validator.NewValidator(),
+		tokenCache: cache.NewMemoryCache(mockClock, nil),
 	}
 }
 
@@ -110,11 +115,13 @@ func NewTestClientWithURL(baseURL string) *Reddit {
 		panic("failed to create test HTTP client: " + err.Error())
 	}
 
+	mockClock := clock.NewMockClock(time.Time{})
 	return &Reddit{
 		httpClient: internalClient,
 		auth:       &testutil.MockTokenProvider{Token: "test_token", Expiry: time.Now().Add(1 * time.Hour)},
 		parser:     parse.NewParser(nil),
 		validator:  validator.NewValidator(),
+		tokenCache: cache.NewMemoryCache(mockClock, nil),
 	}
 }
 
@@ -180,5 +187,6 @@ func NewTestClientWithRateLimit(baseURL string, rateLimitConfig RateLimitConfig)
 		auth:       &testutil.MockTokenProvider{Token: "test_token", Expiry: time.Now().Add(1 * time.Hour)},
 		parser:     parse.NewParser(nil),
 		validator:  validator.NewValidator(),
+		tokenCache: cache.NewMemoryCache(realClock, nil),
 	}
 }

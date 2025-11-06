@@ -16,9 +16,10 @@ import (
 	"time"
 
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
-	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/client"
-	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/parse"
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/cache"
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/client"
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/clock"
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/parse"
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/validator"
 )
 
@@ -96,7 +97,7 @@ func newTestClient(httpClient HTTPClient, auth TokenProvider) *Reddit {
 	return &Reddit{
 		httpClient: httpClient,
 		auth:       auth,
-		cache:      cache.NewMemoryCache(nil, nil),
+		tokenCache: cache.NewMemoryCache(nil, nil),
 		config: &Config{
 			UserAgent: "test/1.0",
 			BaseURL:   "https://oauth.reddit.com/",
@@ -397,7 +398,7 @@ func TestGetHot_RetryOnUnauthorized(t *testing.T) {
 	if got := doCalls.Load(); got != 2 {
 		t.Fatalf("expected 2 Do calls, got %d", got)
 	}
-if got := tp.getCalls.Load(); got < 2 {
+	if got := tp.getCalls.Load(); got < 2 {
 		t.Fatalf("expected GetToken called at least twice, got %d", got)
 	}
 }
@@ -439,7 +440,7 @@ func TestGetComments_RetryOnUnauthorized(t *testing.T) {
 	if got := doCalls.Load(); got != 2 {
 		t.Fatalf("expected 2 DoThingArray calls, got %d", got)
 	}
-if got := tp.getCalls.Load(); got < 2 {
+	if got := tp.getCalls.Load(); got < 2 {
 		t.Fatalf("expected GetToken called at least twice, got %d", got)
 	}
 }
@@ -503,7 +504,7 @@ func TestGetMoreComments_RetryOnUnauthorized(t *testing.T) {
 	if got := doCalls.Load(); got != 2 {
 		t.Fatalf("expected 2 DoMoreChildren calls, got %d", got)
 	}
-if got := tp.getCalls.Load(); got < 2 {
+	if got := tp.getCalls.Load(); got < 2 {
 		t.Fatalf("expected GetToken called at least twice, got %d", got)
 	}
 }
@@ -1897,8 +1898,10 @@ func TestClient_addAuthHeaders(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			mockClock := clock.NewMockClock(time.Time{})
 			client := &Reddit{
-				auth: tt.auth,
+				auth:       tt.auth,
+				tokenCache: cache.NewMemoryCache(mockClock, nil),
 			}
 
 			req, _ := http.NewRequest(http.MethodGet, "https://oauth.reddit.com/hot", nil)

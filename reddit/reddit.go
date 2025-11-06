@@ -420,6 +420,7 @@ func NewClientWithContext(ctx context.Context, config *Config) (*Reddit, error) 
 		config:     config,
 		parser:     parse.NewParser(config.Logger),
 		validator:  validatorpkg.NewValidator(),
+		tokenCache: tokenCache,
 	}, nil
 }
 

@@ -14,6 +14,7 @@ import (
 
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/auth"
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/cache"
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/client"
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/clock"
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/parse"
@@ -847,7 +848,8 @@ func createTestRedditClient(b *testing.B, serverURL string) *Reddit {
 			HTTPClient:   httpClient,
 			Logger:       logger,
 		},
-		parser:    parse.NewParser(logger),
-		validator: validatorpkg.NewValidator(),
+		parser:     parse.NewParser(logger),
+		validator:  validatorpkg.NewValidator(),
+		tokenCache: cache.NewMemoryCache(mockClock, logger),
 	}
 }

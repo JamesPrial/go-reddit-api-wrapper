@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
+	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/cache"
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/client"
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/clock"
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/parse"
@@ -59,6 +60,7 @@ func TestConcurrentClientUsage(t *testing.T) {
 			auth:       &testutil.MockTokenProvider{Token: "test_token", Expiry: time.Now().Add(1 * time.Hour)},
 			parser:     parse.NewParser(nil),
 			validator:  validator.NewValidator(),
+			tokenCache: cache.NewMemoryCache(mockClock, nil),
 		}
 	}
 
@@ -152,6 +154,7 @@ func TestConcurrentSameClientOperations(t *testing.T) {
 		parser:     parse.NewParser(nil),
 		validator:  validator.NewValidator(),
 		auth:       &testutil.MockTokenProvider{Token: "test_token", Expiry: time.Now().Add(1 * time.Hour)},
+		tokenCache: cache.NewMemoryCache(mockClock, nil),
 	}
 
 	// Test concurrent operations on the same client
@@ -272,6 +275,7 @@ func TestConcurrentRateLimitingBehavior(t *testing.T) {
 		parser:     parse.NewParser(nil),
 		validator:  validator.NewValidator(),
 		auth:       &testutil.MockTokenProvider{Token: "test_token", Expiry: time.Now().Add(1 * time.Hour)},
+		tokenCache: cache.NewMemoryCache(mockClock, nil),
 	}
 
 	// Test rapid concurrent requests
@@ -360,6 +364,7 @@ func TestConcurrentContextCancellation(t *testing.T) {
 		parser:     parse.NewParser(nil),
 		validator:  validator.NewValidator(),
 		auth:       &testutil.MockTokenProvider{Token: "test_token", Expiry: time.Now().Add(1 * time.Hour)},
+		tokenCache: cache.NewMemoryCache(mockClock, nil),
 	}
 
 	// Test context cancellation
@@ -451,6 +456,7 @@ func TestConcurrentResourceContention(t *testing.T) {
 		parser:     parse.NewParser(nil),
 		validator:  validator.NewValidator(),
 		auth:       &testutil.MockTokenProvider{Token: "test_token", Expiry: time.Now().Add(1 * time.Hour)},
+		tokenCache: cache.NewMemoryCache(mockClock, nil),
 	}
 
 	// Test high concurrency with resource contention
@@ -552,6 +558,7 @@ func TestConcurrentMixedOperations(t *testing.T) {
 		parser:     parse.NewParser(nil),
 		validator:  validator.NewValidator(),
 		auth:       &testutil.MockTokenProvider{Token: "test_token", Expiry: time.Now().Add(1 * time.Hour)},
+		tokenCache: cache.NewMemoryCache(mockClock, nil),
 	}
 
 	// Test mixed operations concurrently
@@ -720,6 +727,7 @@ func TestConcurrentSameClientOperationsWithSeparateParsers(t *testing.T) {
 				parser:     sharedParser,
 				validator:  validator.NewValidator(),
 				auth:       &testutil.MockTokenProvider{Token: "test_token", Expiry: time.Now().Add(1 * time.Hour)},
+				tokenCache: cache.NewMemoryCache(mockClock, nil),
 			}
 			sr, err := client.GetSubreddit(context.Background(), "concurrent_test_sep")
 			if err != nil {
@@ -748,6 +756,7 @@ func TestConcurrentSameClientOperationsWithSeparateParsers(t *testing.T) {
 				parser:     parse.NewParser(nil), // DIFFERENT parser
 				validator:  validator.NewValidator(),
 				auth:       &testutil.MockTokenProvider{Token: "test_token", Expiry: time.Now().Add(1 * time.Hour)},
+				tokenCache: cache.NewMemoryCache(mockClock, nil),
 			}
 			posts, err := client.GetHot(context.Background(), &types.PostsRequest{
 				Subreddit: "concurrent_test_sep",
@@ -830,6 +839,7 @@ func TestConcurrentSameClientOperationsWithSeparateClients(t *testing.T) {
 				parser:     parse.NewParser(nil),
 				validator:  validator.NewValidator(),
 				auth:       &testutil.MockTokenProvider{Token: "test_token", Expiry: time.Now().Add(1 * time.Hour)},
+				tokenCache: cache.NewMemoryCache(mockClock, nil),
 			}
 			sr, err := client.GetSubreddit(context.Background(), "concurrent_test_full")
 			if err != nil {
@@ -866,6 +876,7 @@ func TestConcurrentSameClientOperationsWithSeparateClients(t *testing.T) {
 				parser:     parse.NewParser(nil),
 				validator:  validator.NewValidator(),
 				auth:       &testutil.MockTokenProvider{Token: "test_token", Expiry: time.Now().Add(1 * time.Hour)},
+				tokenCache: cache.NewMemoryCache(mockClock, nil),
 			}
 			posts, err := client.GetHot(context.Background(), &types.PostsRequest{
 				Subreddit: "concurrent_test_full",
@@ -933,6 +944,7 @@ func TestSequentialSameServer(t *testing.T) {
 		parser:     parse.NewParser(nil),
 		validator:  validator.NewValidator(),
 		auth:       &testutil.MockTokenProvider{Token: "test_token", Expiry: time.Now().Add(1 * time.Hour)},
+		tokenCache: cache.NewMemoryCache(mockClock, nil),
 	}
 
 	// Make 5 SEQUENTIAL requests (no goroutines)
@@ -993,6 +1005,7 @@ func TestSequentialWithoutSubreddit(t *testing.T) {
 		parser:     parse.NewParser(nil),
 		validator:  validator.NewValidator(),
 		auth:       &testutil.MockTokenProvider{Token: "test_token", Expiry: time.Now().Add(1 * time.Hour)},
+		tokenCache: cache.NewMemoryCache(mockClock, nil),
 	}
 
 	// Make 1 request
@@ -1049,6 +1062,7 @@ func TestSequentialNoSubField(t *testing.T) {
 		parser:     parse.NewParser(nil),
 		validator:  validator.NewValidator(),
 		auth:       &testutil.MockTokenProvider{Token: "test_token", Expiry: time.Now().Add(1 * time.Hour)},
+		tokenCache: cache.NewMemoryCache(mockClock, nil),
 	}
 
 	// Make 1 request
@@ -1105,6 +1119,7 @@ func TestConcurrentSameClientOperationsNoWithSubreddit(t *testing.T) {
 		parser:     parse.NewParser(nil),
 		validator:  validator.NewValidator(),
 		auth:       &testutil.MockTokenProvider{Token: "test_token", Expiry: time.Now().Add(1 * time.Hour)},
+		tokenCache: cache.NewMemoryCache(mockClock, nil),
 	}
 
 	// Test concurrent operations on the same client
@@ -1187,6 +1202,7 @@ func TestExactCopyOfTestConcurrentClientUsage(t *testing.T) {
 			auth:       &testutil.MockTokenProvider{Token: "test_token", Expiry: time.Now().Add(1 * time.Hour)},
 			parser:     parse.NewParser(nil),
 			validator:  validator.NewValidator(),
+			tokenCache: cache.NewMemoryCache(mockClock, nil),
 		}
 	}
 
@@ -1263,6 +1279,7 @@ func TestExactCopyWithConcurrentRequests(t *testing.T) {
 		parser:     parse.NewParser(nil),
 		validator:  validator.NewValidator(),
 		auth:       &testutil.MockTokenProvider{Token: "test_token", Expiry: time.Now().Add(1 * time.Hour)},
+		tokenCache: cache.NewMemoryCache(mockClock, nil),
 	}
 
 	// Test concurrent operations with 5 CONCURRENT goroutines
@@ -1340,6 +1357,7 @@ func TestWithDifferentSubredditName(t *testing.T) {
 		parser:     parse.NewParser(nil),
 		validator:  validator.NewValidator(),
 		auth:       &testutil.MockTokenProvider{Token: "test_token", Expiry: time.Now().Add(1 * time.Hour)},
+		tokenCache: cache.NewMemoryCache(mockClock, nil),
 	}
 
 	// Test concurrent operations with 5 CONCURRENT goroutines
@@ -1417,6 +1435,7 @@ func TestWithDifferentPostID(t *testing.T) {
 		parser:     parse.NewParser(nil),
 		validator:  validator.NewValidator(),
 		auth:       &testutil.MockTokenProvider{Token: "test_token", Expiry: time.Now().Add(1 * time.Hour)},
+		tokenCache: cache.NewMemoryCache(mockClock, nil),
 	}
 
 	// Test concurrent operations with 5 CONCURRENT goroutines
