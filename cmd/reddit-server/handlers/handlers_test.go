@@ -9,6 +9,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/jamesprial/go-reddit-api-wrapper/cmd/reddit-server/config"
 	graw "github.com/jamesprial/go-reddit-api-wrapper/reddit"
 )
 
@@ -420,5 +421,39 @@ func TestContains(t *testing.T) {
 				t.Errorf("contains() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+// TestHealthEndpointNoAuthRequired tests that the health endpoint works without authentication.
+func TestHealthEndpointNoAuthRequired(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	handler := New(logger, nil)
+
+	// Create router with test API keys
+	corsConfig := config.CORS{
+		AllowedOrigins: "*",
+		AllowedMethods: "GET,OPTIONS",
+		AllowedHeaders: "Content-Type,Authorization",
+		MaxAge:         300,
+	}
+	router := handler.Router(corsConfig, []string{"test-key"})
+
+	// Test health endpoint without API key
+	req := httptest.NewRequest("GET", "/health", nil)
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Health endpoint status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to unmarshal response: %v", err)
+	}
+
+	if resp["status"] != "ok" {
+		t.Errorf("Health status = %v, want ok", resp["status"])
 	}
 }

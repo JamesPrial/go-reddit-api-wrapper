@@ -1,10 +1,15 @@
 package handlers
 
 import (
+	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
+	"net/http/httptest"
+	"os"
 	"testing"
 
+	"github.com/jamesprial/go-reddit-api-wrapper/cmd/reddit-server/config"
 	graw "github.com/jamesprial/go-reddit-api-wrapper/reddit"
 )
 
@@ -112,5 +117,61 @@ func TestGetUserMe_ErrorTypeMapping(t *testing.T) {
 	status = errorToStatus(apiErr)
 	if status != http.StatusInternalServerError {
 		t.Errorf("APIError mapped to %d, want %d", status, http.StatusInternalServerError)
+	}
+}
+
+// TestGetUserMe_NoAPIKey tests that the endpoint requires API key authentication
+func TestGetUserMe_NoAPIKey(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	handler := New(logger, nil)
+
+	corsConfig := config.CORS{
+		AllowedOrigins: "*",
+		AllowedMethods: "GET,OPTIONS",
+		AllowedHeaders: "Content-Type,Authorization",
+		MaxAge:         300,
+	}
+	router := handler.Router(corsConfig, []string{testAPIKey})
+
+	// Create request WITHOUT API key
+	req := httptest.NewRequest("GET", "/api/v1/user/me", nil)
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("GetUserMe without API key: expected status %d, got %d", http.StatusUnauthorized, w.Code)
+	}
+
+	var resp ErrorResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err == nil {
+		if resp.Error.Type != "auth_error" {
+			t.Errorf("expected error type 'auth_error', got '%s'", resp.Error.Type)
+		}
+	}
+}
+
+// TestGetUserMe_InvalidAPIKey tests that invalid API keys are rejected
+func TestGetUserMe_InvalidAPIKey(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	handler := New(logger, nil)
+
+	corsConfig := config.CORS{
+		AllowedOrigins: "*",
+		AllowedMethods: "GET,OPTIONS",
+		AllowedHeaders: "Content-Type,Authorization",
+		MaxAge:         300,
+	}
+	router := handler.Router(corsConfig, []string{testAPIKey})
+
+	// Create request with invalid API key
+	req := httptest.NewRequest("GET", "/api/v1/user/me", nil)
+	req.Header.Set("X-API-Key", "invalid-api-key")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("GetUserMe with invalid API key: expected status %d, got %d", http.StatusUnauthorized, w.Code)
 	}
 }

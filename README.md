@@ -227,6 +227,9 @@ Configure the server via environment variables:
 export REDDIT_CLIENT_ID="your-client-id"
 export REDDIT_CLIENT_SECRET="your-client-secret"
 
+# Optional: API keys for client authentication (auto-generated if not provided)
+export API_KEYS="$(openssl rand -base64 32)"
+
 # Optional: User authentication
 export REDDIT_USERNAME="your-username"
 export REDDIT_PASSWORD="your-password"
@@ -240,26 +243,34 @@ export SERVER_IDLE_TIMEOUT=120
 # Optional: CORS configuration
 export CORS_ALLOWED_ORIGINS="http://localhost:3000,http://localhost:5173"
 export CORS_ALLOWED_METHODS="GET,POST,PUT,DELETE,OPTIONS"
-export CORS_ALLOWED_HEADERS="Content-Type,Authorization"
+export CORS_ALLOWED_HEADERS="Content-Type,Authorization,X-API-Key"
 ```
+
+**Note**: If `API_KEYS` is not provided, the server will auto-generate a random API key and display it in the logs. For production, set `API_KEYS` explicitly.
 
 ### Example API Usage
 
+**Note**: All endpoints except `/health` require API key authentication via `X-API-Key` header.
+
 ```bash
-# Health check
+# Health check (no API key required)
 curl http://localhost:8080/health
 
-# Get user info
-curl http://localhost:8080/api/v1/user/me
+# Get user info (requires API key)
+curl -H "X-API-Key: your-api-key" \
+  http://localhost:8080/api/v1/user/me
 
 # Get hot posts from r/golang
-curl "http://localhost:8080/api/v1/posts/hot?subreddit=golang&limit=10"
+curl -H "X-API-Key: your-api-key" \
+  "http://localhost:8080/api/v1/posts/hot?subreddit=golang&limit=10"
 
 # Get subreddit info
-curl http://localhost:8080/api/v1/subreddit/golang
+curl -H "X-API-Key: your-api-key" \
+  http://localhost:8080/api/v1/subreddit/golang
 
 # Get comments for a post
-curl http://localhost:8080/api/v1/posts/golang/abc123/comments
+curl -H "X-API-Key: your-api-key" \
+  http://localhost:8080/api/v1/posts/golang/abc123/comments
 ```
 
 ### Response Format

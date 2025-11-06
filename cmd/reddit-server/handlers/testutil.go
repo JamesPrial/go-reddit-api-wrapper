@@ -3,10 +3,39 @@ package handlers
 import (
 	"context"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
+	"github.com/jamesprial/go-reddit-api-wrapper/cmd/reddit-server/middleware"
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 )
+
+const testAPIKey = "test-api-key-12345"
+
+// NewAuthenticatedRequest creates an HTTP request with API key authentication.
+func NewAuthenticatedRequest(method, url string, body io.Reader) *http.Request {
+	req := httptest.NewRequest(method, url, body)
+	req.Header.Set("X-API-Key", testAPIKey)
+	return req
+}
+
+// AddAuthenticationToRequest adds API key authentication header to an existing request.
+func AddAuthenticationToRequest(req *http.Request) {
+	req.Header.Set("X-API-Key", testAPIKey)
+}
+
+// AddCredentialsToContext adds Reddit credentials to the request context.
+// This simulates what the AuthFromConfig middleware does.
+func AddCredentialsToContext(req *http.Request, clientID, clientSecret, userAgent string) *http.Request {
+	creds := &middleware.Credentials{
+		ClientID:     clientID,
+		ClientSecret: clientSecret,
+		UserAgent:    userAgent,
+	}
+	return middleware.SetCredentialsInContext(req, creds)
+}
 
 // MockRedditClient is a mock implementation of the Reddit client for testing.
 type MockRedditClient struct {

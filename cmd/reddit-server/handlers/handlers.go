@@ -53,7 +53,8 @@ func New(logger *slog.Logger, client *graw.Reddit) *Handler {
 }
 
 // Router returns a configured chi router with all endpoints and middleware.
-func (h *Handler) Router(corsConfig config.CORS) *chi.Mux {
+// apiKeys should be a non-empty slice of valid API keys for client authentication.
+func (h *Handler) Router(corsConfig config.CORS, apiKeys []string) *chi.Mux {
 	r := chi.NewRouter()
 
 	// Add CORS middleware with parsed config
@@ -69,21 +70,25 @@ func (h *Handler) Router(corsConfig config.CORS) *chi.Mux {
 	// Health check endpoint (no auth required)
 	r.Get("/health", h.Health)
 
-	// API v1 routes (all require authentication)
-	r.Route("/api/v1", func(r chi.Router) {
-		// User endpoints
-		r.Get("/user/me", h.GetUserMe)
+	// API routes (all require API key authentication)
+	r.Route("/api", func(r chi.Router) {
+		r.Use(middleware.RequireAPIKey(apiKeys))
 
-		// Subreddit endpoints
-		r.Get("/subreddit/{name}", h.GetSubreddit)
+		r.Route("/v1", func(r chi.Router) {
+			// User endpoints
+			r.Get("/user/me", h.GetUserMe)
 
-		// Posts endpoints
-		r.Get("/posts/hot", h.GetHotPosts)
-		r.Get("/posts/new", h.GetNewPosts)
+			// Subreddit endpoints
+			r.Get("/subreddit/{name}", h.GetSubreddit)
 
-		// Comments endpoints
-		r.Get("/posts/{subreddit}/{postID}/comments", h.GetComments)
-		r.Post("/posts/{linkID}/more-comments", h.GetMoreComments)
+			// Posts endpoints
+			r.Get("/posts/hot", h.GetHotPosts)
+			r.Get("/posts/new", h.GetNewPosts)
+
+			// Comments endpoints
+			r.Get("/posts/{subreddit}/{postID}/comments", h.GetComments)
+			r.Post("/posts/{linkID}/more-comments", h.GetMoreComments)
+		})
 	})
 
 	return r

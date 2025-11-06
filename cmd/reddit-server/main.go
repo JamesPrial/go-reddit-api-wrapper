@@ -12,18 +12,20 @@
 //   - REDDIT_PASSWORD: Optional password for user authentication
 //   - REDDIT_USER_AGENT: Optional custom user agent string (default: reddit-server/1.0)
 //   - CORS_ALLOWED_ORIGINS: Comma-separated allowed origins (default: *)
+//   - API_KEYS: Comma-separated list of valid API keys (optional - auto-generated if not provided)
 //
 // The server provides the following endpoints:
 //   - GET /health: Health check (no authentication required)
-//   - GET /api/v1/user/me: Current user information
-//   - GET /api/v1/subreddit/{name}: Subreddit information
-//   - GET /api/v1/posts/hot: Hot posts
-//   - GET /api/v1/posts/new: New posts
-//   - GET /api/v1/posts/{subreddit}/{postID}/comments: Post comments
-//   - POST /api/v1/posts/{linkID}/more-comments: Load more comments (max 100 comment IDs per request)
+//   - GET /api/v1/user/me: Current user information (requires API key)
+//   - GET /api/v1/subreddit/{name}: Subreddit information (requires API key)
+//   - GET /api/v1/posts/hot: Hot posts (requires API key)
+//   - GET /api/v1/posts/new: New posts (requires API key)
+//   - GET /api/v1/posts/{subreddit}/{postID}/comments: Post comments (requires API key)
+//   - POST /api/v1/posts/{linkID}/more-comments: Load more comments (requires API key, max 100 comment IDs per request)
 //
-// All endpoints except /health require authentication via REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET
-// environment variables.
+// All endpoints except /health require:
+// - Authentication via REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET environment variables
+// - An API key via X-API-Key header or Authorization: Bearer <key> header
 package main
 
 import (
@@ -77,6 +79,13 @@ func main() {
 		slog.Duration("write_timeout", cfg.Server.WriteTimeout),
 	)
 
+	// Log generated API key if one was auto-generated
+	if cfg.Auth.GeneratedKey != "" {
+		logger.Warn("No API_KEYS environment variable provided - generated a random API key for this session")
+		logger.Warn("IMPORTANT: Use this API key for all requests to secure endpoints", slog.String("api_key", cfg.Auth.GeneratedKey))
+		logger.Warn("To use a persistent API key, set the API_KEYS environment variable before starting the server")
+	}
+
 	// Create Reddit client (used to validate credentials on startup)
 	redditCfg := &graw.Config{
 		ClientID:     cfg.Reddit.ClientID,
@@ -95,8 +104,8 @@ func main() {
 	// Create handler
 	handler := handlers.New(logger, client)
 
-	// Create router
-	router := handler.Router(cfg.CORS)
+	// Create router with API key authentication
+	router := handler.Router(cfg.CORS, cfg.Auth.APIKeys)
 
 	// Add global middleware
 	// Note: middleware is applied in reverse order
@@ -168,13 +177,22 @@ Environment Variables:
   REDDIT_PASSWORD          Optional password for user authentication
   REDDIT_USER_AGENT        Optional custom user agent string
 
+  API_KEYS                 Comma-separated list of valid API keys (optional)
+                           If not provided, a random key is auto-generated
+                           Example: API_KEYS="key1,key2,key3"
+
   CORS_ALLOWED_ORIGINS     Comma-separated allowed origins (default: *)
   CORS_ALLOWED_METHODS     Comma-separated allowed methods (default: GET,OPTIONS)
   CORS_ALLOWED_HEADERS     Comma-separated allowed headers (default: Content-Type,Authorization)
   CORS_MAX_AGE             Preflight cache max age in seconds (default: 300)
 
+Authentication:
+  All API endpoints except /health require an API key. Provide the key via:
+  - X-API-Key header: curl -H "X-API-Key: your-api-key" http://localhost:8080/api/v1/user/me
+  - Authorization header: curl -H "Authorization: Bearer your-api-key" http://localhost:8080/api/v1/user/me
+
 Examples:
-  # Start server with default configuration
+  # Start server with default configuration (auto-generates API key)
   reddit-server
 
   # Start server with debug logging
@@ -187,6 +205,15 @@ Examples:
   REDDIT_CLIENT_ID=your-id \
   REDDIT_CLIENT_SECRET=your-secret \
   reddit-server
+
+  # Start server with persistent API key(s)
+  API_KEYS="my-secret-key" \
+  REDDIT_CLIENT_ID=your-id \
+  REDDIT_CLIENT_SECRET=your-secret \
+  reddit-server
+
+  # Generate a secure API key (example)
+  openssl rand -base64 32
 
 Endpoints:
   GET    /health                                  Health check

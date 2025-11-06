@@ -2,9 +2,12 @@
 package config
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -30,6 +33,7 @@ type Config struct {
 	Server Server
 	Reddit Reddit
 	CORS   CORS
+	Auth   Auth
 }
 
 // CORS contains CORS configuration.
@@ -38,6 +42,12 @@ type CORS struct {
 	AllowedMethods string // Comma-separated list of allowed HTTP methods
 	AllowedHeaders string // Comma-separated list of allowed headers
 	MaxAge         int    // Max age for preflight cache in seconds
+}
+
+// Auth contains authentication configuration.
+type Auth struct {
+	APIKeys      []string // API keys for client authentication (auto-generated if not provided)
+	GeneratedKey string   // Set if key was auto-generated (for logging only)
 }
 
 // FromEnv loads configuration from environment variables.
@@ -55,9 +65,11 @@ type CORS struct {
 //   - CORS_ALLOWED_METHODS: Comma-separated allowed methods (default: GET,OPTIONS)
 //   - CORS_ALLOWED_HEADERS: Comma-separated allowed headers (default: Content-Type,Authorization)
 //   - CORS_MAX_AGE: Preflight cache max age in seconds (default: 300, must be non-negative)
+//   - API_KEYS: Comma-separated list of valid API keys (optional, auto-generated if not provided)
 //
 // Returns an error if required fields (REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET) are missing
-// or if environment variables cannot be parsed.
+// or if environment variables cannot be parsed. If API_KEYS is not provided, a cryptographically
+// secure random API key is auto-generated.
 func FromEnv() (*Config, error) {
 	// Parse integer configuration values with error handling
 	port, err := getIntEnv("SERVER_PORT", 8080)
@@ -85,6 +97,20 @@ func FromEnv() (*Config, error) {
 		return nil, err
 	}
 
+	// Parse API keys from environment or auto-generate if not provided
+	apiKeysStr := os.Getenv("API_KEYS")
+	apiKeys := parseAPIKeys(apiKeysStr)
+	generatedKey := ""
+
+	if len(apiKeys) == 0 {
+		// Auto-generate a secure random API key
+		generatedKey, err = generateSecureAPIKey()
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate API key: %w", err)
+		}
+		apiKeys = []string{generatedKey}
+	}
+
 	cfg := &Config{
 		Server: Server{
 			Port:         port,
@@ -104,6 +130,10 @@ func FromEnv() (*Config, error) {
 			AllowedMethods: getStringEnv("CORS_ALLOWED_METHODS", "GET,OPTIONS"),
 			AllowedHeaders: getStringEnv("CORS_ALLOWED_HEADERS", "Content-Type,Authorization"),
 			MaxAge:         corsMaxAge,
+		},
+		Auth: Auth{
+			APIKeys:      apiKeys,
+			GeneratedKey: generatedKey,
 		},
 	}
 
@@ -164,4 +194,35 @@ func getStringEnv(key, defaultVal string) string {
 		return val
 	}
 	return defaultVal
+}
+
+// parseAPIKeys parses a comma-separated list of API keys, trimming whitespace.
+// Returns an empty slice if the input is empty.
+func parseAPIKeys(apiKeysStr string) []string {
+	if apiKeysStr == "" {
+		return []string{}
+	}
+
+	keys := strings.Split(apiKeysStr, ",")
+	result := make([]string, 0, len(keys))
+	for _, key := range keys {
+		trimmed := strings.TrimSpace(key)
+		if trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
+}
+
+// generateSecureAPIKey generates a cryptographically secure random API key.
+// Returns a URL-safe base64-encoded 32-byte random string.
+func generateSecureAPIKey() (string, error) {
+	// Generate 32 random bytes (256 bits)
+	b := make([]byte, 32)
+	_, err := rand.Read(b)
+	if err != nil {
+		return "", err
+	}
+	// Encode as URL-safe base64
+	return base64.URLEncoding.EncodeToString(b), nil
 }
