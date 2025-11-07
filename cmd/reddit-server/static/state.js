@@ -17,6 +17,9 @@
  */
 function appState() {
   return {
+    // ========== Configuration ==========
+    PAGE_SIZE: 25,
+
     // ========== Authentication State ==========
     apiKey: '',
     authenticated: false,
@@ -45,12 +48,15 @@ function appState() {
     // ========== Saved Posts State ==========
     savedPosts: [],
     savedFilters: {
-      sortBy: 'hot',
+      author: '',
+      minScore: null,
+      sortBy: 'created_utc',
       subreddit: '',
     },
     savedPagination: {
-      after: '',
-      before: '',
+      offset: 0,
+      limit: 25,
+      total: 0,
     },
     savedComments: [],
     savedCurrentPost: null,
@@ -60,7 +66,7 @@ function appState() {
     bulkSort: 'hot',
     bulkLimit: 25,
     bulkProgress: {
-      current: 0,
+      saved: 0,
       total: 0,
     },
 
@@ -74,6 +80,7 @@ function appState() {
     loading: false,
     error: '',
     success: '',
+    _messageTimeoutId: null,
 
     // ========== INITIALIZATION ==========
 
@@ -166,30 +173,13 @@ function appState() {
         return;
       }
 
-      this.loading = true;
-      this.error = '';
       this.selectedPosts.clear();
+      await this._fetchPostsWithParams({});
 
-      try {
-        const sortFunc = this.sortBy === 'hot' ? window.api.fetchHotPosts : window.api.fetchNewPosts;
-        const result = await sortFunc({
-          subreddit: this.subreddit.trim(),
-          limit: 25,
-        });
-
-        this.posts = result.posts || [];
-        this.pagination.after = result.after || '';
-        this.pagination.before = result.before || '';
-
-        if (this.posts.length === 0) {
-          this.showError('No posts found. Try a different subreddit.');
-        } else {
-          this.showSuccess(`Loaded ${this.posts.length} posts`);
-        }
-      } catch (err) {
-        this.showError('Failed to fetch posts: ' + err.message);
-      } finally {
-        this.loading = false;
+      if (this.posts.length === 0) {
+        this.showError('No posts found. Try a different subreddit.');
+      } else {
+        this.showSuccess(`Loaded ${this.posts.length} posts`);
       }
     },
 
@@ -202,26 +192,7 @@ function appState() {
         return;
       }
 
-      this.loading = true;
-      this.error = '';
-
-      try {
-        const sortFunc = this.sortBy === 'hot' ? window.api.fetchHotPosts : window.api.fetchNewPosts;
-        const result = await sortFunc({
-          subreddit: this.subreddit.trim(),
-          limit: 25,
-          after: this.pagination.after,
-        });
-
-        this.posts = result.posts || [];
-        this.pagination.after = result.after || '';
-        this.pagination.before = result.before || '';
-        this.selectedPosts.clear();
-      } catch (err) {
-        this.showError('Failed to load next page: ' + err.message);
-      } finally {
-        this.loading = false;
-      }
+      await this._fetchPostsWithParams({ after: this.pagination.after });
     },
 
     /**
@@ -233,26 +204,7 @@ function appState() {
         return;
       }
 
-      this.loading = true;
-      this.error = '';
-
-      try {
-        const sortFunc = this.sortBy === 'hot' ? window.api.fetchHotPosts : window.api.fetchNewPosts;
-        const result = await sortFunc({
-          subreddit: this.subreddit.trim(),
-          limit: 25,
-          before: this.pagination.before,
-        });
-
-        this.posts = result.posts || [];
-        this.pagination.after = result.after || '';
-        this.pagination.before = result.before || '';
-        this.selectedPosts.clear();
-      } catch (err) {
-        this.showError('Failed to load previous page: ' + err.message);
-      } finally {
-        this.loading = false;
-      }
+      await this._fetchPostsWithParams({ before: this.pagination.before });
     },
 
     /**
@@ -271,7 +223,7 @@ function appState() {
         const postId = post.data.id;
 
         const result = await window.api.fetchComments(subreddit, postId, {
-          limit: 25,
+          limit: this.PAGE_SIZE,
         });
 
         this.currentPost = result.post;
@@ -297,11 +249,44 @@ function appState() {
     },
 
     /**
+     * Internal helper to fetch posts with pagination parameters
+     * Reduces duplication across fetchPosts(), nextPage(), and previousPage()
+     * @private
+     */
+    async _fetchPostsWithParams(params) {
+      this.loading = true;
+      this.error = '';
+
+      try {
+        const sortFunc = this.sortBy === 'hot' ? window.api.fetchHotPosts : window.api.fetchNewPosts;
+        const result = await sortFunc({
+          subreddit: this.subreddit.trim(),
+          limit: this.PAGE_SIZE,
+          ...params
+        });
+
+        this.posts = result.posts || [];
+        this.pagination.after = result.after || '';
+        this.pagination.before = result.before || '';
+        this.selectedPosts.clear();
+      } catch (err) {
+        this.showError('Failed to load posts: ' + err.message);
+      } finally {
+        this.loading = false;
+      }
+    },
+
+    /**
      * Load more comments (expand comment thread)
      *
      * @param {object} commentData - The comment data object containing more_replies info
      */
     async loadMoreComments(commentData) {
+      if (!this.currentPost) {
+        this.showError('No post is currently being viewed');
+        return;
+      }
+
       if (!commentData.more_replies || !Array.isArray(commentData.more_children)) {
         return;
       }
@@ -338,7 +323,7 @@ function appState() {
       } else {
         this.selectedPosts.add(postId);
       }
-      // Force Alpine.js reactivity by triggering a state change
+      // Force Alpine.js reactivity: Set mutations don't trigger updates automatically
       this.selectedPosts = new Set(this.selectedPosts);
     },
 
@@ -349,6 +334,7 @@ function appState() {
       this.posts.forEach(post => {
         this.selectedPosts.add(post.data.id);
       });
+      // Force Alpine.js reactivity: Set mutations don't trigger updates automatically
       this.selectedPosts = new Set(this.selectedPosts);
     },
 
@@ -392,8 +378,8 @@ function appState() {
       this.error = '';
 
       try {
-        // Stub: In production, this would make an API call
-        // await window.api.savePost(post);
+        await window.api.savePost(post);
+        await this.loadStorageStats();
         this.showSuccess(`Saved post: ${post.data.title.substring(0, 50)}...`);
       } catch (err) {
         this.showError('Failed to save post: ' + err.message);
@@ -420,11 +406,13 @@ function appState() {
           this.selectedPosts.has(post.data.id)
         );
 
-        // Stub: In production, would batch save to backend
-        // await window.api.saveMultiplePosts(postsToSave);
+        for (const post of postsToSave) {
+          await window.api.savePost(post);
+        }
+        await this.loadStorageStats();
 
         const count = postsToSave.length;
-        this.showSuccess(`Saved ${count} post${count !== 1 ? 's' : ''}`);
+        this.showSuccess(`Saved ${count} post${this.pluralize(count)}`);
         this.selectedPosts.clear();
       } catch (err) {
         this.showError('Failed to save posts: ' + err.message);
@@ -446,11 +434,14 @@ function appState() {
       this.error = '';
 
       try {
-        // Stub: In production, would persist post + comments to backend
-        // await window.api.savePostWithComments(this.currentPost, this.comments);
+        await window.api.savePost(this.currentPost);
+        if (this.comments.length > 0) {
+          await window.api.saveComments(this.currentPost.data.id, this.comments);
+        }
+        await this.loadStorageStats();
 
         this.showSuccess(
-          `Saved post with ${this.comments.length} comment${this.comments.length !== 1 ? 's' : ''}`
+          `Saved post with ${this.comments.length} comment${this.pluralize(this.comments.length)}`
         );
       } catch (err) {
         this.showError('Failed to save post with comments: ' + err.message);
@@ -471,51 +462,26 @@ function appState() {
 
       this.loading = true;
       this.error = '';
-      this.bulkProgress.current = 0;
+      this.bulkProgress.saved = 0;
       this.bulkProgress.total = this.bulkLimit;
 
       try {
-        const sortFunc = this.bulkSort === 'hot' ? window.api.fetchHotPosts : window.api.fetchNewPosts;
-        const allPosts = [];
-        let after = '';
-        let remaining = this.bulkLimit;
+        const result = await window.api.bulkSaveFromSubreddit(
+          this.bulkSubreddit.trim(),
+          this.bulkSort,
+          this.bulkLimit
+        );
 
-        while (remaining > 0) {
-          const batchSize = Math.min(remaining, 25);
-          const result = await sortFunc({
-            subreddit: this.bulkSubreddit.trim(),
-            limit: batchSize,
-            after: after,
-          });
-
-          if (!result.posts || result.posts.length === 0) {
-            break;
-          }
-
-          allPosts.push(...result.posts);
-          this.bulkProgress.current += result.posts.length;
-          remaining -= result.posts.length;
-
-          if (!result.after) {
-            break;
-          }
-          after = result.after;
-
-          // Small delay to avoid rate limiting
-          await new Promise(resolve => setTimeout(resolve, 100));
-        }
-
-        // Stub: In production, would save all posts to backend
-        // await window.api.saveBulkPosts(allPosts);
+        await this.loadStorageStats();
 
         this.showSuccess(
-          `Bulk saved ${allPosts.length} post${allPosts.length !== 1 ? 's' : ''}`
+          `Bulk saved ${result.saved} post${this.pluralize(result.saved)}`
         );
-        this.bulkProgress.current = 0;
+        this.bulkProgress.saved = 0;
         this.bulkProgress.total = 0;
       } catch (err) {
         this.showError('Bulk save failed: ' + err.message);
-        this.bulkProgress.current = 0;
+        this.bulkProgress.saved = 0;
         this.bulkProgress.total = 0;
       } finally {
         this.loading = false;
@@ -533,13 +499,21 @@ function appState() {
       this.error = '';
 
       try {
-        // Stub: In production, would fetch from backend
-        // const result = await window.api.getSavedPosts({
-        //   sortBy: this.savedFilters.sortBy,
-        //   subreddit: this.savedFilters.subreddit,
-        // });
-        // this.savedPosts = result.posts || [];
-        // this.savedPagination = { after: result.after, before: result.before };
+        const result = await window.api.listSavedPosts(
+          {
+            subreddit: this.savedFilters.subreddit || undefined,
+            author: this.savedFilters.author || undefined,
+            min_score: this.savedFilters.minScore || undefined,
+            sort_by: this.savedFilters.sortBy,
+            sort_dir: 'desc'
+          },
+          {
+            limit: this.savedPagination.limit,
+            offset: this.savedPagination.offset
+          }
+        );
+        this.savedPosts = result.posts || [];
+        this.savedPagination.total = result.total || 0;
 
         this.showSuccess('Loaded saved posts');
         this.view = 'saved';
@@ -560,12 +534,9 @@ function appState() {
       this.error = '';
 
       try {
-        // Stub: In production, would fetch from backend storage
-        // const result = await window.api.getSavedComments(post.id);
-        // this.savedCurrentPost = post;
-        // this.savedComments = result.comments || [];
-
+        const result = await window.api.getSavedComments(post.data.id, {});
         this.savedCurrentPost = post;
+        this.savedComments = result.comments || [];
       } catch (err) {
         this.showError('Failed to load comments: ' + err.message);
       } finally {
@@ -583,8 +554,8 @@ function appState() {
       this.error = '';
 
       try {
-        // Stub: In production, would delete from backend
-        // await window.api.deleteSavedPost(postId);
+        await window.api.deleteSavedPost(postId);
+        await this.loadStorageStats();
 
         this.savedPosts = this.savedPosts.filter(p => p.data.id !== postId);
         this.showSuccess('Post deleted');
@@ -599,56 +570,26 @@ function appState() {
      * Load next page of saved posts (stub implementation)
      */
     async savedNextPage() {
-      if (!this.savedPagination.after) {
+      if (this.savedPagination.offset + this.savedPagination.limit >= this.savedPagination.total) {
         this.showError('No more posts available');
         return;
       }
 
-      this.loading = true;
-      this.error = '';
-
-      try {
-        // Stub: In production, would fetch next page from backend
-        // const result = await window.api.getSavedPosts({
-        //   sortBy: this.savedFilters.sortBy,
-        //   subreddit: this.savedFilters.subreddit,
-        //   after: this.savedPagination.after,
-        // });
-        // this.savedPosts = result.posts || [];
-        // this.savedPagination = { after: result.after, before: result.before };
-      } catch (err) {
-        this.showError('Failed to load next page: ' + err.message);
-      } finally {
-        this.loading = false;
-      }
+      this.savedPagination.offset += this.savedPagination.limit;
+      await this.loadSavedPosts();
     },
 
     /**
      * Load previous page of saved posts (stub implementation)
      */
     async savedPreviousPage() {
-      if (!this.savedPagination.before) {
+      if (this.savedPagination.offset === 0) {
         this.showError('No previous posts available');
         return;
       }
 
-      this.loading = true;
-      this.error = '';
-
-      try {
-        // Stub: In production, would fetch previous page from backend
-        // const result = await window.api.getSavedPosts({
-        //   sortBy: this.savedFilters.sortBy,
-        //   subreddit: this.savedFilters.subreddit,
-        //   before: this.savedPagination.before,
-        // });
-        // this.savedPosts = result.posts || [];
-        // this.savedPagination = { after: result.after, before: result.before };
-      } catch (err) {
-        this.showError('Failed to load previous page: ' + err.message);
-      } finally {
-        this.loading = false;
-      }
+      this.savedPagination.offset = Math.max(0, this.savedPagination.offset - this.savedPagination.limit);
+      await this.loadSavedPosts();
     },
 
     // ========== STATISTICS ==========
@@ -659,20 +600,28 @@ function appState() {
      */
     async loadStorageStats() {
       try {
-        // Stub: In production, would fetch from backend
-        // const result = await window.api.getStorageStats();
-        // this.stats.postCount = result.postCount || 0;
-        // this.stats.commentCount = result.commentCount || 0;
-
-        // For now, initialize with defaults
-        this.stats.postCount = 0;
-        this.stats.commentCount = 0;
+        const result = await window.api.getStorageStats();
+        this.stats.postCount = result.post_count || 0;
+        this.stats.commentCount = result.comment_count || 0;
       } catch (err) {
+        // Silently log stats errors to avoid disrupting save operations
         console.error('Failed to load storage stats:', err.message);
+        // Keep existing stats on failure
       }
     },
 
     // ========== UI HELPERS ==========
+
+    /**
+     * Helper for grammatically correct pluralization
+     * @param {number} count - The count to check
+     * @param {string} singular - Singular suffix (default: '')
+     * @param {string} plural - Plural suffix (default: 's')
+     * @returns {string} Appropriate suffix
+     */
+    pluralize(count, singular = '', plural = 's') {
+      return count === 1 ? singular : plural;
+    },
 
     /**
      * Display an error message
@@ -683,10 +632,15 @@ function appState() {
     showError(message) {
       this.error = message;
       this.success = '';
-      setTimeout(() => {
-        if (this.error === message) {
-          this.error = '';
-        }
+
+      // Clear any existing timeout
+      if (this._messageTimeoutId) {
+        clearTimeout(this._messageTimeoutId);
+      }
+
+      this._messageTimeoutId = setTimeout(() => {
+        this.error = '';
+        this._messageTimeoutId = null;
       }, 3000);
     },
 
@@ -699,10 +653,15 @@ function appState() {
     showSuccess(message) {
       this.success = message;
       this.error = '';
-      setTimeout(() => {
-        if (this.success === message) {
-          this.success = '';
-        }
+
+      // Clear any existing timeout
+      if (this._messageTimeoutId) {
+        clearTimeout(this._messageTimeoutId);
+      }
+
+      this._messageTimeoutId = setTimeout(() => {
+        this.success = '';
+        this._messageTimeoutId = null;
       }, 3000);
     },
 
