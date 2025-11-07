@@ -589,7 +589,7 @@ async function savePost(post) {
 
   const response = await makeRequest('/api/v1/storage/posts', {
     method: 'POST',
-    body: post,
+    body: { post: post },
   });
 
   return {
