@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -36,6 +37,11 @@ type Config struct {
 
 	// CORS configuration
 	AllowedOrigins []string // CORS allowed origins (from ALLOWED_ORIGINS, comma-separated)
+
+	// Storage configuration
+	StorageDSN          string // Database connection string (from STORAGE_DSN, default: ~/.local/share/reddit-server/reddit.db)
+	StorageMaxOpenConns int    // Maximum open database connections (from STORAGE_MAX_OPEN_CONNS, default: 10)
+	StorageMaxIdleConns int    // Maximum idle database connections (from STORAGE_MAX_IDLE_CONNS, default: 5)
 }
 
 // Load reads configuration from environment variables and returns a Config with defaults applied.
@@ -52,14 +58,20 @@ type Config struct {
 //   - REDDIT_USER_AGENT: Custom user agent string
 //   - API_KEYS: Comma-separated list of API keys for authentication (auto-generated if empty)
 //   - ALLOWED_ORIGINS: Comma-separated list of CORS allowed origins
+//   - STORAGE_DSN: Database connection string (default: XDG_DATA_HOME/reddit-server/reddit.db or ~/.local/share/reddit-server/reddit.db)
+//   - STORAGE_MAX_OPEN_CONNS: Maximum open database connections (default: 10)
+//   - STORAGE_MAX_IDLE_CONNS: Maximum idle database connections (default: 5)
 //
 // Returns the config, a generated API key (if one was auto-generated), and an error if any required fields are missing or invalid.
 // If API_KEYS is empty, a secure random API key is generated and stored in Config.APIKeys.
+// The storage DSN directory is created if it doesn't exist.
 func Load() (*Config, string, error) {
 	cfg := &Config{
-		Port:            8080,
-		ShutdownTimeout: 30 * time.Second,
-		RequestTimeout:  30 * time.Second,
+		Port:                8080,
+		ShutdownTimeout:     30 * time.Second,
+		RequestTimeout:      30 * time.Second,
+		StorageMaxOpenConns: 10,
+		StorageMaxIdleConns: 5,
 	}
 
 	// Parse port
@@ -131,6 +143,57 @@ func Load() (*Config, string, error) {
 		}
 	}
 
+	// Parse storage configuration
+	if dsnStr := os.Getenv("STORAGE_DSN"); dsnStr != "" {
+		cfg.StorageDSN = dsnStr
+	} else {
+		// Build default DSN using XDG_DATA_HOME or ~/.local/share
+		dataHome := os.Getenv("XDG_DATA_HOME")
+		if dataHome != "" {
+			// XDG spec requires absolute path
+			if !filepath.IsAbs(dataHome) {
+				return nil, "", fmt.Errorf("XDG_DATA_HOME must be an absolute path, got %q", dataHome)
+			}
+			// Check for directory traversal
+			if strings.Contains(dataHome, "..") {
+				return nil, "", fmt.Errorf("XDG_DATA_HOME must not contain '..' sequences, got %q", dataHome)
+			}
+		}
+		if dataHome == "" {
+			homeDir, err := os.UserHomeDir()
+			if err != nil {
+				return nil, "", fmt.Errorf("failed to determine home directory: %w", err)
+			}
+			dataHome = filepath.Join(homeDir, ".local", "share")
+		}
+
+		dbDir := filepath.Join(dataHome, "reddit-server")
+		cfg.StorageDSN = filepath.Join(dbDir, "reddit.db")
+
+		// Create directory if it doesn't exist with secure permissions
+		if err := os.MkdirAll(dbDir, 0o700); err != nil {
+			return nil, "", fmt.Errorf("failed to create storage directory %q: %w", dbDir, err)
+		}
+	}
+
+	// Parse storage max open connections
+	if maxOpenStr := os.Getenv("STORAGE_MAX_OPEN_CONNS"); maxOpenStr != "" {
+		maxOpen, err := strconv.Atoi(maxOpenStr)
+		if err != nil {
+			return nil, "", fmt.Errorf("invalid STORAGE_MAX_OPEN_CONNS: %w", err)
+		}
+		cfg.StorageMaxOpenConns = maxOpen
+	}
+
+	// Parse storage max idle connections
+	if maxIdleStr := os.Getenv("STORAGE_MAX_IDLE_CONNS"); maxIdleStr != "" {
+		maxIdle, err := strconv.Atoi(maxIdleStr)
+		if err != nil {
+			return nil, "", fmt.Errorf("invalid STORAGE_MAX_IDLE_CONNS: %w", err)
+		}
+		cfg.StorageMaxIdleConns = maxIdle
+	}
+
 	return cfg, generatedKey, nil
 }
 
@@ -141,6 +204,8 @@ func Load() (*Config, string, error) {
 //   - Timeout values (must be positive and not exceed 5 minutes)
 //   - API keys (must be at least 32 characters and valid base64)
 //   - CORS origins (must start with http:// or https://)
+//   - Storage DSN (must not be empty)
+//   - Storage pool sizes (must be positive)
 //
 // Returns an error if any validation fails.
 func (c *Config) Validate() error {
@@ -202,6 +267,59 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	// Validate storage configuration
+	const (
+		maxStorageOpenConns = 100
+		maxStorageIdleConns = 50
+	)
+
+	if c.StorageDSN == "" {
+		errs = append(errs, errors.New("storage DSN must not be empty"))
+	} else if c.StorageDSN != ":memory:" {
+		// Check for directory traversal attempts
+		if strings.Contains(c.StorageDSN, "..") {
+			errs = append(errs, fmt.Errorf("storage DSN must not contain '..' (directory traversal protection)"))
+		}
+
+		// Ensure path is absolute for security
+		if !filepath.IsAbs(c.StorageDSN) {
+			errs = append(errs, fmt.Errorf("storage DSN must be an absolute path, got %q", c.StorageDSN))
+		}
+
+		// Validate parent directory exists and is writable
+		dir := filepath.Dir(c.StorageDSN)
+		if info, err := os.Stat(dir); err != nil {
+			if os.IsNotExist(err) {
+				errs = append(errs, fmt.Errorf("storage DSN parent directory %q does not exist", dir))
+			} else {
+				errs = append(errs, fmt.Errorf("cannot access storage DSN parent directory %q: %w", dir, err))
+			}
+		} else if !info.IsDir() {
+			errs = append(errs, fmt.Errorf("storage DSN parent %q is not a directory", dir))
+		}
+
+		// Check if DSN points to existing directory (should be file)
+		if info, err := os.Stat(c.StorageDSN); err == nil && info.IsDir() {
+			errs = append(errs, fmt.Errorf("storage DSN %q is a directory, expected file path", c.StorageDSN))
+		}
+	}
+
+	if c.StorageMaxOpenConns <= 0 {
+		errs = append(errs, fmt.Errorf("storage max open connections must be positive, got %d", c.StorageMaxOpenConns))
+	}
+	if c.StorageMaxOpenConns > maxStorageOpenConns {
+		errs = append(errs, fmt.Errorf("storage max open connections must not exceed %d (resource limit), got %d", maxStorageOpenConns, c.StorageMaxOpenConns))
+	}
+	if c.StorageMaxIdleConns <= 0 {
+		errs = append(errs, fmt.Errorf("storage max idle connections must be positive, got %d", c.StorageMaxIdleConns))
+	}
+	if c.StorageMaxIdleConns > maxStorageIdleConns {
+		errs = append(errs, fmt.Errorf("storage max idle connections must not exceed %d (resource limit), got %d", maxStorageIdleConns, c.StorageMaxIdleConns))
+	}
+	if c.StorageMaxIdleConns > c.StorageMaxOpenConns {
+		errs = append(errs, fmt.Errorf("storage max idle connections (%d) must not exceed max open connections (%d)", c.StorageMaxIdleConns, c.StorageMaxOpenConns))
+	}
+
 	if len(errs) > 0 {
 		return errors.Join(errs...)
 	}
@@ -217,7 +335,7 @@ func (c *Config) String() string {
 		redactedKeys[i] = redact(c.APIKeys[i])
 	}
 	return fmt.Sprintf(
-		"Config{Port: %d, ShutdownTimeout: %v, RequestTimeout: %v, RedditClientID: %s, RedditClientSecret: %s, RedditUsername: %s, RedditPassword: %s, APIKeys: %v, AllowedOrigins: %v}",
+		"Config{Port: %d, ShutdownTimeout: %v, RequestTimeout: %v, RedditClientID: %s, RedditClientSecret: %s, RedditUsername: %s, RedditPassword: %s, APIKeys: %v, AllowedOrigins: %v, StorageDSN: %s, StorageMaxOpenConns: %d, StorageMaxIdleConns: %d}",
 		c.Port,
 		c.ShutdownTimeout,
 		c.RequestTimeout,
@@ -227,6 +345,9 @@ func (c *Config) String() string {
 		redact(c.RedditPassword),
 		redactedKeys,
 		c.AllowedOrigins,
+		redact(c.StorageDSN),
+		c.StorageMaxOpenConns,
+		c.StorageMaxIdleConns,
 	)
 }
 

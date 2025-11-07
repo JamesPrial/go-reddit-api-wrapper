@@ -9,8 +9,8 @@
     <link rel="stylesheet" href="/static/style.css">
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 </head>
-<body>
-    <div x-data="appState()" x-init="initApp()" class="app-container">
+<body x-data="appState()" x-init="initApp()" x-cloak>
+    <div class="app-container">
         <!-- Header -->
         <header class="app-header">
             <div class="header-content">
@@ -21,6 +21,10 @@
                             <span class="status-dot"></span>
                             Authenticated
                         </span>
+                        <div class="stats-badges">
+                            <span class="status-badge" x-text="`📝 ${stats.postCount} posts`"></span>
+                            <span class="status-badge" x-text="`💬 ${stats.commentCount} comments`"></span>
+                        </div>
                         <button @click="logout()" class="btn-logout">Logout</button>
                     </template>
                     <template x-if="!authenticated">
@@ -35,11 +39,34 @@
 
         <!-- Main Content -->
         <main class="app-main">
+            <!-- Navigation Tabs (shown when authenticated) -->
+            <template x-if="authenticated">
+                <nav class="view-tabs">
+                    <button @click="view = 'posts'; fetchPosts()" :class="{ 'active': view === 'posts' }" class="tab-button">
+                        Browse Reddit
+                    </button>
+                    <button @click="loadSavedPosts()" :class="{ 'active': view === 'saved' }" class="tab-button">
+                        Saved Posts
+                    </button>
+                    <button @click="view = 'bulk'" :class="{ 'active': view === 'bulk' }" class="tab-button">
+                        Bulk Download
+                    </button>
+                </nav>
+            </template>
+
             <!-- Error Display -->
             <template x-if="error">
                 <div class="error-banner" role="alert">
                     <span x-text="error"></span>
                     <button @click="error = ''" class="btn-close" aria-label="Close error message">×</button>
+                </div>
+            </template>
+
+            <!-- Success Display -->
+            <template x-if="success">
+                <div class="success-banner" role="alert">
+                    <span x-text="success"></span>
+                    <button @click="success = ''" class="btn-close">×</button>
                 </div>
             </template>
 
@@ -120,6 +147,15 @@
                         </button>
                     </div>
 
+                    <!-- Batch Save Controls -->
+                    <template x-if="posts.length > 0">
+                        <div class="batch-controls">
+                            <button @click="saveSelectedPosts()" :disabled="selectedPosts.size === 0" class="btn-primary">
+                                💾 Save Selected (<span x-text="selectedPosts.size"></span>)
+                            </button>
+                        </div>
+                    </template>
+
                     <!-- Posts List -->
                     <div class="posts-list">
                         <template x-if="posts.length === 0 && !loading">
@@ -129,34 +165,42 @@
                         </template>
 
                         <template x-for="post in posts" :key="post.data.id" class="post-item-wrapper">
-                            <article class="post-item" @click="viewComments(post)">
-                                <div class="post-header">
-                                    <h3 x-text="post.data.title"></h3>
-                                    <span class="post-meta" x-text="`u/${post.data.author}`"></span>
+                            <article class="post-item">
+                                <div class="post-checkbox">
+                                    <input type="checkbox" @change="togglePostSelection(post.data.id)" :checked="selectedPosts.has(post.data.id)">
                                 </div>
-                                <div class="post-content">
-                                    <template x-if="post.data.selftext">
-                                        <p class="post-selftext" x-text="post.data.selftext.substring(0, 150) + (post.data.selftext.length > 150 ? '...' : '')"></p>
-                                    </template>
-                                    <template x-if="!post.data.selftext && post.data.url">
-                                        <p class="post-url">
-                                            <span class="url-label">Link</span>
-                                            <a :href="post.data.url" target="_blank" rel="noopener noreferrer" @click.stop x-text="post.data.url.substring(0, 50) + '...'"></a>
-                                        </p>
-                                    </template>
+                                <div class="post-content-wrapper" @click="viewComments(post)">
+                                    <div class="post-header">
+                                        <h3 x-text="post.data.title"></h3>
+                                        <span class="post-meta" x-text="`u/${post.data.author}`"></span>
+                                    </div>
+                                    <div class="post-content">
+                                        <template x-if="post.data.selftext">
+                                            <p class="post-selftext" x-text="post.data.selftext.substring(0, 150) + (post.data.selftext.length > 150 ? '...' : '')"></p>
+                                        </template>
+                                        <template x-if="!post.data.selftext && post.data.url">
+                                            <p class="post-url">
+                                                <span class="url-label">Link</span>
+                                                <a :href="post.data.url" target="_blank" rel="noopener noreferrer" @click.stop x-text="post.data.url.substring(0, 50) + '...'"></a>
+                                            </p>
+                                        </template>
+                                    </div>
+                                    <div class="post-stats">
+                                        <span class="stat">
+                                            <span class="stat-label">↑</span>
+                                            <span x-text="post.data.score"></span>
+                                        </span>
+                                        <span class="stat">
+                                            <span class="stat-label">💬</span>
+                                            <span x-text="post.data.num_comments"></span>
+                                        </span>
+                                    </div>
+                                    <div class="post-action">
+                                        View Comments →
+                                    </div>
                                 </div>
-                                <div class="post-stats">
-                                    <span class="stat">
-                                        <span class="stat-label">↑</span>
-                                        <span x-text="post.data.score"></span>
-                                    </span>
-                                    <span class="stat">
-                                        <span class="stat-label">💬</span>
-                                        <span x-text="post.data.num_comments"></span>
-                                    </span>
-                                </div>
-                                <div class="post-action">
-                                    View Comments →
+                                <div class="post-actions">
+                                    <button @click.stop="savePost(post)" class="btn-secondary">💾 Save</button>
                                 </div>
                             </article>
                         </template>
@@ -184,6 +228,153 @@
                 </section>
             </template>
 
+            <!-- Saved Posts View Section (shown when browsing saved posts) -->
+            <template x-if="authenticated && view === 'saved'">
+                <section class="saved-section">
+                    <h2>Saved Posts (<span x-text="savedPagination.total"></span>)</h2>
+
+                    <!-- Filters -->
+                    <div class="filters">
+                        <input type="text" x-model="savedFilters.subreddit" placeholder="Subreddit" class="filter-input">
+                        <input type="text" x-model="savedFilters.author" placeholder="Author" class="filter-input">
+                        <input type="number" x-model="savedFilters.minScore" placeholder="Min score" class="filter-input">
+                        <select x-model="savedFilters.sortBy" class="filter-select">
+                            <option value="created_utc">Date</option>
+                            <option value="score">Score</option>
+                            <option value="num_comments">Comments</option>
+                        </select>
+                        <button @click="loadSavedPosts()" class="btn-primary">Apply Filters</button>
+                    </div>
+
+                    <!-- Posts list -->
+                    <div class="posts-list">
+                        <template x-if="savedPosts.length === 0 && !loading">
+                            <div class="empty-state">
+                                <p>No saved posts found.</p>
+                            </div>
+                        </template>
+
+                        <template x-for="post in savedPosts" :key="post.data.id" class="post-item-wrapper">
+                            <article class="post-item">
+                                <div class="post-content-wrapper" @click="viewComments(post)">
+                                    <div class="post-header">
+                                        <h3 x-text="post.data.title"></h3>
+                                        <span class="post-meta" x-text="`u/${post.data.author}`"></span>
+                                    </div>
+                                    <div class="post-content">
+                                        <template x-if="post.data.selftext">
+                                            <p class="post-selftext" x-text="post.data.selftext.substring(0, 150) + (post.data.selftext.length > 150 ? '...' : '')"></p>
+                                        </template>
+                                        <template x-if="!post.data.selftext && post.data.url">
+                                            <p class="post-url">
+                                                <span class="url-label">Link</span>
+                                                <a :href="post.data.url" target="_blank" rel="noopener noreferrer" @click.stop x-text="post.data.url.substring(0, 50) + '...'"></a>
+                                            </p>
+                                        </template>
+                                    </div>
+                                    <div class="post-stats">
+                                        <span class="stat">
+                                            <span class="stat-label">↑</span>
+                                            <span x-text="post.data.score"></span>
+                                        </span>
+                                        <span class="stat">
+                                            <span class="stat-label">💬</span>
+                                            <span x-text="post.data.num_comments"></span>
+                                        </span>
+                                    </div>
+                                    <div class="post-action">
+                                        View Comments →
+                                    </div>
+                                </div>
+                                <div class="post-actions">
+                                    <button @click.stop="deleteSavedPost(post.data.id)" class="btn-delete">🗑️ Delete</button>
+                                </div>
+                            </article>
+                        </template>
+                    </div>
+
+                    <!-- Pagination -->
+                    <template x-if="savedPosts.length > 0">
+                        <div class="pagination">
+                            <button
+                                @click="savedPreviousPage()"
+                                :disabled="savedPagination.offset === 0 || loading"
+                                class="btn-secondary"
+                            >
+                                ← Prev
+                            </button>
+                            <span class="pagination-info" x-text="`${savedPagination.offset + 1} - ${Math.min(savedPagination.offset + savedPagination.limit, savedPagination.total)} of ${savedPagination.total}`"></span>
+                            <button
+                                @click="savedNextPage()"
+                                :disabled="savedPagination.offset + savedPagination.limit >= savedPagination.total || loading"
+                                class="btn-secondary"
+                            >
+                                Next →
+                            </button>
+                        </div>
+                    </template>
+                </section>
+            </template>
+
+            <!-- Bulk Download View Section (shown when in bulk mode) -->
+            <template x-if="authenticated && view === 'bulk'">
+                <section class="bulk-section">
+                    <h2>Bulk Download & Save</h2>
+                    <form @submit.prevent="bulkSaveFromSubreddit()" class="bulk-form">
+                        <div class="form-group">
+                            <label for="bulkSubreddit">Subreddit</label>
+                            <div class="subreddit-input-wrapper">
+                                <span class="subreddit-prefix">r/</span>
+                                <input
+                                    id="bulkSubreddit"
+                                    type="text"
+                                    x-model="bulkSubreddit"
+                                    placeholder="golang"
+                                    required
+                                    aria-label="Subreddit name"
+                                >
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="bulkSort">Sort By</label>
+                            <select id="bulkSort" x-model="bulkSort" class="filter-select">
+                                <option value="hot">Hot</option>
+                                <option value="new">New</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="bulkLimit">Quantity (1-100)</label>
+                            <input
+                                id="bulkLimit"
+                                type="number"
+                                x-model.number="bulkLimit"
+                                min="1"
+                                max="100"
+                                placeholder="25"
+                                required
+                            >
+                        </div>
+
+                        <button type="submit" :disabled="loading || !bulkSubreddit" class="btn-primary">
+                            <template x-if="!loading">💾 Download & Save</template>
+                            <template x-if="loading">Downloading...</template>
+                        </button>
+                    </form>
+
+                    <!-- Bulk Progress -->
+                    <template x-if="bulkProgress.total > 0">
+                        <div class="bulk-progress">
+                            <p x-text="`Progress: ${bulkProgress.saved} of ${bulkProgress.total} posts saved`"></p>
+                            <div class="progress-bar">
+                                <div class="progress-fill" :style="`width: ${(bulkProgress.saved / bulkProgress.total) * 100}%`"></div>
+                            </div>
+                        </div>
+                    </template>
+                </section>
+            </template>
+
             <!-- Comments View Section (shown when viewing comments) -->
             <template x-if="authenticated && view === 'comments' && currentPost">
                 <section class="comments-section">
@@ -195,6 +386,9 @@
                             <h2 x-text="currentPost.data.title"></h2>
                             <p class="post-meta" x-text="`u/${currentPost.data.author} • ${currentPost.data.score} points • ${currentPost.data.num_comments} comments`"></p>
                         </div>
+                        <button @click="saveCurrentPostWithComments()" :disabled="loading" class="btn-primary">
+                            💾 Save Post & Comments
+                        </button>
                     </div>
 
                     <!-- Comments List -->
@@ -238,5 +432,6 @@
     </div>
 
     <script src="/static/app.js"></script>
+    <script src="/static/state.js"></script>
 </body>
 </html>

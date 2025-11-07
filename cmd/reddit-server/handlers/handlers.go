@@ -11,18 +11,22 @@ import (
 
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 	graw "github.com/jamesprial/go-reddit-api-wrapper/reddit"
+	"github.com/jamesprial/go-reddit-api-wrapper/storage"
 )
 
 // Handlers contains dependencies for all HTTP handlers.
 type Handlers struct {
 	client RedditClient
+	store  storage.Store
 }
 
-// NewHandlers creates a new Handlers instance with the provided Reddit client.
+// NewHandlers creates a new Handlers instance with the provided Reddit client and storage.
 // The client parameter must implement the RedditClient interface.
-func NewHandlers(client RedditClient) *Handlers {
+// The store parameter is the storage backend for persisting data.
+func NewHandlers(client RedditClient, store storage.Store) *Handlers {
 	return &Handlers{
 		client: client,
+		store:  store,
 	}
 }
 

@@ -26,7 +26,7 @@ func TestGetSubreddit_PathTraversal(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := NewHandlers(nil)
+			h := NewHandlers(nil, nil)
 			req := httptest.NewRequest(http.MethodGet, tt.path, nil)
 			w := httptest.NewRecorder()
 
@@ -56,7 +56,7 @@ func TestGetSubreddit_EmptyName(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := NewHandlers(nil)
+			h := NewHandlers(nil, nil)
 			req := httptest.NewRequest(http.MethodGet, tt.path, nil)
 			w := httptest.NewRecorder()
 
@@ -88,7 +88,7 @@ func TestGetSubreddit_MethodNotAllowed(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := NewHandlers(nil)
+			h := NewHandlers(nil, nil)
 			req := httptest.NewRequest(tt.method, "/api/v1/subreddit/golang", nil)
 			w := httptest.NewRecorder()
 
@@ -196,7 +196,7 @@ func TestGetSubreddit_PathParsing(t *testing.T) {
 
 func TestGetSubreddit_ContentType(t *testing.T) {
 	// Test that responses have correct content-type
-	h := NewHandlers(nil)
+	h := NewHandlers(nil, nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/subreddit/../invalid", nil)
 	w := httptest.NewRecorder()
 
@@ -256,7 +256,7 @@ func TestGetSubreddit_Success_ReturnsSubredditData(t *testing.T) {
 		subredditError:    nil,
 	}
 
-	h := NewHandlers(mock)
+	h := NewHandlers(mock, nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/subreddit/golang", nil)
 	w := httptest.NewRecorder()
 

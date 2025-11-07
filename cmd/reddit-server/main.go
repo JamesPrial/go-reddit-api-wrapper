@@ -67,6 +67,8 @@ import (
 	"github.com/jamesprial/go-reddit-api-wrapper/cmd/reddit-server/handlers"
 	"github.com/jamesprial/go-reddit-api-wrapper/cmd/reddit-server/middleware"
 	graw "github.com/jamesprial/go-reddit-api-wrapper/reddit"
+	"github.com/jamesprial/go-reddit-api-wrapper/storage"
+	_ "github.com/jamesprial/go-reddit-api-wrapper/storage/sqlite"
 )
 
 func main() {
@@ -104,8 +106,29 @@ func main() {
 
 	logger.Info("Reddit client created successfully")
 
+	// Create storage
+	storeCfg := storage.Config{
+		DSN:             cfg.StorageDSN,
+		MaxOpenConns:    cfg.StorageMaxOpenConns,
+		MaxIdleConns:    cfg.StorageMaxIdleConns,
+		ConnMaxLifetime: 0,
+		Logger:          logger,
+	}
+
+	// Create storage with timeout
+	initCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	store, err := storage.New(initCtx, storeCfg)
+	if err != nil {
+		logger.Error("failed to create storage", "error", err)
+		os.Exit(1)
+	}
+
+	logger.Info("storage initialized successfully", "dsn", cfg.StorageDSN)
+
 	// Create HTTP handlers
-	h := handlers.NewHandlers(redditClient)
+	h := handlers.NewHandlers(redditClient, store)
 
 	// Setup HTTP router
 	mux := http.NewServeMux()
@@ -117,6 +140,11 @@ func main() {
 	mux.HandleFunc("/api/v1/posts/hot", h.GetHotPosts)
 	mux.HandleFunc("/api/v1/posts/new", h.GetNewPosts)
 	mux.HandleFunc("/api/v1/posts/", routePostsHandler(h)) // Routes to GetComments or GetMoreComments based on path
+
+	// Storage routes
+	mux.HandleFunc("/api/v1/storage/posts", routeStoragePosts(h))
+	mux.HandleFunc("/api/v1/storage/stats", h.GetStorageStats)
+	mux.HandleFunc("/api/v1/storage/bulk-save", h.BulkSaveFromSubreddit)
 
 	// Register static file handler (serves frontend at /app/)
 	mux.Handle("/app/", http.StripPrefix("/app/", StaticHandler(logger)))
@@ -192,10 +220,21 @@ func main() {
 			if closeErr := srv.Close(); closeErr != nil {
 				logger.Error("error closing server", "error", closeErr)
 			}
+			// Still attempt to close storage
+			logger.Info("closing storage after forced shutdown")
+			if storeErr := store.Close(); storeErr != nil {
+				logger.Error("error closing storage during forced shutdown", "error", storeErr)
+			}
 			os.Exit(1)
 		}
 
-		logger.Info("server shutdown complete")
+		logger.Info("server shutdown complete, closing storage")
+		if err := store.Close(); err != nil {
+			logger.Error("error closing storage", "error", err)
+			os.Exit(1)
+		}
+
+		logger.Info("storage closed successfully")
 	}
 }
 
@@ -219,6 +258,78 @@ func routePostsHandler(h *handlers.Handlers) http.HandlerFunc {
 
 		// No matching pattern
 		http.NotFound(w, r)
+	}
+}
+
+// routeStoragePosts routes requests under /api/v1/storage/posts to the appropriate handler
+// based on the HTTP method and URL path pattern. It routes:
+//   - GET  /api/v1/storage/posts -> ListSavedPosts
+//   - POST /api/v1/storage/posts -> SavePost
+//   - GET  /api/v1/storage/posts/{id} -> GetSavedPost
+//   - DELETE /api/v1/storage/posts/{id} -> DeleteSavedPost
+//   - GET  /api/v1/storage/posts/{id}/comments -> GetCommentTree
+//   - POST /api/v1/storage/posts/{id}/comments -> SaveComments
+func routeStoragePosts(h *handlers.Handlers) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Remove trailing slashes to normalize
+		path := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/v1/storage/posts"), "/")
+
+		// Handle base path /api/v1/storage/posts
+		if path == "" {
+			switch r.Method {
+			case http.MethodGet:
+				h.ListSavedPosts(w, r)
+			case http.MethodPost:
+				h.SavePost(w, r)
+			default:
+				w.Header().Set("Allow", "GET, POST")
+				http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+			}
+			return
+		}
+
+		parts := strings.Split(strings.TrimPrefix(path, "/"), "/")
+
+		// Validate no empty segments (prevents /posts//comments attacks)
+		for _, part := range parts {
+			if part == "" {
+				http.Error(w, "Bad Request", http.StatusBadRequest)
+				return
+			}
+		}
+
+		// /api/v1/storage/posts/{id}/comments
+		if len(parts) == 2 && parts[1] == "comments" {
+			postID := parts[0]
+			switch r.Method {
+			case http.MethodPost:
+				h.SaveComments(w, r, postID)
+			case http.MethodGet:
+				h.GetCommentTree(w, r, postID)
+			default:
+				w.Header().Set("Allow", "GET, POST")
+				http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+			}
+			return
+		}
+
+		// /api/v1/storage/posts/{id}
+		if len(parts) == 1 {
+			postID := parts[0]
+			switch r.Method {
+			case http.MethodGet:
+				h.GetSavedPost(w, r, postID)
+			case http.MethodDelete:
+				h.DeleteSavedPost(w, r, postID)
+			default:
+				w.Header().Set("Allow", "GET, DELETE")
+				http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+			}
+			return
+		}
+
+		// Invalid path
+		http.Error(w, "Not Found", http.StatusNotFound)
 	}
 }
 

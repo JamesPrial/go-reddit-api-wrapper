@@ -53,6 +53,9 @@ The server is configured entirely through environment variables. All variables e
 | `REDDIT_PASSWORD` | Reddit password for user authentication | _(none)_ | `your-password` |
 | `REDDIT_USER_AGENT` | Custom user agent string | `reddit-api-server/1.0 (host:hostname)` | `MyApp/1.0` |
 | `ALLOWED_ORIGINS` | Comma-separated CORS allowed origins | _(none)_ | `http://localhost:5173,https://example.com` |
+| `STORAGE_DSN` | SQLite database path or `:memory:` | `~/.local/share/reddit-server/reddit.db` | `/var/lib/reddit-server/reddit.db` or `:memory:` |
+| `STORAGE_MAX_OPEN_CONNS` | Maximum open database connections | `10` | `25` |
+| `STORAGE_MAX_IDLE_CONNS` | Maximum idle database connections | `5` | `10` |
 
 **Notes:**
 - Duration values accept Go duration strings (e.g., `30s`, `1m`, `1m30s`)
@@ -60,6 +63,8 @@ The server is configured entirely through environment variables. All variables e
 - If only client credentials are provided, the server uses application-only authentication
 - CORS is disabled if `ALLOWED_ORIGINS` is not set
 - Origins in `ALLOWED_ORIGINS` must start with `http://` or `https://`
+- Storage DSN respects `XDG_DATA_HOME` environment variable when using default location
+- Use `:memory:` for in-memory database (data lost on restart)
 
 ## Running the Server
 
@@ -515,6 +520,177 @@ curl -X POST http://localhost:8080/api/v1/posts/t3_abc123/more-comments \
 
 ---
 
+## Storage API Endpoints
+
+The server includes built-in SQLite storage for saving Reddit posts and comments locally.
+
+### Save Operations
+
+**POST /api/v1/storage/posts**
+- Saves a single post to local storage
+- Authentication: Required (API key)
+- Request body: `{"post": {...}}` (post object from Reddit API)
+- Response: `{"success": true, "id": "abc123"}`
+
+**Example:**
+
+```bash
+curl -X POST http://localhost:8080/api/v1/storage/posts \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"post": {"id": "abc123", "name": "t3_abc123", "title": "Example Post", "subreddit": "golang"}}'
+```
+
+---
+
+**POST /api/v1/storage/posts/{id}/comments**
+- Saves comments for a specific post
+- Authentication: Required (API key)
+- URL Parameters:
+  - `id` - Post ID (e.g., "abc123")
+- Request body: `{"comments": [...]}`
+- Response: `{"success": true, "count": 42}`
+
+---
+
+**POST /api/v1/storage/bulk-save**
+- Bulk downloads and saves posts from a subreddit
+- Authentication: Required (API key)
+- Request body:
+  ```json
+  {
+    "subreddit": "golang",
+    "sort": "hot",
+    "limit": 25
+  }
+  ```
+  - `subreddit` - Subreddit name (required)
+  - `sort` - Sort order: `hot`, `new`, `top`, `controversial` (default: `hot`)
+  - `limit` - Number of posts to download (1-100, default: 25)
+- Response: `{"success": true, "saved": 25, "posts": [...]}`
+
+**Example:**
+
+```bash
+curl -X POST http://localhost:8080/api/v1/storage/bulk-save \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"subreddit": "golang", "sort": "hot", "limit": 25}'
+```
+
+---
+
+### Retrieval Operations
+
+**GET /api/v1/storage/posts**
+- Lists saved posts with filtering and pagination
+- Authentication: Required (API key)
+- Query Parameters:
+  - `subreddit` - Filter by subreddit name
+  - `author` - Filter by author username
+  - `min_score` - Minimum post score (supports negative values)
+  - `max_age` - Maximum age in seconds
+  - `sort_by` - Sort field: `created_utc` (default), `score`, `num_comments`, `title`
+  - `sort_dir` - Sort direction: `desc` (default), `asc`
+  - `limit` - Number of results (default: 25, max: 100)
+  - `offset` - Pagination offset (default: 0)
+- Response: `{"posts": [...], "total": 123}`
+
+**Example:**
+
+```bash
+curl -X GET "http://localhost:8080/api/v1/storage/posts?subreddit=golang&limit=10&sort_by=score" \
+  -H "Authorization: Bearer YOUR_API_KEY"
+```
+
+---
+
+**GET /api/v1/storage/posts/{id}**
+- Retrieves a specific saved post by ID
+- Authentication: Required (API key)
+- URL Parameters:
+  - `id` - Post ID (e.g., "abc123")
+- Response: Post object or 404 if not found
+
+---
+
+**GET /api/v1/storage/posts/{id}/comments**
+- Retrieves saved comments for a post as a tree structure
+- Authentication: Required (API key)
+- URL Parameters:
+  - `id` - Post ID (e.g., "abc123")
+- Query Parameters:
+  - `max_depth` - Maximum tree depth (0 = unlimited)
+  - `sort_by` - Sort field: `score` (default), `created_utc`
+  - `sort_dir` - Sort direction: `desc` (default), `asc`
+- Response: `{"comments": [...], "count": 42}`
+
+---
+
+**GET /api/v1/storage/stats**
+- Returns storage statistics
+- Authentication: Required (API key)
+- Response: `{"post_count": 100, "comment_count": 500, ...}`
+
+**Example:**
+
+```bash
+curl -X GET http://localhost:8080/api/v1/storage/stats \
+  -H "Authorization: Bearer YOUR_API_KEY"
+```
+
+---
+
+### Delete Operations
+
+**DELETE /api/v1/storage/posts/{id}**
+- Deletes a saved post and its associated comments
+- Authentication: Required (API key)
+- URL Parameters:
+  - `id` - Post ID (e.g., "abc123")
+- Response: `{"success": true}`
+- Returns 200 even if post doesn't exist (idempotent DELETE)
+
+**Example:**
+
+```bash
+curl -X DELETE http://localhost:8080/api/v1/storage/posts/abc123 \
+  -H "Authorization: Bearer YOUR_API_KEY"
+```
+
+---
+
+### Storage Configuration
+
+**Database Location:**
+- Default: `~/.local/share/reddit-server/reddit.db`
+- Respects `XDG_DATA_HOME` environment variable
+- Use `:memory:` for in-memory database (data lost on restart)
+
+**Connection Pool:**
+- Default: 10 open connections, 5 idle connections
+- Suitable for most use cases with SQLite
+- Increase for high-concurrency scenarios
+
+**Configuration Examples:**
+
+```bash
+# Use in-memory database (testing/development)
+export STORAGE_DSN=:memory:
+
+# Custom database location
+export STORAGE_DSN=/var/lib/reddit-server/reddit.db
+
+# Increase connection pool for high concurrency
+export STORAGE_MAX_OPEN_CONNS=25
+export STORAGE_MAX_IDLE_CONNS=10
+
+# Run server with custom storage configuration
+./reddit-server
+```
+
+---
+
 ## Static Frontend
 
 The server includes a built-in web interface for browsing Reddit content.
@@ -534,8 +710,16 @@ The frontend is embedded in the server binary and requires no additional setup.
 - **API Key Management**: Enter and save the server's API key (displayed at startup) for authenticated requests to the backend
 - **Browse Posts**: View hot or new posts from any subreddit with pagination
 - **View Comments**: Display threaded comments for posts
+- **Save Posts**: Individual save button on each post, or batch save selected posts
+- **Bulk Download**: Input a subreddit and quantity to bulk download and save posts
+- **Saved Posts View**: Browse, filter, and search saved posts with pagination
+- **View Saved Comments**: Access saved comment trees for each saved post
+- **Storage Stats**: Real-time display of post and comment counts in the header
+- **Delete Posts**: Remove saved posts from storage
 - **Responsive Design**: Works on desktop, tablet, and mobile devices
 - **Dark Mode**: Automatically adapts to your system theme preference
+
+**Storage Navigation:** Navigate between "Browse Reddit", "Saved Posts", and "Bulk Download" tabs in the UI.
 
 **Note:** The "API key" refers to the server-side API key (auto-generated on first run or set via `API_KEYS` environment variable) that protects the HTTP API endpoints. This is different from Reddit's client credentials (`REDDIT_CLIENT_ID` and `REDDIT_CLIENT_SECRET`).
 

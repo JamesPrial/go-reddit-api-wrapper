@@ -65,7 +65,7 @@ func TestGetUserMe_MethodNotAllowed(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := NewHandlers(nil)
+			h := NewHandlers(nil, nil)
 			req := httptest.NewRequest(tt.method, "/api/v1/user/me", nil)
 			w := httptest.NewRecorder()
 
@@ -150,7 +150,7 @@ func TestGetUserMe_ErrorMapping(t *testing.T) {
 
 func TestGetUserMe_ContentType(t *testing.T) {
 	// Test that even with nil client, we get proper content-type on method check
-	h := NewHandlers(nil)
+	h := NewHandlers(nil, nil)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/user/me", nil)
 	w := httptest.NewRecorder()
 
@@ -181,7 +181,7 @@ func TestGetUserMe_Success_ReturnsAccountData(t *testing.T) {
 		meError:    nil,
 	}
 
-	h := NewHandlers(mock)
+	h := NewHandlers(mock, nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/user/me", nil)
 	w := httptest.NewRecorder()
 

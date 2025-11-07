@@ -27,7 +27,7 @@ func TestGetHotPosts_MethodNotAllowed(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := NewHandlers(nil)
+			h := NewHandlers(nil, nil)
 			req := httptest.NewRequest(tt.method, "/api/v1/posts/hot", nil)
 			w := httptest.NewRecorder()
 
@@ -47,7 +47,7 @@ func TestGetHotPosts_MethodNotAllowed(t *testing.T) {
 
 func TestGetHotPosts_ContentType(t *testing.T) {
 	// Test that method not allowed returns proper content type
-	h := NewHandlers(nil)
+	h := NewHandlers(nil, nil)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/posts/hot", nil)
 	w := httptest.NewRecorder()
 
@@ -72,7 +72,7 @@ func TestGetNewPosts_MethodNotAllowed(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := NewHandlers(nil)
+			h := NewHandlers(nil, nil)
 			req := httptest.NewRequest(tt.method, "/api/v1/posts/new", nil)
 			w := httptest.NewRecorder()
 
@@ -92,7 +92,7 @@ func TestGetNewPosts_MethodNotAllowed(t *testing.T) {
 
 func TestGetNewPosts_ContentType(t *testing.T) {
 	// Test that method not allowed returns proper content type
-	h := NewHandlers(nil)
+	h := NewHandlers(nil, nil)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/posts/new", nil)
 	w := httptest.NewRecorder()
 
@@ -119,7 +119,7 @@ func TestGetComments_PathTraversal(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := NewHandlers(nil)
+			h := NewHandlers(nil, nil)
 			req := httptest.NewRequest(http.MethodGet, tt.path, nil)
 			w := httptest.NewRecorder()
 
@@ -157,7 +157,7 @@ func TestGetComments_EmptySegments(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := NewHandlers(nil)
+			h := NewHandlers(nil, nil)
 			req := httptest.NewRequest(http.MethodGet, tt.path, nil)
 			w := httptest.NewRecorder()
 
@@ -187,7 +187,7 @@ func TestGetComments_MethodNotAllowed(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := NewHandlers(nil)
+			h := NewHandlers(nil, nil)
 			req := httptest.NewRequest(tt.method, "/api/v1/posts/golang/abc123/comments", nil)
 			w := httptest.NewRecorder()
 
@@ -207,7 +207,7 @@ func TestGetComments_MethodNotAllowed(t *testing.T) {
 
 func TestGetComments_ContentType(t *testing.T) {
 	// Test that errors return proper content type
-	h := NewHandlers(nil)
+	h := NewHandlers(nil, nil)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/posts/golang/abc123/comments", nil)
 	w := httptest.NewRecorder()
 
@@ -221,7 +221,7 @@ func TestGetComments_ContentType(t *testing.T) {
 
 // TestGetMoreComments tests the GetMoreComments handler
 func TestGetMoreComments_EmptyChildren(t *testing.T) {
-	h := NewHandlers(nil)
+	h := NewHandlers(nil, nil)
 	body := `{"children":[]}`
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/posts/t3_abc123/more-comments", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -240,7 +240,7 @@ func TestGetMoreComments_EmptyChildren(t *testing.T) {
 }
 
 func TestGetMoreComments_TooManyChildren(t *testing.T) {
-	h := NewHandlers(nil)
+	h := NewHandlers(nil, nil)
 
 	// Create an array with 101 items
 	children := make([]string, 101)
@@ -267,7 +267,7 @@ func TestGetMoreComments_TooManyChildren(t *testing.T) {
 }
 
 func TestGetMoreComments_EmptyChildID(t *testing.T) {
-	h := NewHandlers(nil)
+	h := NewHandlers(nil, nil)
 	body := `{"children":["id1","","id3"]}`
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/posts/t3_abc123/more-comments", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -286,7 +286,7 @@ func TestGetMoreComments_EmptyChildID(t *testing.T) {
 }
 
 func TestGetMoreComments_DuplicateIDs(t *testing.T) {
-	h := NewHandlers(nil)
+	h := NewHandlers(nil, nil)
 	body := `{"children":["id1","id2","id1"]}`
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/posts/t3_abc123/more-comments", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -305,7 +305,7 @@ func TestGetMoreComments_DuplicateIDs(t *testing.T) {
 }
 
 func TestGetMoreComments_LongID(t *testing.T) {
-	h := NewHandlers(nil)
+	h := NewHandlers(nil, nil)
 
 	// Create a string longer than 100 characters
 	longID := strings.Repeat("a", 101)
@@ -338,7 +338,7 @@ func TestGetMoreComments_MethodNotAllowed(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := NewHandlers(nil)
+			h := NewHandlers(nil, nil)
 			req := httptest.NewRequest(tt.method, "/api/v1/posts/t3_abc123/more-comments", nil)
 			w := httptest.NewRecorder()
 
@@ -358,7 +358,7 @@ func TestGetMoreComments_MethodNotAllowed(t *testing.T) {
 
 func TestGetMoreComments_ContentType(t *testing.T) {
 	// Test that responses have proper content type
-	h := NewHandlers(nil)
+	h := NewHandlers(nil, nil)
 	body := `{"children":[]}`
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/posts/t3_abc123/more-comments", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -373,7 +373,7 @@ func TestGetMoreComments_ContentType(t *testing.T) {
 }
 
 func TestGetMoreComments_InvalidJSON(t *testing.T) {
-	h := NewHandlers(nil)
+	h := NewHandlers(nil, nil)
 	body := `{invalid json}`
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/posts/t3_abc123/more-comments", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -393,7 +393,7 @@ func TestGetMoreComments_InvalidJSON(t *testing.T) {
 
 func TestGetMoreComments_EmptyLinkID(t *testing.T) {
 	// Test that empty linkID in path is rejected
-	h := NewHandlers(nil)
+	h := NewHandlers(nil, nil)
 	body := `{"children":["id1"]}`
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/posts//more-comments", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -413,7 +413,7 @@ func TestGetMoreComments_EmptyLinkID(t *testing.T) {
 
 func TestGetMoreComments_PathTraversal(t *testing.T) {
 	// Test that path traversal in linkID is rejected
-	h := NewHandlers(nil)
+	h := NewHandlers(nil, nil)
 	body := `{"children":["id1"]}`
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/posts/../etc/more-comments", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -515,7 +515,7 @@ func TestGetHotPosts_Success_ReturnsPosts(t *testing.T) {
 		hotError:    nil,
 	}
 
-	h := NewHandlers(mock)
+	h := NewHandlers(mock, nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/posts/hot?subreddit=golang&limit=10", nil)
 	w := httptest.NewRecorder()
 
@@ -573,7 +573,7 @@ func TestGetNewPosts_Success_ReturnsPosts(t *testing.T) {
 		newError:    nil,
 	}
 
-	h := NewHandlers(mock)
+	h := NewHandlers(mock, nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/posts/new?subreddit=golang&limit=25", nil)
 	w := httptest.NewRecorder()
 
@@ -651,7 +651,7 @@ func TestGetComments_Success_ReturnsComments(t *testing.T) {
 		commentsError:    nil,
 	}
 
-	h := NewHandlers(mock)
+	h := NewHandlers(mock, nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/posts/golang/post123/comments", nil)
 	w := httptest.NewRecorder()
 
@@ -717,7 +717,7 @@ func TestGetMoreComments_Success_ReturnsComments(t *testing.T) {
 		moreCommentsError:    nil,
 	}
 
-	h := NewHandlers(mock)
+	h := NewHandlers(mock, nil)
 	body := `{"children":["child1","child2","child3"]}`
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/posts/t3_abc123/more-comments", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")

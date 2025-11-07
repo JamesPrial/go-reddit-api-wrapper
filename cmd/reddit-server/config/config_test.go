@@ -270,13 +270,16 @@ func TestLoad_AllowedOriginsCommaSeparated(t *testing.T) {
 
 func TestValidate_Success(t *testing.T) {
 	cfg := &Config{
-		Port:               8080,
-		ShutdownTimeout:    30 * time.Second,
-		RequestTimeout:     30 * time.Second,
-		RedditClientID:     "test-id",
-		RedditClientSecret: "test-secret",
-		APIKeys:            []string{"dGVzdC1rZXktdGhhdC1pcy1sb25nLWVub3VnaC1mb3ItdmFsaWRhdGlvbg"},
-		AllowedOrigins:     []string{"http://localhost:3000", "https://example.com"},
+		Port:                8080,
+		ShutdownTimeout:     30 * time.Second,
+		RequestTimeout:      30 * time.Second,
+		RedditClientID:      "test-id",
+		RedditClientSecret:  "test-secret",
+		APIKeys:             []string{"dGVzdC1rZXktdGhhdC1pcy1sb25nLWVub3VnaC1mb3ItdmFsaWRhdGlvbg"},
+		AllowedOrigins:      []string{"http://localhost:3000", "https://example.com"},
+		StorageDSN:          "/tmp/test.db",
+		StorageMaxOpenConns: 10,
+		StorageMaxIdleConns: 5,
 	}
 
 	err := cfg.Validate()
@@ -445,12 +448,15 @@ func TestValidate_ExcessiveTimeout(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := &Config{
-				Port:               8080,
-				ShutdownTimeout:    tt.shutdownTimeout,
-				RequestTimeout:     tt.requestTimeout,
-				RedditClientID:     "test-id",
-				RedditClientSecret: "test-secret",
-				APIKeys:            []string{"dGVzdC1rZXktdGhhdC1pcy1sb25nLWVub3VnaC1mb3ItdmFsaWRhdGlvbg"},
+				Port:                8080,
+				ShutdownTimeout:     tt.shutdownTimeout,
+				RequestTimeout:      tt.requestTimeout,
+				RedditClientID:      "test-id",
+				RedditClientSecret:  "test-secret",
+				APIKeys:             []string{"dGVzdC1rZXktdGhhdC1pcy1sb25nLWVub3VnaC1mb3ItdmFsaWRhdGlvbg"},
+				StorageDSN:          "/tmp/test.db",
+				StorageMaxOpenConns: 10,
+				StorageMaxIdleConns: 5,
 			}
 
 			err := cfg.Validate()
@@ -849,6 +855,212 @@ func TestLoad_APIKeys_WhitespaceAndEmpty(t *testing.T) {
 	}
 	if cfg.APIKeys[1] != "YW5vdGhlci10ZXN0LWFwaS1rZXktdGhhdC1pcy0zMi1jaGFycw" {
 		t.Errorf("APIKeys[1] = %q, want %q (whitespace should be trimmed)", cfg.APIKeys[1], "YW5vdGhlci10ZXN0LWFwaS1rZXktdGhhdC1pcy0zMi1jaGFycw")
+	}
+}
+
+func TestLoad_StorageDefaults(t *testing.T) {
+	// Set only required environment variables
+	setenv(t, "REDDIT_CLIENT_ID", "test-client-id")
+	setenv(t, "REDDIT_CLIENT_SECRET", "test-client-secret")
+
+	cfg, _, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v, want nil", err)
+	}
+
+	// Verify storage defaults
+	if cfg.StorageMaxOpenConns != 10 {
+		t.Errorf("StorageMaxOpenConns = %d, want 10 (default)", cfg.StorageMaxOpenConns)
+	}
+	if cfg.StorageMaxIdleConns != 5 {
+		t.Errorf("StorageMaxIdleConns = %d, want 5 (default)", cfg.StorageMaxIdleConns)
+	}
+	if cfg.StorageDSN == "" {
+		t.Error("StorageDSN is empty, want default path")
+	}
+	// Verify default path contains expected components
+	if !strings.Contains(cfg.StorageDSN, "reddit.db") {
+		t.Errorf("StorageDSN = %q, want path containing 'reddit.db'", cfg.StorageDSN)
+	}
+}
+
+func TestLoad_StorageEnvironmentVariables(t *testing.T) {
+	setenv(t, "STORAGE_DSN", "/custom/path/db.sqlite")
+	setenv(t, "STORAGE_MAX_OPEN_CONNS", "20")
+	setenv(t, "STORAGE_MAX_IDLE_CONNS", "10")
+	setenv(t, "REDDIT_CLIENT_ID", "test-id")
+	setenv(t, "REDDIT_CLIENT_SECRET", "test-secret")
+
+	cfg, _, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v, want nil", err)
+	}
+
+	if cfg.StorageDSN != "/custom/path/db.sqlite" {
+		t.Errorf("StorageDSN = %q, want %q", cfg.StorageDSN, "/custom/path/db.sqlite")
+	}
+	if cfg.StorageMaxOpenConns != 20 {
+		t.Errorf("StorageMaxOpenConns = %d, want 20", cfg.StorageMaxOpenConns)
+	}
+	if cfg.StorageMaxIdleConns != 10 {
+		t.Errorf("StorageMaxIdleConns = %d, want 10", cfg.StorageMaxIdleConns)
+	}
+}
+
+func TestLoad_InvalidStorageMaxOpenConns(t *testing.T) {
+	setenv(t, "STORAGE_MAX_OPEN_CONNS", "not-a-number")
+	setenv(t, "REDDIT_CLIENT_ID", "test-id")
+	setenv(t, "REDDIT_CLIENT_SECRET", "test-secret")
+
+	_, _, err := Load()
+	if err == nil {
+		t.Fatal("Load() error = nil, want error for invalid STORAGE_MAX_OPEN_CONNS")
+	}
+
+	if !strings.Contains(err.Error(), "invalid STORAGE_MAX_OPEN_CONNS") {
+		t.Errorf("Load() error = %v, want error containing 'invalid STORAGE_MAX_OPEN_CONNS'", err)
+	}
+}
+
+func TestLoad_InvalidStorageMaxIdleConns(t *testing.T) {
+	setenv(t, "STORAGE_MAX_IDLE_CONNS", "not-a-number")
+	setenv(t, "REDDIT_CLIENT_ID", "test-id")
+	setenv(t, "REDDIT_CLIENT_SECRET", "test-secret")
+
+	_, _, err := Load()
+	if err == nil {
+		t.Fatal("Load() error = nil, want error for invalid STORAGE_MAX_IDLE_CONNS")
+	}
+
+	if !strings.Contains(err.Error(), "invalid STORAGE_MAX_IDLE_CONNS") {
+		t.Errorf("Load() error = %v, want error containing 'invalid STORAGE_MAX_IDLE_CONNS'", err)
+	}
+}
+
+func TestValidate_StorageEmptyDSN(t *testing.T) {
+	cfg := &Config{
+		Port:                8080,
+		ShutdownTimeout:     30 * time.Second,
+		RequestTimeout:      30 * time.Second,
+		RedditClientID:      "test-id",
+		RedditClientSecret:  "test-secret",
+		APIKeys:             []string{"dGVzdC1rZXktdGhhdC1pcy1sb25nLWVub3VnaC1mb3ItdmFsaWRhdGlvbg"},
+		StorageDSN:          "", // Empty
+		StorageMaxOpenConns: 10,
+		StorageMaxIdleConns: 5,
+	}
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("Validate() error = nil, want error for empty storage DSN")
+	}
+
+	if !strings.Contains(err.Error(), "storage DSN must not be empty") {
+		t.Errorf("Validate() error = %v, want error containing 'storage DSN must not be empty'", err)
+	}
+}
+
+func TestValidate_StorageNegativeMaxOpenConns(t *testing.T) {
+	cfg := &Config{
+		Port:                8080,
+		ShutdownTimeout:     30 * time.Second,
+		RequestTimeout:      30 * time.Second,
+		RedditClientID:      "test-id",
+		RedditClientSecret:  "test-secret",
+		APIKeys:             []string{"dGVzdC1rZXktdGhhdC1pcy1sb25nLWVub3VnaC1mb3ItdmFsaWRhdGlvbg"},
+		StorageDSN:          "/tmp/test.db",
+		StorageMaxOpenConns: -1, // Invalid
+		StorageMaxIdleConns: 5,
+	}
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("Validate() error = nil, want error for negative storage max open conns")
+	}
+
+	if !strings.Contains(err.Error(), "storage max open connections must be positive") {
+		t.Errorf("Validate() error = %v, want error containing 'storage max open connections must be positive'", err)
+	}
+}
+
+func TestValidate_StorageNegativeMaxIdleConns(t *testing.T) {
+	cfg := &Config{
+		Port:                8080,
+		ShutdownTimeout:     30 * time.Second,
+		RequestTimeout:      30 * time.Second,
+		RedditClientID:      "test-id",
+		RedditClientSecret:  "test-secret",
+		APIKeys:             []string{"dGVzdC1rZXktdGhhdC1pcy1sb25nLWVub3VnaC1mb3ItdmFsaWRhdGlvbg"},
+		StorageDSN:          "/tmp/test.db",
+		StorageMaxOpenConns: 10,
+		StorageMaxIdleConns: -1, // Invalid
+	}
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("Validate() error = nil, want error for negative storage max idle conns")
+	}
+
+	if !strings.Contains(err.Error(), "storage max idle connections must be positive") {
+		t.Errorf("Validate() error = %v, want error containing 'storage max idle connections must be positive'", err)
+	}
+}
+
+func TestValidate_StorageIdleExceedsOpen(t *testing.T) {
+	cfg := &Config{
+		Port:                8080,
+		ShutdownTimeout:     30 * time.Second,
+		RequestTimeout:      30 * time.Second,
+		RedditClientID:      "test-id",
+		RedditClientSecret:  "test-secret",
+		APIKeys:             []string{"dGVzdC1rZXktdGhhdC1pcy1sb25nLWVub3VnaC1mb3ItdmFsaWRhdGlvbg"},
+		StorageDSN:          "/tmp/test.db",
+		StorageMaxOpenConns: 5,
+		StorageMaxIdleConns: 10, // Exceeds max open
+	}
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("Validate() error = nil, want error when idle exceeds open")
+	}
+
+	if !strings.Contains(err.Error(), "storage max idle connections") || !strings.Contains(err.Error(), "must not exceed max open connections") {
+		t.Errorf("Validate() error = %v, want error about idle exceeding open", err)
+	}
+}
+
+func TestString_StorageConfiguration(t *testing.T) {
+	cfg := &Config{
+		Port:                8080,
+		ShutdownTimeout:     30 * time.Second,
+		RequestTimeout:      30 * time.Second,
+		RedditClientID:      "test-id",
+		RedditClientSecret:  "test-secret",
+		APIKeys:             []string{"dGVzdC1rZXktdGhhdC1pcy1sb25nLWVub3VnaC1mb3ItdmFsaWRhdGlvbg"},
+		StorageDSN:          "/home/user/.local/share/reddit-server/reddit.db",
+		StorageMaxOpenConns: 15,
+		StorageMaxIdleConns: 8,
+	}
+
+	str := cfg.String()
+
+	// Verify storage config is included
+	if !strings.Contains(str, "StorageDSN") {
+		t.Error("String() does not contain 'StorageDSN'")
+	}
+	if !strings.Contains(str, "15") {
+		t.Error("String() does not contain StorageMaxOpenConns value")
+	}
+	if !strings.Contains(str, "8") {
+		t.Error("String() does not contain StorageMaxIdleConns value")
+	}
+
+	// Verify DSN path is redacted
+	if strings.Contains(str, "/home/user/") {
+		t.Error("String() contains unredacted DSN path")
+	}
+	if !strings.Contains(str, "<redacted>") {
+		t.Error("String() does not contain '<redacted>' marker for DSN")
 	}
 }
 

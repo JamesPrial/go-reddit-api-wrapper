@@ -573,6 +573,233 @@ function getThumbnailClass(thumbnail) {
 }
 
 /**
+ * Storage Functions
+ */
+
+/**
+ * Saves a post to storage.
+ * @param {object} post - The post object to save
+ * @returns {Promise<object>} Result with success flag and ID
+ * @throws {Error} If request fails
+ */
+async function savePost(post) {
+  if (!post || typeof post !== 'object') {
+    throw new Error('Post object is required.');
+  }
+
+  const response = await makeRequest('/api/v1/storage/posts', {
+    method: 'POST',
+    body: post,
+  });
+
+  return {
+    success: response.success || false,
+    id: response.id || '',
+  };
+}
+
+/**
+ * Saves comments for a post to storage.
+ * @param {string} postId - The post ID
+ * @param {array} comments - Array of comment objects to save
+ * @returns {Promise<object>} Result with success flag and count
+ * @throws {Error} If request fails
+ */
+async function saveComments(postId, comments) {
+  if (!postId || typeof postId !== 'string') {
+    throw new Error('Post ID is required.');
+  }
+
+  if (!Array.isArray(comments)) {
+    throw new Error('Comments must be an array.');
+  }
+
+  const response = await makeRequest('/api/v1/storage/posts/' + postId + '/comments', {
+    method: 'POST',
+    body: {
+      comments: comments,
+    },
+  });
+
+  return {
+    success: response.success || false,
+    count: response.count || 0,
+  };
+}
+
+/**
+ * Lists saved posts with optional filtering and pagination.
+ * @param {object} filters - Filter options
+ * @param {string} filters.subreddit - Filter by subreddit
+ * @param {string} filters.author - Filter by author
+ * @param {number} filters.min_score - Minimum score filter
+ * @param {string} filters.sort_by - Sort field (score, timestamp, title)
+ * @param {string} filters.sort_dir - Sort direction (asc, desc)
+ * @param {object} pagination - Pagination options
+ * @param {number} pagination.limit - Results per page
+ * @param {number} pagination.offset - Starting offset
+ * @returns {Promise<object>} Object with posts array and total count
+ * @throws {Error} If request fails
+ */
+async function listSavedPosts(filters, pagination) {
+  filters = filters || {};
+  pagination = pagination || {};
+
+  const limit = pagination.limit || 25;
+  const offset = pagination.offset || 0;
+
+  if (limit < 1 || limit > 100) {
+    throw new Error('Limit must be between 1 and 100.');
+  }
+
+  if (offset < 0) {
+    throw new Error('Offset must be non-negative.');
+  }
+
+  const params = new URLSearchParams();
+  if (filters.subreddit) params.append('subreddit', filters.subreddit);
+  if (filters.author) params.append('author', filters.author);
+  if (filters.min_score) params.append('min_score', filters.min_score.toString());
+  if (filters.sort_by) params.append('sort_by', filters.sort_by);
+  if (filters.sort_dir) params.append('sort_dir', filters.sort_dir);
+  params.append('limit', limit.toString());
+  params.append('offset', offset.toString());
+
+  const url = '/api/v1/storage/posts?' + params.toString();
+
+  const response = await makeRequest(url, {
+    method: 'GET',
+  });
+
+  return {
+    posts: response.posts || [],
+    total: response.total || 0,
+  };
+}
+
+/**
+ * Gets a specific saved post by ID.
+ * @param {string} postId - The post ID
+ * @returns {Promise<object>} The post object
+ * @throws {Error} If request fails or post not found
+ */
+async function getSavedPost(postId) {
+  if (!postId || typeof postId !== 'string') {
+    throw new Error('Post ID is required.');
+  }
+
+  return makeRequest('/api/v1/storage/posts/' + postId, {
+    method: 'GET',
+  });
+}
+
+/**
+ * Deletes a saved post from storage.
+ * @param {string} postId - The post ID to delete
+ * @returns {Promise<object>} Result with success flag
+ * @throws {Error} If request fails
+ */
+async function deleteSavedPost(postId) {
+  if (!postId || typeof postId !== 'string') {
+    throw new Error('Post ID is required.');
+  }
+
+  const response = await makeRequest('/api/v1/storage/posts/' + postId, {
+    method: 'DELETE',
+  });
+
+  return {
+    success: response.success || false,
+  };
+}
+
+/**
+ * Gets comments for a saved post with optional filtering.
+ * @param {string} postId - The post ID
+ * @param {object} options - Query options
+ * @param {number} options.max_depth - Maximum comment tree depth
+ * @param {string} options.sort_by - Sort field (score, timestamp)
+ * @param {string} options.sort_dir - Sort direction (asc, desc)
+ * @returns {Promise<object>} Object with comments array and count
+ * @throws {Error} If request fails
+ */
+async function getSavedComments(postId, options) {
+  if (!postId || typeof postId !== 'string') {
+    throw new Error('Post ID is required.');
+  }
+
+  options = options || {};
+
+  const params = new URLSearchParams();
+  if (options.max_depth) params.append('max_depth', options.max_depth.toString());
+  if (options.sort_by) params.append('sort_by', options.sort_by);
+  if (options.sort_dir) params.append('sort_dir', options.sort_dir);
+
+  const url = '/api/v1/storage/posts/' + postId + '/comments?' + params.toString();
+
+  const response = await makeRequest(url, {
+    method: 'GET',
+  });
+
+  return {
+    comments: response.comments || [],
+    count: response.count || 0,
+  };
+}
+
+/**
+ * Gets storage statistics.
+ * @returns {Promise<object>} Statistics object with post_count, comment_count, etc.
+ * @throws {Error} If request fails
+ */
+async function getStorageStats() {
+  return makeRequest('/api/v1/storage/stats', {
+    method: 'GET',
+  });
+}
+
+/**
+ * Bulk saves posts from a subreddit.
+ * @param {string} subreddit - Subreddit name
+ * @param {string} sort - Sort order (hot, new, top, controversial)
+ * @param {number} limit - Number of posts to save (1-100)
+ * @returns {Promise<object>} Result with success, count saved, and posts array
+ * @throws {Error} If request fails or parameters are invalid
+ */
+async function bulkSaveFromSubreddit(subreddit, sort, limit) {
+  if (!subreddit || typeof subreddit !== 'string') {
+    throw new Error('Subreddit name is required.');
+  }
+
+  if (!sort || typeof sort !== 'string') {
+    throw new Error('Sort order is required.');
+  }
+
+  if (!['hot', 'new', 'top', 'controversial'].includes(sort)) {
+    throw new Error('Invalid sort order. Use "hot", "new", "top", or "controversial".');
+  }
+
+  if (typeof limit !== 'number' || limit < 1 || limit > 100) {
+    throw new Error('Limit must be a number between 1 and 100.');
+  }
+
+  const response = await makeRequest('/api/v1/storage/bulk-save', {
+    method: 'POST',
+    body: {
+      subreddit: subreddit,
+      sort: sort,
+      limit: limit,
+    },
+  });
+
+  return {
+    success: response.success || false,
+    saved: response.saved || 0,
+    posts: response.posts || [],
+  };
+}
+
+/**
  * State Management Helper
  */
 
@@ -614,7 +841,7 @@ function createState(initialValue) {
  * All API functions are accessible as window.api.*
  */
 window.api = {
-  // Storage
+  // LocalStorage
   saveApiKey: saveApiKey,
   getApiKey: getApiKey,
   clearApiKey: clearApiKey,
@@ -637,6 +864,16 @@ window.api = {
 
   // Subreddit
   fetchSubreddit: fetchSubreddit,
+
+  // Storage
+  savePost: savePost,
+  saveComments: saveComments,
+  listSavedPosts: listSavedPosts,
+  getSavedPost: getSavedPost,
+  deleteSavedPost: deleteSavedPost,
+  getSavedComments: getSavedComments,
+  getStorageStats: getStorageStats,
+  bulkSaveFromSubreddit: bulkSaveFromSubreddit,
 
   // Utilities
   formatTimestamp: formatTimestamp,
@@ -661,6 +898,14 @@ if (window.location.hostname === 'localhost' || window.location.hostname === '12
   console.log('- api.fetchComments(subreddit, postId, options)');
   console.log('- api.fetchMoreComments(linkId, children)');
   console.log('- api.fetchSubreddit(name)');
+  console.log('- api.savePost(post)');
+  console.log('- api.saveComments(postId, comments)');
+  console.log('- api.listSavedPosts(filters, pagination)');
+  console.log('- api.getSavedPost(postId)');
+  console.log('- api.deleteSavedPost(postId)');
+  console.log('- api.getSavedComments(postId, options)');
+  console.log('- api.getStorageStats()');
+  console.log('- api.bulkSaveFromSubreddit(subreddit, sort, limit)');
   console.log('- api.formatTimestamp(unixTime)');
   console.log('- api.formatScore(score)');
   console.log('- api.truncateText(text, maxLength)');

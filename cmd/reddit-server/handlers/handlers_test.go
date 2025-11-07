@@ -284,11 +284,14 @@ func TestNewHandlers(t *testing.T) {
 	// We can't create a real Reddit client without credentials,
 	// so we just check that NewHandlers doesn't panic
 	var client *graw.Reddit
-	h := NewHandlers(client)
+	h := NewHandlers(client, nil)
 	if h == nil {
 		t.Error("NewHandlers returned nil")
 	}
 	if h.client != client {
 		t.Error("NewHandlers did not store the client correctly")
+	}
+	if h.store != nil {
+		t.Error("NewHandlers did not store the nil store correctly")
 	}
 }
