@@ -4,10 +4,12 @@ package commands
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/jamesprial/go-reddit-api-wrapper/cmd/reddit/output"
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 	graw "github.com/jamesprial/go-reddit-api-wrapper/reddit"
+	"github.com/jamesprial/go-reddit-api-wrapper/storage"
 )
 
 // GetComments fetches comments for a specific post and formats the output.
@@ -19,13 +21,17 @@ import (
 //   - postID: ID of the post without prefix (e.g., "abc123")
 //   - pagination: pagination parameters (limit, after, before)
 //   - formatter: output formatter for displaying results
+//   - store: optional storage backend for persisting comments (can be nil to disable storage)
 //
 // Returns an error if:
 //   - client is nil
 //   - subreddit or postID is empty
 //   - API call fails
 //   - formatting fails
-func GetComments(ctx context.Context, client *graw.Reddit, subreddit, postID string, pagination types.Pagination, formatter output.Formatter) error {
+//
+// Storage errors are logged but do not cause the command to fail, allowing graceful degradation
+// when storage is unavailable.
+func GetComments(ctx context.Context, client *graw.Reddit, subreddit, postID string, pagination types.Pagination, formatter output.Formatter, store storage.Store) error {
 	if client == nil {
 		return fmt.Errorf("client cannot be nil")
 	}
@@ -60,6 +66,13 @@ func GetComments(ctx context.Context, client *graw.Reddit, subreddit, postID str
 		return fmt.Errorf("received nil response from API")
 	}
 
+	// Store comments if storage is enabled
+	if store != nil {
+		if err := StoreCommentsFromResponse(ctx, store, response); err != nil {
+			slog.Error("failed to store comments from response", "postID", postID, "error", err)
+		}
+	}
+
 	if response.Post != nil && len(response.Comments) == 0 {
 		// Post exists but has no comments - this is not an error, just empty results
 		return formatter.FormatComments(response)
@@ -80,6 +93,7 @@ func GetComments(ctx context.Context, client *graw.Reddit, subreddit, postID str
 //   - linkID: full name or ID of the post (with or without "t3_" prefix)
 //   - commentIDs: slice of comment IDs to load (without prefix)
 //   - formatter: output formatter for displaying results
+//   - store: optional storage backend for persisting comments (can be nil to disable storage)
 //
 // Returns an error if:
 //   - client is nil
@@ -88,9 +102,12 @@ func GetComments(ctx context.Context, client *graw.Reddit, subreddit, postID str
 //   - API call fails
 //   - formatting fails
 //
+// Storage errors are logged but do not cause the command to fail, allowing graceful degradation
+// when storage is unavailable.
+//
 // Note: The formatter will receive a CommentsResponse with a nil Post field
 // and only the loaded Comments field populated.
-func GetMoreComments(ctx context.Context, client *graw.Reddit, linkID string, commentIDs []string, formatter output.Formatter) error {
+func GetMoreComments(ctx context.Context, client *graw.Reddit, linkID string, commentIDs []string, formatter output.Formatter, store storage.Store) error {
 	if client == nil {
 		return fmt.Errorf("client cannot be nil")
 	}
@@ -115,18 +132,19 @@ func GetMoreComments(ctx context.Context, client *graw.Reddit, linkID string, co
 		return fmt.Errorf("failed to get more comments: %w", err)
 	}
 
-	// Handle empty result
-	if len(comments) == 0 {
-		response := &types.CommentsResponse{
-			Comments: comments,
-		}
-		return formatter.FormatComments(response)
-	}
-
 	// Create a response with only comments (no post data for "more comments")
 	response := &types.CommentsResponse{
 		Post:     nil,
 		Comments: comments,
+	}
+
+	// Store comments if storage is enabled
+	if store != nil {
+		if len(comments) > 0 {
+			if err := StoreComments(ctx, store, comments); err != nil {
+				slog.Error("failed to store more comments", "linkID", linkID, "count", len(comments), "error", err)
+			}
+		}
 	}
 
 	// Format and output the response

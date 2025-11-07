@@ -4,10 +4,12 @@ package commands
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/jamesprial/go-reddit-api-wrapper/cmd/reddit/output"
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 	graw "github.com/jamesprial/go-reddit-api-wrapper/reddit"
+	"github.com/jamesprial/go-reddit-api-wrapper/storage"
 )
 
 // GetSubreddit fetches subreddit information and formats it for display.
@@ -34,7 +36,9 @@ func GetSubreddit(ctx context.Context, client *graw.Reddit, name string, formatt
 // Hot posts are the currently trending posts on the subreddit.
 // If subreddit is empty, fetches hot posts from the front page.
 // Supports pagination via the Pagination parameter.
-func GetHotPosts(ctx context.Context, client *graw.Reddit, subreddit string, pagination types.Pagination, formatter output.Formatter) error {
+// If store is not nil, posts will be stored in the storage backend.
+// Storage errors are logged but do not cause the command to fail.
+func GetHotPosts(ctx context.Context, client *graw.Reddit, subreddit string, pagination types.Pagination, formatter output.Formatter, store storage.Store) error {
 	request := &types.PostsRequest{
 		Subreddit:  subreddit,
 		Pagination: pagination,
@@ -50,6 +54,13 @@ func GetHotPosts(ctx context.Context, client *graw.Reddit, subreddit string, pag
 		return nil
 	}
 
+	// Store posts if store is available
+	if store != nil {
+		if err := store.UpsertPosts(ctx, response.Posts); err != nil {
+			slog.Error("failed to store hot posts", "subreddit", subreddit, "count", len(response.Posts), "error", err)
+		}
+	}
+
 	return formatter.FormatPosts(response.Posts)
 }
 
@@ -57,7 +68,9 @@ func GetHotPosts(ctx context.Context, client *graw.Reddit, subreddit string, pag
 // New posts are the most recently submitted posts on the subreddit.
 // If subreddit is empty, fetches new posts from the front page.
 // Supports pagination via the Pagination parameter.
-func GetNewPosts(ctx context.Context, client *graw.Reddit, subreddit string, pagination types.Pagination, formatter output.Formatter) error {
+// If store is not nil, posts will be stored in the storage backend.
+// Storage errors are logged but do not cause the command to fail.
+func GetNewPosts(ctx context.Context, client *graw.Reddit, subreddit string, pagination types.Pagination, formatter output.Formatter, store storage.Store) error {
 	request := &types.PostsRequest{
 		Subreddit:  subreddit,
 		Pagination: pagination,
@@ -71,6 +84,13 @@ func GetNewPosts(ctx context.Context, client *graw.Reddit, subreddit string, pag
 	if response == nil || len(response.Posts) == 0 {
 		fmt.Println("No posts found")
 		return nil
+	}
+
+	// Store posts if store is available
+	if store != nil {
+		if err := store.UpsertPosts(ctx, response.Posts); err != nil {
+			slog.Error("failed to store new posts", "subreddit", subreddit, "count", len(response.Posts), "error", err)
+		}
 	}
 
 	return formatter.FormatPosts(response.Posts)

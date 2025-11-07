@@ -29,14 +29,19 @@
 //		Enable verbose output
 //	-debug
 //		Enable debug logging
+//	-store
+//		Enable storage of posts and comments (env: REDDIT_STORE)
+//	-db-path string
+//		Path to SQLite database file (env: REDDIT_DB_PATH, default: ~/.reddit/data.db)
 //
 // Commands:
 //
-//	me                       Show authenticated user information
-//	subreddit <name>         Get information about a subreddit
-//	hot <subreddit>          Fetch hot posts from a subreddit (or front page if omitted)
-//	new <subreddit>          Fetch new posts from a subreddit (or front page if omitted)
-//	comments <sub> <post-id> Get comments for a specific post
+//	me                           Show authenticated user information
+//	subreddit <name>             Get information about a subreddit
+//	hot <subreddit>              Fetch hot posts from a subreddit (or front page if omitted)
+//	new <subreddit>              Fetch new posts from a subreddit (or front page if omitted)
+//	comments <sub> <post-id>     Get comments for a specific post
+//	more-comments <link-id> <id> Load additional comments by ID [id...]
 //
 // Examples:
 //
@@ -58,6 +63,9 @@
 //
 //	# Fetch comments for a post
 //	reddit comments golang abc123def
+//
+//	# Load additional comments by ID
+//	reddit more-comments abc123def comment1 comment2 comment3
 package main
 
 import (
@@ -65,7 +73,10 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"log/slog"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/jamesprial/go-reddit-api-wrapper/cmd/reddit/commands"
@@ -73,6 +84,9 @@ import (
 	"github.com/jamesprial/go-reddit-api-wrapper/cmd/reddit/output"
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 	graw "github.com/jamesprial/go-reddit-api-wrapper/reddit"
+	"github.com/jamesprial/go-reddit-api-wrapper/storage"
+
+	_ "github.com/jamesprial/go-reddit-api-wrapper/storage/sqlite"
 )
 
 // Exit codes used by the CLI.
@@ -98,6 +112,8 @@ var (
 	flagVerbose      = flag.Bool("verbose", false, "Enable verbose output")
 	flagDebug        = flag.Bool("debug", false, "Enable debug logging")
 	flagTimeout      = flag.Duration("timeout", 30*time.Second, "HTTP request timeout")
+	flagStore        = flag.Bool("store", false, "Enable storage of posts and comments (env: REDDIT_STORE)")
+	flagDBPath       = flag.String("db-path", "", "Path to SQLite database file (env: REDDIT_DB_PATH)")
 )
 
 func main() {
@@ -130,8 +146,51 @@ func main() {
 	cmdCtx, cmdCancel := context.WithTimeout(context.Background(), *flagTimeout)
 	defer cmdCancel()
 
+	// Initialize storage if enabled
+	var store storage.Store
+	if cfg.Store {
+		// DBPath is already expanded by config.FromEnv()
+		dbPath := cfg.DBPath
+
+		// Validate path to prevent directory traversal attacks
+		if strings.Contains(dbPath, "..") {
+			printError("storage", fmt.Errorf("invalid database path: contains '..'"))
+			os.Exit(ExitValidation)
+		}
+
+		// Create directory if needed (but not for in-memory database)
+		if dbPath != ":memory:" {
+			dbDir := filepath.Dir(dbPath)
+			if err := os.MkdirAll(dbDir, 0755); err != nil {
+				printError("storage", fmt.Errorf("failed to create database directory: %w", err))
+				os.Exit(ExitGeneralErr)
+			}
+		}
+
+		logger := slog.Default()
+		if cfg.Debug {
+			logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+				Level: slog.LevelDebug,
+			}))
+		}
+
+		// Use context.Background() for storage initialization (one-time setup, not command timeout)
+		storeCtx := context.Background()
+		var err error
+		store, err = storage.New(storeCtx, storage.Config{
+			DSN:    dbPath,
+			Driver: "sqlite",
+			Logger: logger,
+		})
+		if err != nil {
+			printError("storage", fmt.Errorf("failed to initialize storage: %w", err))
+			os.Exit(ExitGeneralErr)
+		}
+		defer store.Close()
+	}
+
 	// Execute command (handles auth and client creation internally)
-	if err := executeCommand(cmdCtx, cfg, command, commandArgs); err != nil {
+	if err := executeCommand(cmdCtx, cfg, command, commandArgs, store); err != nil {
 		exitCode := classifyError(err)
 		printError(command, err)
 		os.Exit(exitCode)
@@ -146,6 +205,7 @@ func loadConfig() (*config.Config, error) {
 		cfg = &config.Config{
 			Output: "text",
 			Limit:  25,
+			DBPath: "~/.reddit/data.db",
 		}
 	}
 
@@ -183,6 +243,12 @@ func loadConfig() (*config.Config, error) {
 	if *flagDebug {
 		cfg.Debug = *flagDebug
 	}
+	if *flagStore {
+		cfg.Store = *flagStore
+	}
+	if *flagDBPath != "" {
+		cfg.DBPath = *flagDBPath
+	}
 
 	// Validate configuration (but not credentials yet)
 	if err := cfg.Validate(); err != nil {
@@ -193,50 +259,120 @@ func loadConfig() (*config.Config, error) {
 }
 
 // executeCommand dispatches to the appropriate command handler.
-func executeCommand(ctx context.Context, cfg *config.Config, command string, args []string) error {
-	// Validate credentials before creating client
-	if err := cfg.ValidateCredentials(); err != nil {
-		return err
-	}
-
-	// Create client with a longer timeout for authentication.
-	// The context is only needed during client creation, so we cancel immediately after.
-	authCtx, authCancel := context.WithTimeout(ctx, 60*time.Second)
-	client, err := graw.NewClientWithContext(authCtx, cfg.ToRedditConfig())
-	authCancel() // Safe to cancel - client creation is synchronous
-
-	if err != nil {
-		return err
-	}
-
+func executeCommand(ctx context.Context, cfg *config.Config, command string, args []string, store storage.Store) error {
 	switch command {
 	case "me":
+		// Create client for authentication-required command
+		if err := cfg.ValidateCredentials(); err != nil {
+			return err
+		}
+		client, err := createRedditClient(ctx, cfg)
+		if err != nil {
+			return err
+		}
 		return commandMe(ctx, cfg, client)
+
 	case "subreddit":
 		if len(args) != 1 {
 			return fmt.Errorf("subreddit command requires exactly 1 argument: subreddit name")
 		}
+		if err := cfg.ValidateCredentials(); err != nil {
+			return err
+		}
+		client, err := createRedditClient(ctx, cfg)
+		if err != nil {
+			return err
+		}
 		return commandSubreddit(ctx, cfg, client, args[0])
+
 	case "hot":
 		subreddit := ""
 		if len(args) > 0 {
 			subreddit = args[0]
 		}
-		return commandHot(ctx, cfg, client, subreddit)
+		if err := cfg.ValidateCredentials(); err != nil {
+			return err
+		}
+		client, err := createRedditClient(ctx, cfg)
+		if err != nil {
+			return err
+		}
+		return commandHot(ctx, cfg, client, subreddit, store)
+
 	case "new":
 		subreddit := ""
 		if len(args) > 0 {
 			subreddit = args[0]
 		}
-		return commandNew(ctx, cfg, client, subreddit)
+		if err := cfg.ValidateCredentials(); err != nil {
+			return err
+		}
+		client, err := createRedditClient(ctx, cfg)
+		if err != nil {
+			return err
+		}
+		return commandNew(ctx, cfg, client, subreddit, store)
+
 	case "comments":
 		if len(args) < 2 {
 			return fmt.Errorf("comments command requires 2 arguments: subreddit post-id")
 		}
-		return commandComments(ctx, cfg, client, args[0], args[1])
+		if err := cfg.ValidateCredentials(); err != nil {
+			return err
+		}
+		client, err := createRedditClient(ctx, cfg)
+		if err != nil {
+			return err
+		}
+		return commandComments(ctx, cfg, client, args[0], args[1], store)
+
+	case "more-comments":
+		if len(args) < 2 {
+			return fmt.Errorf("more-comments command requires at least 2 arguments: link-id comment-id [comment-id...]")
+		}
+		if err := cfg.ValidateCredentials(); err != nil {
+			return err
+		}
+		client, err := createRedditClient(ctx, cfg)
+		if err != nil {
+			return err
+		}
+		linkID := args[0]
+		commentIDs := args[1:]
+		formatter, err := createFormatter(cfg.Output)
+		if err != nil {
+			return err
+		}
+		return commands.GetMoreComments(ctx, client, linkID, commentIDs, formatter, store)
+
+	case "list-posts":
+		if store == nil {
+			return fmt.Errorf("storage not enabled (use --store flag)")
+		}
+		return commands.ListStoredPosts(ctx, store, cfg)
+
+	case "stats":
+		if store == nil {
+			return fmt.Errorf("storage not enabled (use --store flag)")
+		}
+		return commands.ShowStats(ctx, store, cfg)
+
 	default:
 		return fmt.Errorf("unknown command: %q", command)
 	}
+}
+
+// createRedditClient creates an authenticated Reddit API client.
+func createRedditClient(ctx context.Context, cfg *config.Config) (*graw.Reddit, error) {
+	// Create client with a longer timeout for authentication.
+	authCtx, authCancel := context.WithTimeout(ctx, 60*time.Second)
+	defer authCancel()
+
+	client, err := graw.NewClientWithContext(authCtx, cfg.ToRedditConfig())
+	if err != nil {
+		return nil, err
+	}
+	return client, nil
 }
 
 // createFormatter creates a new formatter with the specified format.
@@ -268,7 +404,7 @@ func commandSubreddit(ctx context.Context, cfg *config.Config, client *graw.Redd
 }
 
 // commandHot fetches hot posts from a subreddit or front page.
-func commandHot(ctx context.Context, cfg *config.Config, client *graw.Reddit, subreddit string) error {
+func commandHot(ctx context.Context, cfg *config.Config, client *graw.Reddit, subreddit string, store storage.Store) error {
 	formatter, err := createFormatter(cfg.Output)
 	if err != nil {
 		return err
@@ -280,11 +416,11 @@ func commandHot(ctx context.Context, cfg *config.Config, client *graw.Reddit, su
 		Before: cfg.Before,
 	}
 
-	return commands.GetHotPosts(ctx, client, subreddit, pagination, formatter)
+	return commands.GetHotPosts(ctx, client, subreddit, pagination, formatter, store)
 }
 
 // commandNew fetches new posts from a subreddit or front page.
-func commandNew(ctx context.Context, cfg *config.Config, client *graw.Reddit, subreddit string) error {
+func commandNew(ctx context.Context, cfg *config.Config, client *graw.Reddit, subreddit string, store storage.Store) error {
 	formatter, err := createFormatter(cfg.Output)
 	if err != nil {
 		return err
@@ -296,11 +432,11 @@ func commandNew(ctx context.Context, cfg *config.Config, client *graw.Reddit, su
 		Before: cfg.Before,
 	}
 
-	return commands.GetNewPosts(ctx, client, subreddit, pagination, formatter)
+	return commands.GetNewPosts(ctx, client, subreddit, pagination, formatter, store)
 }
 
 // commandComments fetches comments for a specific post.
-func commandComments(ctx context.Context, cfg *config.Config, client *graw.Reddit, subreddit, postID string) error {
+func commandComments(ctx context.Context, cfg *config.Config, client *graw.Reddit, subreddit, postID string, store storage.Store) error {
 	formatter, err := createFormatter(cfg.Output)
 	if err != nil {
 		return err
@@ -312,7 +448,7 @@ func commandComments(ctx context.Context, cfg *config.Config, client *graw.Reddi
 		Before: cfg.Before,
 	}
 
-	return commands.GetComments(ctx, client, subreddit, postID, pagination, formatter)
+	return commands.GetComments(ctx, client, subreddit, postID, pagination, formatter, store)
 }
 
 // classifyError determines the appropriate exit code based on error type.
@@ -387,14 +523,21 @@ Global Flags:
         Enable verbose output
   -debug
         Enable debug logging
+  -store
+        Enable storage of posts and comments (env: REDDIT_STORE)
+  -db-path string
+        Path to SQLite database file (env: REDDIT_DB_PATH, default: ~/.reddit/data.db)
 
 Commands:
-  me                       Show authenticated user information
-  subreddit <name>         Get information about a subreddit
-  hot [subreddit]          Fetch hot posts (omit subreddit for front page)
-  new [subreddit]          Fetch new posts (omit subreddit for front page)
-  comments <sub> <post-id> Get comments for a specific post
-  help                     Show this help message
+  me                           Show authenticated user information
+  subreddit <name>             Get information about a subreddit
+  hot [subreddit]              Fetch hot posts (omit subreddit for front page)
+  new [subreddit]              Fetch new posts (omit subreddit for front page)
+  comments <sub> <post-id>     Get comments for a specific post
+  more-comments <link-id> <id> Load additional comments by ID [id...]
+  list-posts                   List all stored posts (requires --store)
+  stats                        Show storage statistics (requires --store)
+  help                         Show this help message
 
 Examples:
   # Show authenticated user info
@@ -411,6 +554,18 @@ Examples:
 
   # Fetch comments for a post
   reddit comments golang abc123def
+
+  # Load additional comments by ID
+  reddit more-comments abc123def comment1 comment2
+
+  # Fetch hot posts and store them
+  reddit -store hot golang
+
+  # List all stored posts
+  reddit -store list-posts
+
+  # Show storage statistics
+  reddit -store stats
 
 Set environment variables for credentials:
   export REDDIT_CLIENT_ID="your-client-id"
