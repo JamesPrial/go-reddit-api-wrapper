@@ -539,7 +539,7 @@ func TestGetHotPosts_Success_ReturnsPosts(t *testing.T) {
 		`"title":"Test Post 1"`,
 		`"author":"user1"`,
 		`"score":100`,
-		`"AfterFullname":"t3_ghi789"`,
+		`"after":"t3_ghi789"`,
 	}
 
 	for _, field := range expectedFields {

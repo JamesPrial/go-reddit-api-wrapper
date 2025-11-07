@@ -390,16 +390,16 @@ type Comment struct {
 
 // PostsResponse represents a collection of posts from a subreddit with pagination info.
 type PostsResponse struct {
-	Posts          []*Post
-	AfterFullname  string // Reddit fullname (e.g. "t3_abc123") of last item for next page
-	BeforeFullname string // Reddit fullname (e.g. "t3_abc123") of first item for prev page
+	Posts          []*Post `json:"posts"`
+	AfterFullname  string  `json:"after"`  // Reddit fullname (e.g. "t3_abc123") of last item for next page
+	BeforeFullname string  `json:"before"` // Reddit fullname (e.g. "t3_abc123") of first item for prev page
 }
 
 // CommentsResponse represents a post with its comments and more IDs for loading truncated comments.
 type CommentsResponse struct {
-	Post           *Post
-	Comments       []*Comment
-	MoreIDs        []string // IDs of additional comments that can be loaded
-	AfterFullname  string   // Reddit fullname (e.g. "t1_abc123") of last comment for next page
-	BeforeFullname string   // Reddit fullname (e.g. "t1_abc123") of first comment for prev page
+	Post           *Post      `json:"post"`
+	Comments       []*Comment `json:"comments"`
+	MoreIDs        []string   `json:"more_ids"` // IDs of additional comments that can be loaded
+	AfterFullname  string     `json:"after"`    // Reddit fullname (e.g. "t1_abc123") of last comment for next page
+	BeforeFullname string     `json:"before"`   // Reddit fullname (e.g. "t1_abc123") of first comment for prev page
 }
