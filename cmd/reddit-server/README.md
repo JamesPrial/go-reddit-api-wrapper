@@ -512,6 +512,96 @@ curl -X POST http://localhost:8080/api/v1/posts/t3_abc123/more-comments \
   -d '{"children": ["comment_id_1", "comment_id_2"]}'
 ```
 
+---
+
+## Static Frontend
+
+The server includes a built-in web interface for browsing Reddit content.
+
+### Accessing the Frontend
+
+Once the server is running, open your browser to:
+
+```
+http://localhost:8080/app/
+```
+
+The frontend is embedded in the server binary and requires no additional setup.
+
+### Features
+
+- **API Key Management**: Enter and save the server's API key (displayed at startup) for authenticated requests to the backend
+- **Browse Posts**: View hot or new posts from any subreddit with pagination
+- **View Comments**: Display threaded comments for posts
+- **Responsive Design**: Works on desktop, tablet, and mobile devices
+- **Dark Mode**: Automatically adapts to your system theme preference
+
+**Note:** The "API key" refers to the server-side API key (auto-generated on first run or set via `API_KEYS` environment variable) that protects the HTTP API endpoints. This is different from Reddit's client credentials (`REDDIT_CLIENT_ID` and `REDDIT_CLIENT_SECRET`).
+
+### Technology Stack
+
+- **Alpine.js**: Lightweight reactive framework (loaded via CDN: `cdn.jsdelivr.net`)
+- **Water.css**: Classless CSS baseline (loaded via CDN: `cdn.jsdelivr.net`)
+- **Vanilla JavaScript**: No build step required
+- **Embedded Files**: All assets bundled in the server binary
+
+**Note:** The frontend requires internet access to load Alpine.js and Water.css from CDN. It will not function offline or in air-gapped environments.
+
+### Browser Requirements
+
+- Modern browsers with ES6 support (Chrome 90+, Firefox 88+, Safari 14+, Edge 90+)
+- JavaScript enabled
+- LocalStorage enabled (for API key persistence)
+
+**Security Note:** API keys are stored in your browser's LocalStorage for convenience. Only use this on trusted devices, and clear your browser data when using shared computers.
+
+### Development
+
+Static files are located in `cmd/reddit-server/static/`:
+- `index.html` - Main HTML structure
+- `style.css` - Custom CSS styles
+- `app.js` - API client and application logic
+
+**Testing Changes:**
+1. Modify files in `cmd/reddit-server/static/`
+2. Rebuild the server: `cd cmd/reddit-server && go build -o reddit-server`
+3. Restart the server: `./reddit-server`
+4. Hard refresh your browser: Ctrl+Shift+R (Linux/Windows) or Cmd+Shift+R (Mac)
+
+**Debugging:**
+- Use browser DevTools (F12) to inspect network requests and console errors
+- Check server logs for backend API errors
+- Verify files are embedded: `go list -f '{{.EmbedFiles}}' .`
+
+**Note:** Files are embedded at compile time using Go's `embed` package. Changes require a full rebuild to take effect.
+
+### Troubleshooting
+
+**Frontend not loading (404 error)**
+- Ensure the server is running: `ps aux | grep reddit-server`
+- Check you're accessing the correct URL: `http://localhost:8080/app/`
+- Verify static files are embedded: `go list -f '{{.EmbedFiles}}' .`
+
+**API calls failing from frontend**
+- Check the browser console (F12) for error messages
+- Verify the API key is correctly entered and saved
+- Ensure the server is configured with valid Reddit credentials
+- Check server logs for backend errors
+
+**CORS errors**
+- CORS errors typically occur when accessing from a different domain
+- For local development at localhost:8080, CORS should not be an issue
+- If needed, configure `ALLOWED_ORIGINS` environment variable
+
+**JavaScript console errors**
+- Ensure internet access for CDN resources (Alpine.js, Water.css)
+- Hard refresh the page: Ctrl+Shift+R (Linux/Windows) or Cmd+Shift+R (Mac)
+- Clear browser cache and reload
+
+**Dark mode not working**
+- Verify your system has a dark mode preference set
+- Some browsers may require enabling dark mode detection in settings
+
 ## Error Handling
 
 All error responses follow a consistent JSON format:

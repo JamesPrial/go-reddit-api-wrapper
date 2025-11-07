@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Browse Reddit posts and comments using the Reddit API">
+    <title>Reddit API Browser</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/water.css@2/out/water.css">
+    <link rel="stylesheet" href="/static/style.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+</head>
+<body>
+    <div x-data="appState()" x-init="initApp()" class="app-container">
+        <!-- Header -->
+        <header class="app-header">
+            <div class="header-content">
+                <h1>Reddit API Browser</h1>
+                <div class="auth-status">
+                    <template x-if="authenticated">
+                        <span class="status-badge status-authenticated">
+                            <span class="status-dot"></span>
+                            Authenticated
+                        </span>
+                        <button @click="logout()" class="btn-logout">Logout</button>
+                    </template>
+                    <template x-if="!authenticated">
+                        <span class="status-badge status-unauthenticated">
+                            <span class="status-dot"></span>
+                            Not authenticated
+                        </span>
+                    </template>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="app-main">
+            <!-- Error Display -->
+            <template x-if="error">
+                <div class="error-banner" role="alert">
+                    <span x-text="error"></span>
+                    <button @click="error = ''" class="btn-close" aria-label="Close error message">×</button>
+                </div>
+            </template>
+
+            <!-- API Key Section (shown when not authenticated) -->
+            <template x-if="!authenticated">
+                <section class="auth-section">
+                    <h2>API Authentication</h2>
+                    <form @submit.prevent="authenticate()" class="auth-form">
+                        <div class="form-group">
+                            <label for="apiKeyInput">API Key</label>
+                            <input
+                                id="apiKeyInput"
+                                type="password"
+                                x-model="apiKey"
+                                placeholder="Enter your API key"
+                                required
+                                aria-describedby="apiKeyHelp"
+                            >
+                            <small id="apiKeyHelp">Your API key will be saved locally in your browser</small>
+                        </div>
+                        <button type="submit" :disabled="loading || !apiKey" class="btn-primary">
+                            <template x-if="!loading">Authenticate</template>
+                            <template x-if="loading">Authenticating...</template>
+                        </button>
+                    </form>
+                </section>
+            </template>
+
+            <!-- Posts Browser Section (shown when authenticated) -->
+            <template x-if="authenticated && view === 'posts'">
+                <section class="posts-section">
+                    <div class="posts-header">
+                        <h2>Browse Posts</h2>
+                    </div>
+
+                    <!-- Subreddit and Sort Controls -->
+                    <div class="controls-group">
+                        <div class="form-group">
+                            <label for="subredditInput">Subreddit</label>
+                            <div class="subreddit-input-wrapper">
+                                <span class="subreddit-prefix">r/</span>
+                                <input
+                                    id="subredditInput"
+                                    type="text"
+                                    x-model="subreddit"
+                                    placeholder="golang"
+                                    @keyup.enter="fetchPosts()"
+                                    aria-label="Subreddit name"
+                                >
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Sort By</label>
+                            <div class="sort-toggle">
+                                <button
+                                    @click="sortBy = 'hot'; fetchPosts()"
+                                    :class="{ 'active': sortBy === 'hot' }"
+                                    class="toggle-btn"
+                                    :aria-pressed="sortBy === 'hot'"
+                                >
+                                    Hot
+                                </button>
+                                <button
+                                    @click="sortBy = 'new'; fetchPosts()"
+                                    :class="{ 'active': sortBy === 'new' }"
+                                    class="toggle-btn"
+                                    :aria-pressed="sortBy === 'new'"
+                                >
+                                    New
+                                </button>
+                            </div>
+                        </div>
+
+                        <button @click="fetchPosts()" :disabled="loading || !subreddit" class="btn-primary">
+                            <template x-if="!loading">Load Posts</template>
+                            <template x-if="loading">Loading...</template>
+                        </button>
+                    </div>
+
+                    <!-- Posts List -->
+                    <div class="posts-list">
+                        <template x-if="posts.length === 0 && !loading">
+                            <div class="empty-state">
+                                <p>No posts loaded. Enter a subreddit and click "Load Posts" to get started.</p>
+                            </div>
+                        </template>
+
+                        <template x-for="post in posts" :key="post.data.id" class="post-item-wrapper">
+                            <article class="post-item" @click="viewComments(post)">
+                                <div class="post-header">
+                                    <h3 x-text="post.data.title"></h3>
+                                    <span class="post-meta" x-text="`u/${post.data.author}`"></span>
+                                </div>
+                                <div class="post-content">
+                                    <template x-if="post.data.selftext">
+                                        <p class="post-selftext" x-text="post.data.selftext.substring(0, 150) + (post.data.selftext.length > 150 ? '...' : '')"></p>
+                                    </template>
+                                    <template x-if="!post.data.selftext && post.data.url">
+                                        <p class="post-url">
+                                            <span class="url-label">Link</span>
+                                            <a :href="post.data.url" target="_blank" rel="noopener noreferrer" @click.stop x-text="post.data.url.substring(0, 50) + '...'"></a>
+                                        </p>
+                                    </template>
+                                </div>
+                                <div class="post-stats">
+                                    <span class="stat">
+                                        <span class="stat-label">↑</span>
+                                        <span x-text="post.data.score"></span>
+                                    </span>
+                                    <span class="stat">
+                                        <span class="stat-label">💬</span>
+                                        <span x-text="post.data.num_comments"></span>
+                                    </span>
+                                </div>
+                                <div class="post-action">
+                                    View Comments →
+                                </div>
+                            </article>
+                        </template>
+                    </div>
+
+                    <!-- Pagination -->
+                    <template x-if="posts.length > 0">
+                        <div class="pagination">
+                            <button
+                                @click="previousPage()"
+                                :disabled="!pagination.before || loading"
+                                class="btn-secondary"
+                            >
+                                ← Previous
+                            </button>
+                            <button
+                                @click="nextPage()"
+                                :disabled="!pagination.after || loading"
+                                class="btn-secondary"
+                            >
+                                Next →
+                            </button>
+                        </div>
+                    </template>
+                </section>
+            </template>
+
+            <!-- Comments View Section (shown when viewing comments) -->
+            <template x-if="authenticated && view === 'comments' && currentPost">
+                <section class="comments-section">
+                    <div class="comments-header">
+                        <button @click="backToPostsList()" class="btn-back" aria-label="Back to posts">
+                            ← Back to Posts
+                        </button>
+                        <div class="post-preview">
+                            <h2 x-text="currentPost.data.title"></h2>
+                            <p class="post-meta" x-text="`u/${currentPost.data.author} • ${currentPost.data.score} points • ${currentPost.data.num_comments} comments`"></p>
+                        </div>
+                    </div>
+
+                    <!-- Comments List -->
+                    <div class="comments-list">
+                        <template x-if="comments.length === 0 && !loading">
+                            <div class="empty-state">
+                                <p>No comments to display.</p>
+                            </div>
+                        </template>
+
+                        <template x-for="comment in comments" :key="comment.data.id" class="comment-wrapper">
+                            <article :class="{ 'comment-item': true, 'comment-collapsed': comment.collapsed }" :style="`margin-left: ${comment.depth * 20}px`">
+                                <div class="comment-header">
+                                    <span class="comment-author" x-text="comment.data.author || '[deleted]'"></span>
+                                    <span class="comment-score" x-text="`${comment.data.score} points`"></span>
+                                </div>
+                                <div class="comment-body">
+                                    <p x-text="comment.data.body"></p>
+                                </div>
+                                <template x-if="comment.data.more_replies">
+                                    <button
+                                        @click="loadMoreComments(comment.data)"
+                                        :disabled="loading"
+                                        class="btn-load-more"
+                                    >
+                                        <template x-if="!loading">Load More Replies</template>
+                                        <template x-if="loading">Loading...</template>
+                                    </button>
+                                </template>
+                            </article>
+                        </template>
+                    </div>
+                </section>
+            </template>
+        </main>
+
+        <!-- Footer -->
+        <footer class="app-footer">
+            <p>Reddit API Browser • Built with Alpine.js and Water.css</p>
+        </footer>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

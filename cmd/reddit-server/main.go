@@ -19,12 +19,14 @@
 // API Endpoints:
 //
 //	GET  /health                                    - Health check (no auth required)
-//	GET  /api/v1/user/me                            - Get authenticated user info
-//	GET  /api/v1/subreddit/{name}                   - Get subreddit information
-//	GET  /api/v1/posts/hot                          - Get hot posts (query: subreddit, limit, after, before)
-//	GET  /api/v1/posts/new                          - Get new posts (query: subreddit, limit, after, before)
-//	GET  /api/v1/posts/{subreddit}/{postID}/comments - Get post comments (query: limit, after, before)
-//	POST /api/v1/posts/{linkID}/more-comments       - Load more comments (body: {"children": ["id1", "id2"]})
+//	GET  /app/                                      - Web UI frontend (no auth required)
+//	GET  /                                          - Redirect to /app/ (no auth required)
+//	GET  /api/v1/user/me                            - Get authenticated user info (requires API key)
+//	GET  /api/v1/subreddit/{name}                   - Get subreddit information (requires API key)
+//	GET  /api/v1/posts/hot                          - Get hot posts (requires API key; query: subreddit, limit, after, before)
+//	GET  /api/v1/posts/new                          - Get new posts (requires API key; query: subreddit, limit, after, before)
+//	GET  /api/v1/posts/{subreddit}/{postID}/comments - Get post comments (requires API key; query: limit, after, before)
+//	POST /api/v1/posts/{linkID}/more-comments       - Load more comments (requires API key; body: {"children": ["id1", "id2"]})
 //
 // Examples:
 //
@@ -50,6 +52,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -115,12 +118,31 @@ func main() {
 	mux.HandleFunc("/api/v1/posts/new", h.GetNewPosts)
 	mux.HandleFunc("/api/v1/posts/", routePostsHandler(h)) // Routes to GetComments or GetMoreComments based on path
 
+	// Register static file handler (serves frontend at /app/)
+	mux.Handle("/app/", http.StripPrefix("/app/", StaticHandler(logger)))
+
+	// Root handler: redirect to /app/ or return JSON 404 for unknown API paths
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/" {
+			http.Redirect(w, r, "/app/", http.StatusMovedPermanently)
+			return
+		}
+		// Unknown path - return JSON 404 for API paths, HTML 404 for others
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(map[string]string{"error": "endpoint not found"})
+			return
+		}
+		http.NotFound(w, r)
+	})
+
 	// Apply middleware stack: APIKey → CORS → Logging → Recovery
 	var handler http.Handler = mux
 	handler = middleware.Recovery(logger)(handler)
 	handler = middleware.Logging(logger)(handler)
 	handler = middleware.CORS(cfg.AllowedOrigins)(handler)
-	handler = middleware.APIKey(cfg.APIKeys, []string{"/health"})(handler)
+	handler = middleware.APIKey(cfg.APIKeys, []string{"/health", "/", "/app/"})(handler)
 
 	// Create HTTP server
 	addr := fmt.Sprintf(":%d", cfg.Port)

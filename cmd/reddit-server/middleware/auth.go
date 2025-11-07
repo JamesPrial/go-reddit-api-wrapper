@@ -48,14 +48,14 @@ func respondError(w http.ResponseWriter, status int, message string) {
 // The middleware:
 //   - Extracts the API key from the Authorization header (expected format: "Bearer <api-key>")
 //   - Validates the key against the provided keys slice using constant-time comparison
-//   - Skips authentication for paths in the exemptPaths slice
+//   - Skips authentication for paths in the exemptPaths slice (prefix match for paths ending with "/")
 //   - Returns 401 Unauthorized for missing, malformed, or invalid API keys
 //   - Logs failed authentication attempts with structured logging
 //
 // Example usage:
 //
 //	allowedKeys := []string{"key1", "key2"}
-//	exemptPaths := []string{"/health"}
+//	exemptPaths := []string{"/health", "/app/"}  // "/app/" matches "/app/index.html" etc.
 //	handler := APIKey(allowedKeys, exemptPaths)(myHandler)
 func APIKey(keys []string, exemptPaths []string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
@@ -154,11 +154,20 @@ func validateAPIKey(providedKey string, allowedKeys []string) bool {
 }
 
 // isExemptPath checks if the given path is in the exempt paths list.
-// Comparison is exact match (strings equality).
+// Paths ending with "/" are treated as prefixes (e.g., "/app/" matches "/app/index.html").
+// Other paths are matched exactly.
 func isExemptPath(path string, exemptPaths []string) bool {
 	for _, exemptPath := range exemptPaths {
-		if path == exemptPath {
-			return true
+		// If exempt path ends with /, treat it as a prefix match
+		if strings.HasSuffix(exemptPath, "/") {
+			if strings.HasPrefix(path, exemptPath) || path == strings.TrimSuffix(exemptPath, "/") {
+				return true
+			}
+		} else {
+			// Exact match for paths not ending with /
+			if path == exemptPath {
+				return true
+			}
 		}
 	}
 	return false
