@@ -6,7 +6,7 @@
     <meta name="description" content="Browse Reddit posts and comments using the Reddit API">
     <title>Reddit API Browser</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/water.css@2/out/water.css">
-    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="/app/style.css">
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 </head>
 <body x-data="appState()" x-init="initApp()" x-cloak>
@@ -87,9 +87,7 @@
                             >
                             <small id="apiKeyHelp">Your API key will be saved locally in your browser</small>
                         </div>
-                        <button type="submit" :disabled="loading || !apiKey" class="btn-primary">
-                            <template x-if="!loading">Authenticate</template>
-                            <template x-if="loading">Authenticating...</template>
+                        <button type="submit" :disabled="loading || !apiKey" class="btn-primary" x-text="loading ? 'Authenticating...' : 'Authenticate'">
                         </button>
                     </form>
                 </section>
@@ -141,9 +139,7 @@
                             </div>
                         </div>
 
-                        <button @click="fetchPosts()" :disabled="loading || !subreddit" class="btn-primary">
-                            <template x-if="!loading">Load Posts</template>
-                            <template x-if="loading">Loading...</template>
+                        <button @click="fetchPosts()" :disabled="loading || !subreddit" class="btn-primary" x-text="loading ? 'Loading...' : 'Load Posts'">
                         </button>
                     </div>
 
@@ -357,9 +353,7 @@
                             >
                         </div>
 
-                        <button type="submit" :disabled="loading || !bulkSubreddit" class="btn-primary">
-                            <template x-if="!loading">💾 Download & Save</template>
-                            <template x-if="loading">Downloading...</template>
+                        <button type="submit" :disabled="loading || !bulkSubreddit" class="btn-primary" x-text="loading ? 'Downloading...' : '💾 Download & Save'">
                         </button>
                     </form>
 
@@ -413,9 +407,8 @@
                                         @click="loadMoreComments(comment.data)"
                                         :disabled="loading"
                                         class="btn-load-more"
+                                        x-text="loading ? 'Loading...' : 'Load More Replies'"
                                     >
-                                        <template x-if="!loading">Load More Replies</template>
-                                        <template x-if="loading">Loading...</template>
                                     </button>
                                 </template>
                             </article>
@@ -431,7 +424,7 @@
         </footer>
     </div>
 
-    <script src="/static/app.js"></script>
-    <script src="/static/state.js"></script>
+    <script src="/app/app.js"></script>
+    <script src="/app/state.js"></script>
 </body>
 </html>

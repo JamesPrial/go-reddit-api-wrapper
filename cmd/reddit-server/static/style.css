@@ -1,3 +1,8 @@
+/* Alpine.js cloaking - hide elements until Alpine is loaded */
+[x-cloak] {
+    display: none !important;
+}
+
 /* Root CSS variables for theming */
 :root {
     --primary-color: #1a73e8;
