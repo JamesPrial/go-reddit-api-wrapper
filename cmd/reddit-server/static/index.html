@@ -160,35 +160,35 @@
                             </div>
                         </template>
 
-                        <template x-for="post in posts" :key="post.data.id" class="post-item-wrapper">
+                        <template x-for="post in posts" :key="post.id" class="post-item-wrapper">
                             <article class="post-item">
                                 <div class="post-checkbox">
-                                    <input type="checkbox" @change="togglePostSelection(post.data.id)" :checked="selectedPosts.has(post.data.id)">
+                                    <input type="checkbox" @change="togglePostSelection(post.id)" :checked="selectedPosts.has(post.id)">
                                 </div>
                                 <div class="post-content-wrapper" @click="viewComments(post)">
                                     <div class="post-header">
-                                        <h3 x-text="post.data.title"></h3>
-                                        <span class="post-meta" x-text="`u/${post.data.author}`"></span>
+                                        <h3 x-text="post.title"></h3>
+                                        <span class="post-meta" x-text="`u/${post.author}`"></span>
                                     </div>
                                     <div class="post-content">
-                                        <template x-if="post.data.selftext">
-                                            <p class="post-selftext" x-text="post.data.selftext.substring(0, 150) + (post.data.selftext.length > 150 ? '...' : '')"></p>
+                                        <template x-if="post.selftext">
+                                            <p class="post-selftext" x-text="post.selftext.substring(0, 150) + (post.selftext.length > 150 ? '...' : '')"></p>
                                         </template>
-                                        <template x-if="!post.data.selftext && post.data.url">
+                                        <template x-if="!post.selftext && post.url">
                                             <p class="post-url">
                                                 <span class="url-label">Link</span>
-                                                <a :href="post.data.url" target="_blank" rel="noopener noreferrer" @click.stop x-text="post.data.url.substring(0, 50) + '...'"></a>
+                                                <a :href="post.url" target="_blank" rel="noopener noreferrer" @click.stop x-text="post.url.substring(0, 50) + '...'"></a>
                                             </p>
                                         </template>
                                     </div>
                                     <div class="post-stats">
                                         <span class="stat">
                                             <span class="stat-label">↑</span>
-                                            <span x-text="post.data.score"></span>
+                                            <span x-text="post.score"></span>
                                         </span>
                                         <span class="stat">
                                             <span class="stat-label">💬</span>
-                                            <span x-text="post.data.num_comments"></span>
+                                            <span x-text="post.num_comments"></span>
                                         </span>
                                     </div>
                                     <div class="post-action">
@@ -250,32 +250,32 @@
                             </div>
                         </template>
 
-                        <template x-for="post in savedPosts" :key="post.data.id" class="post-item-wrapper">
+                        <template x-for="post in savedPosts" :key="post.id" class="post-item-wrapper">
                             <article class="post-item">
                                 <div class="post-content-wrapper" @click="viewComments(post)">
                                     <div class="post-header">
-                                        <h3 x-text="post.data.title"></h3>
-                                        <span class="post-meta" x-text="`u/${post.data.author}`"></span>
+                                        <h3 x-text="post.title"></h3>
+                                        <span class="post-meta" x-text="`u/${post.author}`"></span>
                                     </div>
                                     <div class="post-content">
-                                        <template x-if="post.data.selftext">
-                                            <p class="post-selftext" x-text="post.data.selftext.substring(0, 150) + (post.data.selftext.length > 150 ? '...' : '')"></p>
+                                        <template x-if="post.selftext">
+                                            <p class="post-selftext" x-text="post.selftext.substring(0, 150) + (post.selftext.length > 150 ? '...' : '')"></p>
                                         </template>
-                                        <template x-if="!post.data.selftext && post.data.url">
+                                        <template x-if="!post.selftext && post.url">
                                             <p class="post-url">
                                                 <span class="url-label">Link</span>
-                                                <a :href="post.data.url" target="_blank" rel="noopener noreferrer" @click.stop x-text="post.data.url.substring(0, 50) + '...'"></a>
+                                                <a :href="post.url" target="_blank" rel="noopener noreferrer" @click.stop x-text="post.url.substring(0, 50) + '...'"></a>
                                             </p>
                                         </template>
                                     </div>
                                     <div class="post-stats">
                                         <span class="stat">
                                             <span class="stat-label">↑</span>
-                                            <span x-text="post.data.score"></span>
+                                            <span x-text="post.score"></span>
                                         </span>
                                         <span class="stat">
                                             <span class="stat-label">💬</span>
-                                            <span x-text="post.data.num_comments"></span>
+                                            <span x-text="post.num_comments"></span>
                                         </span>
                                     </div>
                                     <div class="post-action">
@@ -283,7 +283,7 @@
                                     </div>
                                 </div>
                                 <div class="post-actions">
-                                    <button @click.stop="deleteSavedPost(post.data.id)" class="btn-delete">🗑️ Delete</button>
+                                    <button @click.stop="deleteSavedPost(post.id)" class="btn-delete">🗑️ Delete</button>
                                 </div>
                             </article>
                         </template>
@@ -377,8 +377,8 @@
                             ← Back to Posts
                         </button>
                         <div class="post-preview">
-                            <h2 x-text="currentPost.data.title"></h2>
-                            <p class="post-meta" x-text="`u/${currentPost.data.author} • ${currentPost.data.score} points • ${currentPost.data.num_comments} comments`"></p>
+                            <h2 x-text="currentPost.title"></h2>
+                            <p class="post-meta" x-text="`u/${currentPost.author} • ${currentPost.score} points • ${currentPost.num_comments} comments`"></p>
                         </div>
                         <button @click="saveCurrentPostWithComments()" :disabled="loading" class="btn-primary">
                             💾 Save Post & Comments
@@ -393,18 +393,18 @@
                             </div>
                         </template>
 
-                        <template x-for="comment in comments" :key="comment.data.id" class="comment-wrapper">
+                        <template x-for="comment in comments" :key="comment.id" class="comment-wrapper">
                             <article :class="{ 'comment-item': true, 'comment-collapsed': comment.collapsed }" :style="`margin-left: ${comment.depth * 20}px`">
                                 <div class="comment-header">
-                                    <span class="comment-author" x-text="comment.data.author || '[deleted]'"></span>
-                                    <span class="comment-score" x-text="`${comment.data.score} points`"></span>
+                                    <span class="comment-author" x-text="comment.author || '[deleted]'"></span>
+                                    <span class="comment-score" x-text="`${comment.score} points`"></span>
                                 </div>
                                 <div class="comment-body">
-                                    <p x-text="comment.data.body"></p>
+                                    <p x-text="comment.body"></p>
                                 </div>
-                                <template x-if="comment.data.more_replies">
+                                <template x-if="comment.more_replies">
                                     <button
-                                        @click="loadMoreComments(comment.data)"
+                                        @click="loadMoreComments(comment)"
                                         :disabled="loading"
                                         class="btn-load-more"
                                         x-text="loading ? 'Loading...' : 'Load More Replies'"

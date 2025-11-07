@@ -219,8 +219,8 @@ function appState() {
 
       try {
         // Extract subreddit and post ID from the post
-        const subreddit = post.data.subreddit;
-        const postId = post.data.id;
+        const subreddit = post.subreddit;
+        const postId = post.id;
 
         const result = await window.api.fetchComments(subreddit, postId, {
           limit: this.PAGE_SIZE,
@@ -295,7 +295,7 @@ function appState() {
       this.error = '';
 
       try {
-        const linkId = this.currentPost.data.name; // e.g., "t3_abc123"
+        const linkId = this.currentPost.name; // e.g., "t3_abc123"
         const children = commentData.more_children.slice(0, 100);
 
         const result = await window.api.fetchMoreComments(linkId, children);
@@ -332,7 +332,7 @@ function appState() {
      */
     selectAllPosts() {
       this.posts.forEach(post => {
-        this.selectedPosts.add(post.data.id);
+        this.selectedPosts.add(post.id);
       });
       // Force Alpine.js reactivity: Set mutations don't trigger updates automatically
       this.selectedPosts = new Set(this.selectedPosts);
@@ -380,7 +380,7 @@ function appState() {
       try {
         await window.api.savePost(post);
         await this.loadStorageStats();
-        this.showSuccess(`Saved post: ${post.data.title.substring(0, 50)}...`);
+        this.showSuccess(`Saved post: ${post.title.substring(0, 50)}...`);
       } catch (err) {
         this.showError('Failed to save post: ' + err.message);
       } finally {
@@ -403,7 +403,7 @@ function appState() {
 
       try {
         const postsToSave = this.posts.filter(post =>
-          this.selectedPosts.has(post.data.id)
+          this.selectedPosts.has(post.id)
         );
 
         for (const post of postsToSave) {
@@ -436,7 +436,7 @@ function appState() {
       try {
         await window.api.savePost(this.currentPost);
         if (this.comments.length > 0) {
-          await window.api.saveComments(this.currentPost.data.id, this.comments);
+          await window.api.saveComments(this.currentPost.id, this.comments);
         }
         await this.loadStorageStats();
 
@@ -534,7 +534,7 @@ function appState() {
       this.error = '';
 
       try {
-        const result = await window.api.getSavedComments(post.data.id, {});
+        const result = await window.api.getSavedComments(post.id, {});
         this.savedCurrentPost = post;
         this.savedComments = result.comments || [];
       } catch (err) {
@@ -557,7 +557,7 @@ function appState() {
         await window.api.deleteSavedPost(postId);
         await this.loadStorageStats();
 
-        this.savedPosts = this.savedPosts.filter(p => p.data.id !== postId);
+        this.savedPosts = this.savedPosts.filter(p => p.id !== postId);
         this.showSuccess('Post deleted');
       } catch (err) {
         this.showError('Failed to delete post: ' + err.message);
@@ -689,7 +689,7 @@ function appState() {
      */
     areAllPostsSelected() {
       if (this.posts.length === 0) return false;
-      return this.posts.every(post => this.selectedPosts.has(post.data.id));
+      return this.posts.every(post => this.selectedPosts.has(post.id));
     },
 
     /**
