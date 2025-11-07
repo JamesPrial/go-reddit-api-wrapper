@@ -74,7 +74,7 @@ func main() {
 	slog.SetDefault(logger)
 
 	// Load and validate configuration
-	cfg, err := config.Load()
+	cfg, generatedKey, err := config.Load()
 	if err != nil {
 		logger.Error("failed to load configuration", "error", err)
 		os.Exit(1)
@@ -86,6 +86,11 @@ func main() {
 	}
 
 	logger.Info("server configuration loaded", "config", cfg.String())
+
+	// Log generated API key if one was created
+	if generatedKey != "" {
+		logger.Warn("API key auto-generated - SAVE THIS SECURELY", "api_key", generatedKey)
+	}
 
 	// Create Reddit API client
 	redditClient, err := createRedditClient(cfg)
@@ -110,11 +115,12 @@ func main() {
 	mux.HandleFunc("/api/v1/posts/new", h.GetNewPosts)
 	mux.HandleFunc("/api/v1/posts/", routePostsHandler(h)) // Routes to GetComments or GetMoreComments based on path
 
-	// Apply middleware stack: CORS → Logging → Recovery
+	// Apply middleware stack: APIKey → CORS → Logging → Recovery
 	var handler http.Handler = mux
 	handler = middleware.Recovery(logger)(handler)
 	handler = middleware.Logging(logger)(handler)
 	handler = middleware.CORS(cfg.AllowedOrigins)(handler)
+	handler = middleware.APIKey(cfg.APIKeys, []string{"/health"})(handler)
 
 	// Create HTTP server
 	addr := fmt.Sprintf(":%d", cfg.Port)

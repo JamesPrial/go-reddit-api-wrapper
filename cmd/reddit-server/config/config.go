@@ -2,6 +2,8 @@
 package config
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"os"
@@ -29,6 +31,9 @@ type Config struct {
 	// Optional Reddit configuration
 	RedditUserAgent string // Custom user agent (from REDDIT_USER_AGENT)
 
+	// API key authentication
+	APIKeys []string // API keys for request authentication (from API_KEYS, comma-separated, or auto-generated)
+
 	// CORS configuration
 	AllowedOrigins []string // CORS allowed origins (from ALLOWED_ORIGINS, comma-separated)
 }
@@ -45,10 +50,12 @@ type Config struct {
 //   - REDDIT_USERNAME: Reddit username for user authentication
 //   - REDDIT_PASSWORD: Reddit password for user authentication
 //   - REDDIT_USER_AGENT: Custom user agent string
+//   - API_KEYS: Comma-separated list of API keys for authentication (auto-generated if empty)
 //   - ALLOWED_ORIGINS: Comma-separated list of CORS allowed origins
 //
-// Returns an error if required fields are missing or invalid.
-func Load() (*Config, error) {
+// Returns the config, a generated API key (if one was auto-generated), and an error if any required fields are missing or invalid.
+// If API_KEYS is empty, a secure random API key is generated and stored in Config.APIKeys.
+func Load() (*Config, string, error) {
 	cfg := &Config{
 		Port:            8080,
 		ShutdownTimeout: 30 * time.Second,
@@ -59,7 +66,7 @@ func Load() (*Config, error) {
 	if portStr := os.Getenv("PORT"); portStr != "" {
 		port, err := strconv.Atoi(portStr)
 		if err != nil {
-			return nil, fmt.Errorf("invalid PORT: %w", err)
+			return nil, "", fmt.Errorf("invalid PORT: %w", err)
 		}
 		cfg.Port = port
 	}
@@ -68,7 +75,7 @@ func Load() (*Config, error) {
 	if timeoutStr := os.Getenv("SHUTDOWN_TIMEOUT"); timeoutStr != "" {
 		timeout, err := time.ParseDuration(timeoutStr)
 		if err != nil {
-			return nil, fmt.Errorf("invalid SHUTDOWN_TIMEOUT: %w", err)
+			return nil, "", fmt.Errorf("invalid SHUTDOWN_TIMEOUT: %w", err)
 		}
 		cfg.ShutdownTimeout = timeout
 	}
@@ -77,7 +84,7 @@ func Load() (*Config, error) {
 	if timeoutStr := os.Getenv("REQUEST_TIMEOUT"); timeoutStr != "" {
 		timeout, err := time.ParseDuration(timeoutStr)
 		if err != nil {
-			return nil, fmt.Errorf("invalid REQUEST_TIMEOUT: %w", err)
+			return nil, "", fmt.Errorf("invalid REQUEST_TIMEOUT: %w", err)
 		}
 		cfg.RequestTimeout = timeout
 	}
@@ -88,6 +95,29 @@ func Load() (*Config, error) {
 	cfg.RedditUsername = os.Getenv("REDDIT_USERNAME")
 	cfg.RedditPassword = os.Getenv("REDDIT_PASSWORD")
 	cfg.RedditUserAgent = os.Getenv("REDDIT_USER_AGENT")
+
+	// Parse API keys
+	if keysStr := os.Getenv("API_KEYS"); keysStr != "" {
+		keys := strings.Split(keysStr, ",")
+		cfg.APIKeys = make([]string, 0, len(keys))
+		for _, key := range keys {
+			trimmed := strings.TrimSpace(key)
+			if trimmed != "" {
+				cfg.APIKeys = append(cfg.APIKeys, trimmed)
+			}
+		}
+	}
+
+	// Generate API key if not provided
+	generatedKey := ""
+	if len(cfg.APIKeys) == 0 {
+		key, err := generateAPIKey()
+		if err != nil {
+			return nil, "", fmt.Errorf("failed to generate API key: %w", err)
+		}
+		cfg.APIKeys = []string{key}
+		generatedKey = key
+	}
 
 	// Parse allowed origins
 	if originsStr := os.Getenv("ALLOWED_ORIGINS"); originsStr != "" {
@@ -101,7 +131,7 @@ func Load() (*Config, error) {
 		}
 	}
 
-	return cfg, nil
+	return cfg, generatedKey, nil
 }
 
 // Validate checks that all required configuration fields are present and valid.
@@ -109,6 +139,7 @@ func Load() (*Config, error) {
 //   - Reddit API credentials (client ID and secret are required)
 //   - Port range (1-65535)
 //   - Timeout values (must be positive and not exceed 5 minutes)
+//   - API keys (must be at least 32 characters and valid base64)
 //   - CORS origins (must start with http:// or https://)
 //
 // Returns an error if any validation fails.
@@ -142,6 +173,28 @@ func (c *Config) Validate() error {
 		errs = append(errs, fmt.Errorf("request timeout must not exceed 5 minutes, got %v", c.RequestTimeout))
 	}
 
+	// Validate API keys
+	if len(c.APIKeys) == 0 {
+		errs = append(errs, errors.New("at least one API key is required"))
+	}
+	seen := make(map[string]bool)
+	for i, key := range c.APIKeys {
+		if len(key) < 32 {
+			errs = append(errs, fmt.Errorf("API key %d must be at least 32 characters, got %d", i+1, len(key)))
+		}
+		if seen[key] {
+			errs = append(errs, fmt.Errorf("API key %d is a duplicate", i+1))
+		}
+		seen[key] = true
+		if _, err := base64.RawURLEncoding.DecodeString(key); err != nil {
+			errs = append(errs, fmt.Errorf("API key %d is not valid base64: %w", i+1, err))
+		}
+		// Check for standard base64 characters that aren't URL-safe
+		if strings.ContainsAny(key, "+/") {
+			errs = append(errs, fmt.Errorf("API key %d must use URL-safe base64 (no + or / characters)", i+1))
+		}
+	}
+
 	// Validate CORS origins
 	for _, origin := range c.AllowedOrigins {
 		if !strings.HasPrefix(origin, "http://") && !strings.HasPrefix(origin, "https://") {
@@ -159,8 +212,12 @@ func (c *Config) Validate() error {
 // String returns a string representation of the configuration for logging.
 // It redacts sensitive credentials for security.
 func (c *Config) String() string {
+	redactedKeys := make([]string, len(c.APIKeys))
+	for i := range c.APIKeys {
+		redactedKeys[i] = redact(c.APIKeys[i])
+	}
 	return fmt.Sprintf(
-		"Config{Port: %d, ShutdownTimeout: %v, RequestTimeout: %v, RedditClientID: %s, RedditClientSecret: %s, RedditUsername: %s, RedditPassword: %s, AllowedOrigins: %v}",
+		"Config{Port: %d, ShutdownTimeout: %v, RequestTimeout: %v, RedditClientID: %s, RedditClientSecret: %s, RedditUsername: %s, RedditPassword: %s, APIKeys: %v, AllowedOrigins: %v}",
 		c.Port,
 		c.ShutdownTimeout,
 		c.RequestTimeout,
@@ -168,6 +225,7 @@ func (c *Config) String() string {
 		redact(c.RedditClientSecret),
 		redact(c.RedditUsername),
 		redact(c.RedditPassword),
+		redactedKeys,
 		c.AllowedOrigins,
 	)
 }
@@ -179,4 +237,17 @@ func redact(s string) string {
 		return "<empty>"
 	}
 	return "<redacted>"
+}
+
+// generateAPIKey generates a secure random API key using 32 random bytes encoded with URL-safe base64.
+func generateAPIKey() (string, error) {
+	buf := make([]byte, 32)
+	n, err := rand.Read(buf)
+	if err != nil {
+		return "", err
+	}
+	if n != len(buf) {
+		return "", fmt.Errorf("insufficient random bytes: got %d, want %d", n, len(buf))
+	}
+	return base64.RawURLEncoding.EncodeToString(buf), nil
 }

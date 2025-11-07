@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/base64"
 	"errors"
 	"os"
 	"strings"
@@ -20,7 +21,7 @@ func TestLoad_AllEnvironmentVariables(t *testing.T) {
 	setenv(t, "REDDIT_USER_AGENT", "test-agent/1.0")
 	setenv(t, "ALLOWED_ORIGINS", "http://localhost:3000,https://example.com")
 
-	cfg, err := Load()
+	cfg, _, err := Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v, want nil", err)
 	}
@@ -68,7 +69,7 @@ func TestLoad_RequiredOnly(t *testing.T) {
 	setenv(t, "REDDIT_CLIENT_ID", "test-client-id")
 	setenv(t, "REDDIT_CLIENT_SECRET", "test-client-secret")
 
-	cfg, err := Load()
+	cfg, _, err := Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v, want nil", err)
 	}
@@ -108,7 +109,7 @@ func TestLoad_InvalidPort(t *testing.T) {
 	setenv(t, "REDDIT_CLIENT_ID", "test-id")
 	setenv(t, "REDDIT_CLIENT_SECRET", "test-secret")
 
-	_, err := Load()
+	_, _, err := Load()
 	if err == nil {
 		t.Fatal("Load() error = nil, want error for invalid PORT")
 	}
@@ -142,7 +143,7 @@ func TestLoad_InvalidDuration(t *testing.T) {
 			setenv(t, "REDDIT_CLIENT_ID", "test-id")
 			setenv(t, "REDDIT_CLIENT_SECRET", "test-secret")
 
-			_, err := Load()
+			_, _, err := Load()
 			if err == nil {
 				t.Fatalf("Load() error = nil, want error for invalid %s", tt.envVar)
 			}
@@ -158,7 +159,7 @@ func TestLoad_UsesDefaults(t *testing.T) {
 	// Clear all environment variables (don't set any)
 	// This tests that defaults are applied correctly
 
-	cfg, err := Load()
+	cfg, _, err := Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v, want nil", err)
 	}
@@ -186,7 +187,7 @@ func TestLoad_UsesDefaults(t *testing.T) {
 
 func TestLoad_ThenValidate_RejectsRequiredFields(t *testing.T) {
 	// Load with defaults (missing required fields)
-	cfg, err := Load()
+	cfg, _, err := Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v, want nil", err)
 	}
@@ -246,7 +247,7 @@ func TestLoad_AllowedOriginsCommaSeparated(t *testing.T) {
 			setenv(t, "REDDIT_CLIENT_ID", "test-id")
 			setenv(t, "REDDIT_CLIENT_SECRET", "test-secret")
 
-			cfg, err := Load()
+			cfg, _, err := Load()
 			if err != nil {
 				t.Fatalf("Load() error = %v, want nil", err)
 			}
@@ -274,6 +275,7 @@ func TestValidate_Success(t *testing.T) {
 		RequestTimeout:     30 * time.Second,
 		RedditClientID:     "test-id",
 		RedditClientSecret: "test-secret",
+		APIKeys:            []string{"dGVzdC1rZXktdGhhdC1pcy1sb25nLWVub3VnaC1mb3ItdmFsaWRhdGlvbg"},
 		AllowedOrigins:     []string{"http://localhost:3000", "https://example.com"},
 	}
 
@@ -290,6 +292,7 @@ func TestValidate_MissingClientID(t *testing.T) {
 		RequestTimeout:     30 * time.Second,
 		RedditClientID:     "", // Missing
 		RedditClientSecret: "test-secret",
+		APIKeys:            []string{"dGVzdC1rZXktdGhhdC1pcy1sb25nLWVub3VnaC1mb3ItdmFsaWRhdGlvbg"},
 	}
 
 	err := cfg.Validate()
@@ -309,6 +312,7 @@ func TestValidate_MissingClientSecret(t *testing.T) {
 		RequestTimeout:     30 * time.Second,
 		RedditClientID:     "test-id",
 		RedditClientSecret: "", // Missing
+		APIKeys:            []string{"dGVzdC1rZXktdGhhdC1pcy1sb25nLWVub3VnaC1mb3ItdmFsaWRhdGlvbg"},
 	}
 
 	err := cfg.Validate()
@@ -340,6 +344,7 @@ func TestValidate_InvalidPortRange(t *testing.T) {
 				RequestTimeout:     30 * time.Second,
 				RedditClientID:     "test-id",
 				RedditClientSecret: "test-secret",
+				APIKeys:            []string{"dGVzdC1rZXktdGhhdC1pcy1sb25nLWVub3VnaC1mb3ItdmFsaWRhdGlvbg"},
 			}
 
 			err := cfg.Validate()
@@ -395,6 +400,7 @@ func TestValidate_NegativeTimeout(t *testing.T) {
 				RequestTimeout:     tt.requestTimeout,
 				RedditClientID:     "test-id",
 				RedditClientSecret: "test-secret",
+				APIKeys:            []string{"dGVzdC1rZXktdGhhdC1pcy1sb25nLWVub3VnaC1mb3ItdmFsaWRhdGlvbg"},
 			}
 
 			err := cfg.Validate()
@@ -444,6 +450,7 @@ func TestValidate_ExcessiveTimeout(t *testing.T) {
 				RequestTimeout:     tt.requestTimeout,
 				RedditClientID:     "test-id",
 				RedditClientSecret: "test-secret",
+				APIKeys:            []string{"dGVzdC1rZXktdGhhdC1pcy1sb25nLWVub3VnaC1mb3ItdmFsaWRhdGlvbg"},
 			}
 
 			err := cfg.Validate()
@@ -495,6 +502,7 @@ func TestValidate_InvalidCORSOrigin(t *testing.T) {
 				RedditClientID:     "test-id",
 				RedditClientSecret: "test-secret",
 				AllowedOrigins:     tt.origins,
+				APIKeys:            []string{"dGVzdC1rZXktdGhhdC1pcy1sb25nLWVub3VnaC1mb3ItdmFsaWRhdGlvbg"},
 			}
 
 			err := cfg.Validate()
@@ -619,6 +627,228 @@ func TestString_EmptyCredentials(t *testing.T) {
 	// Verify "<redacted>" is not present since all credentials are empty
 	if strings.Contains(str, "<redacted>") {
 		t.Error("String() contains '<redacted>' marker when all credentials are empty")
+	}
+}
+
+func TestLoad_APIKeys_Single(t *testing.T) {
+	setenv(t, "API_KEYS", "dGVzdC1hcGkta2V5LXRoYXQtaXMtYXQtbGVhc3QtMzItY2hhcnM")
+	setenv(t, "REDDIT_CLIENT_ID", "test-id")
+	setenv(t, "REDDIT_CLIENT_SECRET", "test-secret")
+
+	cfg, generatedKey, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v, want nil", err)
+	}
+
+	// When API_KEYS is explicitly provided, no key should be generated
+	if generatedKey != "" {
+		t.Errorf("generatedKey = %q, want empty string when API_KEYS is explicitly provided", generatedKey)
+	}
+
+	if len(cfg.APIKeys) != 1 {
+		t.Errorf("APIKeys length = %d, want 1", len(cfg.APIKeys))
+	}
+	if cfg.APIKeys[0] != "dGVzdC1hcGkta2V5LXRoYXQtaXMtYXQtbGVhc3QtMzItY2hhcnM" {
+		t.Errorf("APIKeys[0] = %q, want %q", cfg.APIKeys[0], "dGVzdC1hcGkta2V5LXRoYXQtaXMtYXQtbGVhc3QtMzItY2hhcnM")
+	}
+}
+
+func TestLoad_APIKeys_Multiple(t *testing.T) {
+	setenv(t, "API_KEYS", "dGVzdC1hcGkta2V5LXRoYXQtaXMtYXQtbGVhc3QtMzItY2hhcnM,YW5vdGhlci10ZXN0LWFwaS1rZXktdGhhdC1pcy0zMi1jaGFycw")
+	setenv(t, "REDDIT_CLIENT_ID", "test-id")
+	setenv(t, "REDDIT_CLIENT_SECRET", "test-secret")
+
+	cfg, generatedKey, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v, want nil", err)
+	}
+
+	// When API_KEYS is explicitly provided, no key should be generated
+	if generatedKey != "" {
+		t.Errorf("generatedKey = %q, want empty string when API_KEYS is explicitly provided", generatedKey)
+	}
+
+	if len(cfg.APIKeys) != 2 {
+		t.Errorf("APIKeys length = %d, want 2", len(cfg.APIKeys))
+	}
+	if cfg.APIKeys[0] != "dGVzdC1hcGkta2V5LXRoYXQtaXMtYXQtbGVhc3QtMzItY2hhcnM" {
+		t.Errorf("APIKeys[0] = %q, want %q", cfg.APIKeys[0], "dGVzdC1hcGkta2V5LXRoYXQtaXMtYXQtbGVhc3QtMzItY2hhcnM")
+	}
+	if cfg.APIKeys[1] != "YW5vdGhlci10ZXN0LWFwaS1rZXktdGhhdC1pcy0zMi1jaGFycw" {
+		t.Errorf("APIKeys[1] = %q, want %q", cfg.APIKeys[1], "YW5vdGhlci10ZXN0LWFwaS1rZXktdGhhdC1pcy0zMi1jaGFycw")
+	}
+}
+
+func TestLoad_APIKeys_Empty(t *testing.T) {
+	// Don't set API_KEYS - should trigger auto-generation
+	setenv(t, "REDDIT_CLIENT_ID", "test-id")
+	setenv(t, "REDDIT_CLIENT_SECRET", "test-secret")
+
+	cfg, generatedKey, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v, want nil", err)
+	}
+
+	// When API_KEYS is empty, a key should be auto-generated
+	if generatedKey == "" {
+		t.Error("generatedKey is empty, expected auto-generated key")
+	}
+
+	if len(cfg.APIKeys) != 1 {
+		t.Errorf("APIKeys length = %d, want 1 (auto-generated)", len(cfg.APIKeys))
+	}
+	if cfg.APIKeys[0] == "" {
+		t.Error("APIKeys[0] is empty, expected auto-generated key")
+	}
+	// Verify the config's key matches the returned generated key
+	if cfg.APIKeys[0] != generatedKey {
+		t.Errorf("APIKeys[0] = %q, want to match generatedKey = %q", cfg.APIKeys[0], generatedKey)
+	}
+}
+
+func TestLoad_APIKeys_GeneratedFormat(t *testing.T) {
+	// Don't set API_KEYS - should trigger auto-generation
+	setenv(t, "REDDIT_CLIENT_ID", "test-id")
+	setenv(t, "REDDIT_CLIENT_SECRET", "test-secret")
+
+	cfg, generatedKey, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v, want nil", err)
+	}
+
+	// Verify generated key is returned
+	if generatedKey == "" {
+		t.Fatal("generatedKey is empty, expected auto-generated key")
+	}
+
+	// Verify key is at least 32 characters
+	if len(generatedKey) < 32 {
+		t.Errorf("Generated key length = %d, want at least 32", len(generatedKey))
+	}
+
+	// Verify key is valid base64url (RawURLEncoding without padding)
+	_, err = base64.RawURLEncoding.DecodeString(generatedKey)
+	if err != nil {
+		t.Errorf("Generated key is not valid base64url: %v", err)
+	}
+
+	// Verify it's stored in the config
+	if len(cfg.APIKeys) != 1 {
+		t.Errorf("APIKeys length = %d, want 1", len(cfg.APIKeys))
+	}
+	if cfg.APIKeys[0] != generatedKey {
+		t.Errorf("APIKeys[0] = %q, want to match generatedKey = %q", cfg.APIKeys[0], generatedKey)
+	}
+}
+
+func TestValidate_APIKeys_TooShort(t *testing.T) {
+	cfg := &Config{
+		Port:               8080,
+		ShutdownTimeout:    30 * time.Second,
+		RequestTimeout:     30 * time.Second,
+		RedditClientID:     "test-id",
+		RedditClientSecret: "test-secret",
+		APIKeys:            []string{"short"},
+	}
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("Validate() error = nil, want error for short API key")
+	}
+
+	if !strings.Contains(err.Error(), "must be at least 32 characters") {
+		t.Errorf("Validate() error = %v, want error containing 'must be at least 32 characters'", err)
+	}
+}
+
+func TestValidate_APIKeys_InvalidBase64(t *testing.T) {
+	cfg := &Config{
+		Port:               8080,
+		ShutdownTimeout:    30 * time.Second,
+		RequestTimeout:     30 * time.Second,
+		RedditClientID:     "test-id",
+		RedditClientSecret: "test-secret",
+		APIKeys:            []string{"this-is-not-valid-base64!!!!!!!"}, // 32 chars but not valid base64
+	}
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("Validate() error = nil, want error for invalid base64 API key")
+	}
+
+	if !strings.Contains(err.Error(), "not valid base64") {
+		t.Errorf("Validate() error = %v, want error containing 'not valid base64'", err)
+	}
+}
+
+func TestValidate_APIKeys_Missing(t *testing.T) {
+	cfg := &Config{
+		Port:               8080,
+		ShutdownTimeout:    30 * time.Second,
+		RequestTimeout:     30 * time.Second,
+		RedditClientID:     "test-id",
+		RedditClientSecret: "test-secret",
+		APIKeys:            []string{}, // Empty slice
+	}
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("Validate() error = nil, want error for missing API keys")
+	}
+
+	if !strings.Contains(err.Error(), "at least one API key is required") {
+		t.Errorf("Validate() error = %v, want error containing 'at least one API key is required'", err)
+	}
+}
+
+func TestConfig_String_RedactsAPIKeys(t *testing.T) {
+	cfg := &Config{
+		Port:               8080,
+		ShutdownTimeout:    30 * time.Second,
+		RequestTimeout:     30 * time.Second,
+		RedditClientID:     "test-id",
+		RedditClientSecret: "test-secret",
+		APIKeys:            []string{"dGVzdC1hcGkta2V5LXRoYXQtaXMtYXQtbGVhc3QtMzItY2hhcnM"},
+	}
+
+	str := cfg.String()
+
+	// Verify API key is redacted in output
+	if strings.Contains(str, "dGVzdC1hcGkta2V5LXRoYXQtaXMtYXQtbGVhc3QtMzItY2hhcnM") {
+		t.Error("String() contains unredacted API key")
+	}
+
+	// Verify redacted marker is present for API keys
+	if !strings.Contains(str, "<redacted>") {
+		t.Error("String() does not contain '<redacted>' marker for API keys")
+	}
+}
+
+func TestLoad_APIKeys_WhitespaceAndEmpty(t *testing.T) {
+	// Test that whitespace is trimmed and empty entries are filtered
+	setenv(t, "API_KEYS", "dGVzdC1hcGkta2V5LXRoYXQtaXMtYXQtbGVhc3QtMzItY2hhcnM , , YW5vdGhlci10ZXN0LWFwaS1rZXktdGhhdC1pcy0zMi1jaGFycw")
+	setenv(t, "REDDIT_CLIENT_ID", "test-id")
+	setenv(t, "REDDIT_CLIENT_SECRET", "test-secret")
+
+	cfg, generatedKey, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v, want nil", err)
+	}
+
+	// When API_KEYS is explicitly provided (even with empty entries), no key should be generated
+	if generatedKey != "" {
+		t.Errorf("generatedKey = %q, want empty string when API_KEYS is explicitly provided", generatedKey)
+	}
+
+	// Should have exactly 2 keys (empty entries and whitespace filtered)
+	if len(cfg.APIKeys) != 2 {
+		t.Errorf("APIKeys length = %d, want 2 (with whitespace trimmed and empty entries removed)", len(cfg.APIKeys))
+	}
+	if cfg.APIKeys[0] != "dGVzdC1hcGkta2V5LXRoYXQtaXMtYXQtbGVhc3QtMzItY2hhcnM" {
+		t.Errorf("APIKeys[0] = %q, want %q (whitespace should be trimmed)", cfg.APIKeys[0], "dGVzdC1hcGkta2V5LXRoYXQtaXMtYXQtbGVhc3QtMzItY2hhcnM")
+	}
+	if cfg.APIKeys[1] != "YW5vdGhlci10ZXN0LWFwaS1rZXktdGhhdC1pcy0zMi1jaGFycw" {
+		t.Errorf("APIKeys[1] = %q, want %q (whitespace should be trimmed)", cfg.APIKeys[1], "YW5vdGhlci10ZXN0LWFwaS1rZXktdGhhdC1pcy0zMi1jaGFycw")
 	}
 }
 
