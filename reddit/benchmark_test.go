@@ -1570,17 +1570,14 @@ func createUserActivityServer(postsFixture, commentsFixture []byte, postCount in
 
 		// Route based on path
 		if strings.Contains(r.URL.Path, "/api/v1/me") {
-			// Return user data wrapped in Thing structure with kind "t2"
+			// Return user data directly without Thing wrapper (matches actual Reddit API)
 			response := map[string]interface{}{
-				"kind": "t2",
-				"data": map[string]interface{}{
-					"id":            "abc123xyz",
-					"name":          "t2_abc123xyz",
-					"link_karma":    10000,
-					"comment_karma": 5000,
-					"created":       1704067200.0,
-					"created_utc":   1704067200.0,
-				},
+				"id":            "abc123xyz",
+				"name":          "t2_abc123xyz",
+				"link_karma":    10000,
+				"comment_karma": 5000,
+				"created":       1704067200.0,
+				"created_utc":   1704067200.0,
 			}
 			json.NewEncoder(w).Encode(response)
 		} else if strings.Contains(r.URL.Path, "/new") {

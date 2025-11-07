@@ -190,6 +190,10 @@ type HTTPClient interface {
 	// DoMoreChildren executes an HTTP request for the morechildren endpoint.
 	// Returns the Things array from the nested json.data structure.
 	DoMoreChildren(req *http.Request) ([]*types.Thing, error)
+
+	// DoJSON executes an HTTP request and unmarshals the response into any JSON type.
+	// This is used for endpoints that don't return Thing-wrapped responses.
+	DoJSON(req *http.Request, v interface{}) error
 }
 
 // Validator defines validation operations for Reddit API parameters.
@@ -449,8 +453,8 @@ func (r *Reddit) Me(ctx context.Context) (*types.AccountData, error) {
 		return nil, &AuthError{Message: "failed to add auth headers", Err: err, RequestID: requestID}
 	}
 
-	var result types.Thing
-	err = r.httpClient.Do(req, &result)
+	var account types.AccountData
+	err = r.httpClient.DoJSON(req, &account)
 	if err != nil {
 		// Check if this is a 401 error, invalidate token and retry once
 		if r.handleAuthErrorWithContext(ctx, err) {
@@ -463,25 +467,14 @@ func (r *Reddit) Me(ctx context.Context) (*types.AccountData, error) {
 				return nil, &AuthError{Message: "failed to add auth headers on retry", Err: err, RequestID: requestID}
 			}
 			// Retry the request
-			err = r.httpClient.Do(req, &result)
+			err = r.httpClient.DoJSON(req, &account)
 		}
 		if err != nil {
 			return nil, translateClientErrorWithRequestID(wrapDoError(err, "get user info", MeURL), requestID)
 		}
 	}
 
-	// Parse the account data
-	parsed, err := r.parser.ParseThing(ctx, &result)
-	if err != nil {
-		return nil, &ParseError{Operation: "parse user info", Err: err, RequestID: requestID}
-	}
-
-	account, ok := parsed.(*types.AccountData)
-	if !ok {
-		return nil, &ParseError{Operation: "user info response", Err: fmt.Errorf("unexpected response type"), RequestID: requestID}
-	}
-
-	return account, nil
+	return &account, nil
 }
 
 // GetSubreddit retrieves information about a specific subreddit.

@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	httpclient "github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/client"
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/cache"
+	httpclient "github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/client"
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/parse"
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/testutil"
 	"github.com/jamesprial/go-reddit-api-wrapper/reddit/internal/validator"

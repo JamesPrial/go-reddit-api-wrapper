@@ -1,8 +1,8 @@
 package graw
 
 import (
-	"sync"
 	"context"
+	"sync"
 	"sync/atomic"
 	"time"
 )

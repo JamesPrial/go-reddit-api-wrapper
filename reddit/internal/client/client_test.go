@@ -249,6 +249,107 @@ func TestClient_DoJSONDecodeErrorWrapped(t *testing.T) {
 	testutil.AssertErrorType(t, err, &decodeErr)
 }
 
+func TestClient_DoJSON_Success(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":"test123","name":"testuser","karma":100}`))
+	}))
+	t.Cleanup(server.Close)
+
+	httpClient := server.Client()
+	c, err := NewClient(httpClient, server.URL+"/", "agent", nil)
+	testutil.AssertNoError(t, err)
+
+	req, err := c.NewRequest(context.Background(), http.MethodGet, "user", nil)
+	testutil.AssertNoError(t, err)
+
+	var result struct {
+		ID    string `json:"id"`
+		Name  string `json:"name"`
+		Karma int    `json:"karma"`
+	}
+	err = c.DoJSON(req, &result)
+	testutil.AssertNoError(t, err)
+
+	if result.ID != "test123" {
+		t.Errorf("expected ID 'test123', got %q", result.ID)
+	}
+	if result.Name != "testuser" {
+		t.Errorf("expected name 'testuser', got %q", result.Name)
+	}
+	if result.Karma != 100 {
+		t.Errorf("expected karma 100, got %d", result.Karma)
+	}
+}
+
+func TestClient_DoJSON_DecodeError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"malformed": json`))
+	}))
+	t.Cleanup(server.Close)
+
+	httpClient := server.Client()
+	c, err := NewClient(httpClient, server.URL+"/", "agent", nil)
+	testutil.AssertNoError(t, err)
+
+	req, err := c.NewRequest(context.Background(), http.MethodGet, "bad-json", nil)
+	testutil.AssertNoError(t, err)
+
+	var result map[string]interface{}
+	err = c.DoJSON(req, &result)
+	testutil.AssertError(t, err)
+
+	var decodeErr *DecodeError
+	testutil.AssertErrorType(t, err, &decodeErr)
+	if decodeErr.Operation != "unmarshal_json" {
+		t.Errorf("expected operation 'unmarshal_json', got %q", decodeErr.Operation)
+	}
+}
+
+func TestClient_DoJSON_EmptyResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		// Empty body
+	}))
+	t.Cleanup(server.Close)
+
+	httpClient := server.Client()
+	c, err := NewClient(httpClient, server.URL+"/", "agent", nil)
+	testutil.AssertNoError(t, err)
+
+	req, err := c.NewRequest(context.Background(), http.MethodGet, "empty", nil)
+	testutil.AssertNoError(t, err)
+
+	var result map[string]interface{}
+	err = c.DoJSON(req, &result)
+	testutil.AssertNoError(t, err)
+	// Empty response should succeed without unmarshaling
+}
+
+func TestClient_DoJSON_APIError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"error":"FORBIDDEN","message":"access denied"}`))
+	}))
+	t.Cleanup(server.Close)
+
+	httpClient := server.Client()
+	c, err := NewClient(httpClient, server.URL+"/", "agent", nil)
+	testutil.AssertNoError(t, err)
+
+	req, err := c.NewRequest(context.Background(), http.MethodGet, "restricted", nil)
+	testutil.AssertNoError(t, err)
+
+	var result map[string]interface{}
+	err = c.DoJSON(req, &result)
+	testutil.AssertError(t, err)
+
+	var apiErr *APIError
+	testutil.AssertErrorType(t, err, &apiErr)
+	testutil.AssertAPIError(t, err, http.StatusForbidden)
+}
+
 // failingReader simulates a body read error
 type failingReader struct{}
 

@@ -317,20 +317,17 @@ func BenchmarkReddit_GetSubreddit(b *testing.B) {
 func BenchmarkReddit_Me(b *testing.B) {
 	b.ReportAllocs()
 
-	// Create a minimal account response with Thing wrapper
+	// Create a minimal account response directly without Thing wrapper (matches actual Reddit API)
 	accountResponse := map[string]interface{}{
-		"kind": "t2",
-		"data": map[string]interface{}{
-			"id":                 "user123",
-			"name":               "t2_user123",
-			"created":            1292625108.0,
-			"created_utc":        1292625108.0,
-			"link_karma":         10000,
-			"comment_karma":      5000,
-			"is_gold":            false,
-			"is_mod":             false,
-			"has_verified_email": true,
-		},
+		"id":                 "user123",
+		"name":               "t2_user123",
+		"created":            1292625108.0,
+		"created_utc":        1292625108.0,
+		"link_karma":         10000,
+		"comment_karma":      5000,
+		"is_gold":            false,
+		"is_mod":             false,
+		"has_verified_email": true,
 	}
 	fixture, _ := json.Marshal(accountResponse)
 

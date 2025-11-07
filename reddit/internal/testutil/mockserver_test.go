@@ -256,25 +256,36 @@ func TestMockServer_Account(t *testing.T) {
 		t.Errorf("Expected status 200, got %d", resp.StatusCode)
 	}
 
-	// Parse response
+	// Parse response - account data is returned directly, not wrapped in a Thing
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		t.Fatalf("Failed to read response body: %v", err)
 	}
 
-	var thing map[string]interface{}
-	if err := json.Unmarshal(body, &thing); err != nil {
+	var data map[string]interface{}
+	if err := json.Unmarshal(body, &data); err != nil {
 		t.Fatalf("Failed to parse JSON: %v", err)
 	}
 
-	// Verify thing structure
-	if kind, ok := thing["kind"].(string); !ok || kind != "t2" {
-		t.Errorf("Expected kind 't2', got %v", thing["kind"])
+	// Verify account data fields (no "kind" wrapper)
+	if id, ok := data["id"].(string); !ok || id != "user123" {
+		t.Errorf("Expected id 'user123', got %v", data["id"])
 	}
 
-	data := thing["data"].(map[string]interface{})
+	if name, ok := data["name"].(string); !ok || name != "t2_user123" {
+		t.Errorf("Expected name 't2_user123', got %v", data["name"])
+	}
+
 	if commentKarma, ok := data["comment_karma"].(float64); !ok || commentKarma != 5000 {
 		t.Errorf("Expected comment_karma 5000, got %v", data["comment_karma"])
+	}
+
+	if linkKarma, ok := data["link_karma"].(float64); !ok || linkKarma != 10000 {
+		t.Errorf("Expected link_karma 10000, got %v", data["link_karma"])
+	}
+
+	if isGold, ok := data["is_gold"].(bool); !ok || !isGold {
+		t.Errorf("Expected is_gold true, got %v", data["is_gold"])
 	}
 }
 

@@ -345,6 +345,28 @@ func (c *Client) Do(req *http.Request, v *types.Thing) error {
 	return nil
 }
 
+// DoJSON executes an HTTP request and unmarshals the response into the provided value.
+// Unlike Do, this method works with any JSON-unmarshallable type, not just Thing objects.
+// This is used for endpoints like /api/v1/me that return data directly without Thing wrapping.
+func (c *Client) DoJSON(req *http.Request, v interface{}) error {
+	ctx := req.Context()
+	requestID := reqid.FromContext(ctx)
+	bodyBytes, resp, err := c.doRequest(req)
+	if err != nil {
+		return err
+	}
+
+	if v != nil && len(bodyBytes) > 0 {
+		if err := json.Unmarshal(bodyBytes, v); err != nil {
+			c.logDecodeError(ctx, req, resp, requestID, err)
+			snippet := truncateBody(bodyBytes, TRUNCATE_LEN)
+			return &DecodeError{Operation: "unmarshal_json", BodySnippet: snippet, RequestID: requestID, Err: err}
+		}
+	}
+
+	return nil
+}
+
 // DoThingArray sends an API request and returns either an array of Things or a single Thing wrapped in an array.
 // Used for the comments endpoint which can return [post, comments] or a single Listing.
 func (c *Client) DoThingArray(req *http.Request) ([]*types.Thing, error) {

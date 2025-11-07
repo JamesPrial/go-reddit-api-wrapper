@@ -29,6 +29,7 @@ type mockHTTPClient struct {
 	doFunc             func(req *http.Request, v *types.Thing) error
 	doThingArrayFunc   func(req *http.Request) ([]*types.Thing, error)
 	doMoreChildrenFunc func(req *http.Request) ([]*types.Thing, error)
+	doJSONFunc         func(req *http.Request, v interface{}) error
 }
 
 func (m *mockHTTPClient) NewRequest(ctx context.Context, method, path string, body io.Reader, params ...url.Values) (*http.Request, error) {
@@ -61,6 +62,13 @@ func (m *mockHTTPClient) DoMoreChildren(req *http.Request) ([]*types.Thing, erro
 		return m.doMoreChildrenFunc(req)
 	}
 	return nil, nil
+}
+
+func (m *mockHTTPClient) DoJSON(req *http.Request, v interface{}) error {
+	if m.doJSONFunc != nil {
+		return m.doJSONFunc(req, v)
+	}
+	return nil
 }
 
 type stubParser struct {
@@ -509,6 +517,57 @@ func TestGetMoreComments_RetryOnUnauthorized(t *testing.T) {
 	}
 }
 
+func TestMe_RetryOnUnauthorized(t *testing.T) {
+	var doJSONCalls atomic.Int32
+	tp := &mockTokenProvider{token: "token"}
+
+	mockClient := &mockHTTPClient{
+		doJSONFunc: func(req *http.Request, v interface{}) error {
+			call := doJSONCalls.Add(1)
+			if call == 1 {
+				return &client.APIError{StatusCode: http.StatusUnauthorized, Message: "unauthorized"}
+			}
+			// Return valid account data on second call
+			accountData := `{"id":"abc123","name":"testuser","link_karma":100,"comment_karma":50,"created_utc":1609459200.0,"created":1609459200.0}`
+			return json.Unmarshal([]byte(accountData), v)
+		},
+	}
+
+	r := newTestClient(mockClient, tp)
+
+	account, err := r.Me(context.Background())
+	if err != nil {
+		t.Fatalf("expected retry to succeed, got error: %v", err)
+	}
+	if account == nil {
+		t.Fatal("expected account data after retry")
+	}
+
+	// Verify account data is correctly parsed
+	if account.ID != "abc123" {
+		t.Errorf("expected ID 'abc123', got %s", account.ID)
+	}
+	if account.Name != "testuser" {
+		t.Errorf("expected Name 'testuser', got %s", account.Name)
+	}
+	if account.LinkKarma != 100 {
+		t.Errorf("expected LinkKarma 100, got %d", account.LinkKarma)
+	}
+	if account.CommentKarma != 50 {
+		t.Errorf("expected CommentKarma 50, got %d", account.CommentKarma)
+	}
+
+	// Verify DoJSON was called exactly twice
+	if got := doJSONCalls.Load(); got != 2 {
+		t.Fatalf("expected 2 DoJSON calls, got %d", got)
+	}
+
+	// Verify GetToken was called at least twice (initial + retry)
+	if got := tp.getCalls.Load(); got < 2 {
+		t.Fatalf("expected GetToken called at least twice, got %d", got)
+	}
+}
+
 func TestNewClientWithContext_RateLimitConfig(t *testing.T) {
 	t.Parallel()
 
@@ -547,23 +606,21 @@ func TestNewClientWithContext_RateLimitConfig(t *testing.T) {
 
 func TestClient_Me(t *testing.T) {
 	tests := []struct {
-		name      string
-		setupMock func() HTTPClient
-		setupAuth func() TokenProvider
-		wantError bool
-		errorType string
+		name         string
+		setupMock    func() HTTPClient
+		setupAuth    func() TokenProvider
+		wantError    bool
+		errorType    string
+		validateData func(*testing.T, *types.AccountData)
 	}{
 		{
 			name: "successful request",
 			setupMock: func() HTTPClient {
 				return &mockHTTPClient{
-					doFunc: func(req *http.Request, v *types.Thing) error {
-						accountData := `{"id":"abc123","name":"t2_abc123","link_karma":100,"comment_karma":50,"created_utc":1609459200.0,"created":1609459200.0}`
-						*v = types.Thing{
-							Kind: "t2",
-							Data: json.RawMessage(accountData),
-						}
-						return nil
+					doJSONFunc: func(req *http.Request, v interface{}) error {
+						// Unmarshal directly into AccountData without Thing wrapper
+						accountData := `{"id":"abc123","name":"testuser","link_karma":100,"comment_karma":50,"created_utc":1609459200.0,"created":1609459200.0}`
+						return json.Unmarshal([]byte(accountData), v)
 					},
 				}
 			},
@@ -571,6 +628,23 @@ func TestClient_Me(t *testing.T) {
 				return &mockTokenProvider{token: "valid_token"}
 			},
 			wantError: false,
+			validateData: func(t *testing.T, account *types.AccountData) {
+				if account.ID != "abc123" {
+					t.Errorf("expected ID 'abc123', got %s", account.ID)
+				}
+				if account.Name != "testuser" {
+					t.Errorf("expected Name 'testuser', got %s", account.Name)
+				}
+				if account.LinkKarma != 100 {
+					t.Errorf("expected LinkKarma 100, got %d", account.LinkKarma)
+				}
+				if account.CommentKarma != 50 {
+					t.Errorf("expected CommentKarma 50, got %d", account.CommentKarma)
+				}
+				if account.CreatedUTC != 1609459200.0 {
+					t.Errorf("expected CreatedUTC 1609459200.0, got %f", account.CreatedUTC)
+				}
+			},
 		},
 		{
 			name: "auth error",
@@ -600,7 +674,7 @@ func TestClient_Me(t *testing.T) {
 			name: "API error",
 			setupMock: func() HTTPClient {
 				return &mockHTTPClient{
-					doFunc: func(req *http.Request, v *types.Thing) error {
+					doJSONFunc: func(req *http.Request, v interface{}) error {
 						return &APIError{StatusCode: http.StatusForbidden, Message: "API error"}
 					},
 				}
@@ -608,6 +682,50 @@ func TestClient_Me(t *testing.T) {
 			setupAuth: nil,
 			wantError: true,
 			errorType: "*APIError",
+		},
+		{
+			name: "parse error with invalid JSON",
+			setupMock: func() HTTPClient {
+				return &mockHTTPClient{
+					doJSONFunc: func(req *http.Request, v interface{}) error {
+						// Simulate JSON unmarshal error
+						return errors.New("invalid JSON")
+					},
+				}
+			},
+			setupAuth: nil,
+			wantError: true,
+		},
+		{
+			name: "network error - connection refused",
+			setupMock: func() HTTPClient {
+				return &mockHTTPClient{
+					doJSONFunc: func(req *http.Request, v interface{}) error {
+						// Simulate network-level failure (connection refused)
+						return &client.TransportError{
+							Method:   "GET",
+							URL:      "https://oauth.reddit.com/api/v1/me",
+							Duration: 100 * time.Millisecond,
+							Err:      errors.New("dial tcp 127.0.0.1:443: connect: connection refused"),
+						}
+					},
+				}
+			},
+			setupAuth: nil,
+			wantError: true,
+			errorType: "*NetworkError",
+		},
+		{
+			name: "context cancelled",
+			setupMock: func() HTTPClient {
+				return &mockHTTPClient{
+					doJSONFunc: func(req *http.Request, v interface{}) error {
+						return context.Canceled
+					},
+				}
+			},
+			setupAuth: nil,
+			wantError: true,
 		},
 	}
 
@@ -650,6 +768,8 @@ func TestClient_Me(t *testing.T) {
 				}
 				if account == nil {
 					t.Error("expected account but got nil")
+				} else if tt.validateData != nil {
+					tt.validateData(t, account)
 				}
 			}
 		})

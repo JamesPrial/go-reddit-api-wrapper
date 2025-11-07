@@ -317,7 +317,7 @@ func TestConcurrentTokenRefreshRaceCondition(t *testing.T) {
 		// Note: With 10 concurrent goroutines and no shared cache at authenticator level,
 		// we expect up to numGoroutines token refreshes. Race condition would be if
 		// we got significantly more due to redundant concurrent token requests.
-		if totalRefreshes > int64(numGoroutines * 2) {
+		if totalRefreshes > int64(numGoroutines*2) {
 			t.Errorf("Too many token refreshes (%d), may indicate race condition", totalRefreshes)
 		}
 

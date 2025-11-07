@@ -408,17 +408,15 @@ func (m *MockServer) handler(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleAccount handles GET /api/v1/me
+// Note: The Reddit API returns account data directly, not wrapped in a Thing structure.
 func (m *MockServer) handleAccount(w http.ResponseWriter, r *http.Request) {
 	if m.account == nil {
 		http.Error(w, "Account not configured", http.StatusNotFound)
 		return
 	}
 
-	thing := map[string]interface{}{
-		"kind": "t2",
-		"data": m.account,
-	}
-	json.NewEncoder(w).Encode(thing)
+	// Return account data directly (not wrapped in a Thing)
+	json.NewEncoder(w).Encode(m.account)
 }
 
 // handleSubreddit handles GET /r/{subreddit}/about
