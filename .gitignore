@@ -68,3 +68,7 @@ dist/
 
 # Reddit wiki documentation (already present)
 reddit.wiki/
+# Puppeteer investigation scripts (temporary debugging files)
+.claude/skills/puppeteer-browser-automation/investigate_*.js
+.claude/skills/puppeteer-browser-automation/test-frontend.js
+.claude/skills/puppeteer-browser-automation/*.png
