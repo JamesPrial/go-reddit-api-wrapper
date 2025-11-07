@@ -187,6 +187,123 @@ go run ./cmd/examples/monitor
 go run ./cmd/examples/analyzer
 ```
 
+## HTTP Server
+
+The project includes a production-ready HTTP server that exposes the Reddit API CLI as a REST API.
+
+### Quick Start
+
+```bash
+# Set credentials via environment variables
+export REDDIT_CLIENT_ID="your-client-id"
+export REDDIT_CLIENT_SECRET="your-client-secret"
+
+# Build and run the server
+cd cmd/reddit-server
+go build -o reddit-server
+./reddit-server
+```
+
+The server will start on `http://localhost:8080` by default.
+
+### API Endpoints
+
+- `GET /health` - Health check (no authentication required)
+- `GET /api/v1/user/me` - Get authenticated user information
+- `GET /api/v1/subreddit/{name}` - Get subreddit information
+- `GET /api/v1/posts/hot?subreddit={name}` - Get hot posts (subreddit optional)
+- `GET /api/v1/posts/new?subreddit={name}` - Get new posts (subreddit optional)
+- `GET /api/v1/posts/{subreddit}/{postID}/comments` - Get post comments
+- `POST /api/v1/posts/{linkID}/more-comments` - Load more comments
+
+All endpoints support pagination via query parameters: `limit`, `after`, `before`.
+
+### Configuration
+
+Configure the server via environment variables:
+
+```bash
+# Required: Reddit API credentials
+export REDDIT_CLIENT_ID="your-client-id"
+export REDDIT_CLIENT_SECRET="your-client-secret"
+
+# Optional: API keys for client authentication (auto-generated if not provided)
+export API_KEYS="$(openssl rand -base64 32)"
+
+# Optional: User authentication
+export REDDIT_USERNAME="your-username"
+export REDDIT_PASSWORD="your-password"
+
+# Optional: Server configuration
+export SERVER_PORT=8080
+export SERVER_READ_TIMEOUT=30
+export SERVER_WRITE_TIMEOUT=30
+export SERVER_IDLE_TIMEOUT=120
+
+# Optional: CORS configuration
+export CORS_ALLOWED_ORIGINS="http://localhost:3000,http://localhost:5173"
+export CORS_ALLOWED_METHODS="GET,POST,PUT,DELETE,OPTIONS"
+export CORS_ALLOWED_HEADERS="Content-Type,Authorization,X-API-Key"
+```
+
+**Note**: If `API_KEYS` is not provided, the server will auto-generate a random API key and display it in the logs. For production, set `API_KEYS` explicitly.
+
+### Example API Usage
+
+**Note**: All endpoints except `/health` require API key authentication via `X-API-Key` header.
+
+```bash
+# Health check (no API key required)
+curl http://localhost:8080/health
+
+# Get user info (requires API key)
+curl -H "X-API-Key: your-api-key" \
+  http://localhost:8080/api/v1/user/me
+
+# Get hot posts from r/golang
+curl -H "X-API-Key: your-api-key" \
+  "http://localhost:8080/api/v1/posts/hot?subreddit=golang&limit=10"
+
+# Get subreddit info
+curl -H "X-API-Key: your-api-key" \
+  http://localhost:8080/api/v1/subreddit/golang
+
+# Get comments for a post
+curl -H "X-API-Key: your-api-key" \
+  http://localhost:8080/api/v1/posts/golang/abc123/comments
+```
+
+### Response Format
+
+Successful responses return JSON with data and pagination metadata:
+
+```json
+{
+  "data": { ... },
+  "pagination": {
+    "after": "t3_abc123",
+    "before": null
+  }
+}
+```
+
+Error responses follow a standard format:
+
+```json
+{
+  "error": {
+    "message": "Invalid subreddit name",
+    "type": "validation_error",
+    "code": 400
+  }
+}
+```
+
+For detailed server documentation, integration examples, and architecture details, see:
+- [`cmd/reddit-server/README.md`](cmd/reddit-server/README.md) - Complete server documentation
+- [`cmd/reddit-server/INTEGRATION.md`](cmd/reddit-server/INTEGRATION.md) - Client integration examples
+- [`cmd/reddit-server/IMPLEMENTATION.md`](cmd/reddit-server/IMPLEMENTATION.md) - Technical architecture
+
 ## Performance Testing & Benchmarks
 
 This project includes comprehensive benchmark suites to measure performance characteristics:

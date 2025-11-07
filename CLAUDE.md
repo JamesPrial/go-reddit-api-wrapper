@@ -6,10 +6,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Go wrapper for the Reddit API providing OAuth2 authentication and a clean interface for common Reddit operations. The library supports both application-only and user authentication modes.
 
-The project consists of three main components:
+The project consists of four main components:
 1. **Reddit API Client** (`reddit/`, `pkg/types/`) - Core library for Reddit API interaction
 2. **Storage Layer** (`storage/`) - Database persistence with SQLite/PostgreSQL backends
 3. **Frontend Application** (`frontend/`) - Svelte web UI with Go backend for Reddit authentication
+4. **HTTP Server** (`cmd/reddit-server/`) - REST API server exposing CLI commands over HTTP
 
 Always use context7 when I need code generation, setup or configuration steps, or library/API documentation. This means you should automatically use the Context7 MCP tools to resolve library id and get library docs without me having to explicitly ask.
 
@@ -31,10 +32,13 @@ go test -v -race -cover ./...
 go test -v ./reddit/internal
 go test -v ./storage/sqlite/internal
 go test -v ./storage
+go test -v ./cmd/reddit-server/handlers
+go test -v ./cmd/reddit-server/middleware
 
 # Run a specific test by name
 go test -v -run TestAuthenticator_GetToken ./reddit/internal/auth
 go test -v -run TestSQLiteStore_SavePost ./storage/sqlite/internal
+go test -v -run TestGetUserMe ./cmd/reddit-server/handlers
 
 # Run tests with coverage report
 go test -cover ./...
@@ -51,6 +55,9 @@ go test -bench=. ./storage/sqlite/internal
 go build -o reddit-example-basic ./cmd/examples/basic
 go build -o reddit-example-monitor ./cmd/examples/monitor
 go build -o reddit-example-analyzer ./cmd/examples/analyzer
+
+# Build HTTP server
+cd cmd/reddit-server && go build -o reddit-server .
 
 # Build frontend backend server
 cd frontend/server && go build -o reddit-server .
@@ -103,6 +110,28 @@ npm install
 npm run dev
 
 # Access at http://localhost:5173
+```
+
+### Running the HTTP Server
+```bash
+# Set required environment variables
+export REDDIT_CLIENT_ID="your-client-id"
+export REDDIT_CLIENT_SECRET="your-client-secret"
+
+# Optional: User authentication
+export REDDIT_USERNAME="your-username"
+export REDDIT_PASSWORD="your-password"
+
+# Run the server
+cd cmd/reddit-server
+go run .
+
+# Or build and run
+go build -o reddit-server
+./reddit-server
+
+# Server starts on http://localhost:8080 by default
+# Test with: curl http://localhost:8080/health
 ```
 
 ## Context Management
@@ -179,6 +208,36 @@ ALWAYS PROACTIVELY use the Task tool and available subagents to break down compl
   - Simple dashboard with Reddit karma stats
   - Vite proxy configuration for backend API requests
   - Built with `npm run build`, served with `npm run dev`
+
+#### HTTP Server (`cmd/reddit-server/`)
+
+- **`cmd/reddit-server/` Package**: Production HTTP server exposing CLI commands as REST API
+  - RESTful API endpoints mapping to CLI commands (GetHot, GetNew, GetComments, etc.)
+  - Environment-based configuration (credentials, timeouts, CORS)
+  - Middleware stack: CORS, logging, panic recovery
+  - Shared Reddit client for proper token caching and rate limiting
+  - Graceful shutdown with signal handling and timeout
+  - JSON responses with standardized error format
+  - Comprehensive test coverage (86 tests, 37.8% handlers, 97.1% middleware)
+
+- **`cmd/reddit-server/config/` Package**: Server configuration management
+  - Environment variable parsing with validation
+  - Port range validation (1-65535)
+  - Timeout validation (must be positive)
+  - CORS configuration
+
+- **`cmd/reddit-server/middleware/` Package**: HTTP middleware
+  - `auth.go`: Authentication from environment variables
+  - `logging.go`: Structured request/response logging with slog (method, status, duration, size)
+  - `recovery.go`: Panic recovery with stack traces to prevent crashes
+
+- **`cmd/reddit-server/handlers/` Package**: HTTP request handlers
+  - `handlers.go`: Common utilities (error mapping, response formatting, pagination parsing)
+  - `health.go`: Health check endpoint (GET /health, no auth required)
+  - `user.go`: User endpoints (GET /api/v1/user/me)
+  - `subreddit.go`: Subreddit endpoints (GET /api/v1/subreddit/{name})
+  - `posts.go`: Post endpoints (GET /api/v1/posts/hot, GET /api/v1/posts/new, GET /api/v1/posts/{subreddit}/{postID}/comments, POST /api/v1/posts/{linkID}/more-comments)
+  - Error mapping: 400 (validation), 401 (auth), 404 (not found), 429 (rate limit), 500 (server errors)
 
 ### Key Design Patterns
 
@@ -301,6 +360,19 @@ ALWAYS PROACTIVELY use the Task tool and available subagents to break down compl
 - Frontend API client in `frontend/web/src/api.js` handles backend communication
 - Vite proxy config in `frontend/web/vite.config.js` routes `/api/*` to backend
 - Use svelte-vite-code-reviewer agent to review frontend changes
+
+**Working with the HTTP server:**
+- Use go-code-writer agent for handler and middleware implementation
+- Server code is in `cmd/reddit-server/` with handlers, middleware, and config packages
+- All handlers use the shared `h.client` (CRITICAL: never create new clients per request)
+- Authentication is environment-based only (no header-based auth)
+- Follow REST API patterns: proper status codes, JSON responses, pagination support
+- Error mapping: ValidationError→400, AuthError→401, NotFoundError→404, RateLimitError→429, others→500
+- Always include request body size limits for POST endpoints (`http.MaxBytesReader`)
+- Add comprehensive tests in `handlers/*_test.go` and `middleware/*_test.go`
+- Use go-test-runner agent to verify all tests pass with race detection
+- Use go-code-reviewer agent to review changes before committing
+- See `cmd/reddit-server/README.md` for complete API documentation
 
 **Database migrations:**
 - SQLite migrations are in `storage/sqlite/migrations/`
