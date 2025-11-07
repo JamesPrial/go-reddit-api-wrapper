@@ -4,6 +4,8 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 
 	graw "github.com/jamesprial/go-reddit-api-wrapper/reddit"
 )
@@ -29,6 +31,14 @@ type Config struct {
 	Verbose bool // Enable verbose output
 	Debug   bool // Enable debug logging
 
+	// Storage configuration
+	Store  bool   // Enable storage of posts and comments
+	DBPath string // Path to SQLite database file (e.g., ~/.reddit/data.db)
+
+	// Query filters for stored data
+	SubredditFilter string // Filter posts by subreddit name
+	MinScoreFilter  int    // Filter posts with minimum score threshold (can be negative)
+
 	// User agent string (auto-generated if not provided)
 	UserAgent string
 }
@@ -40,15 +50,45 @@ type Config struct {
 //   - REDDIT_USERNAME: Optional username for user authentication
 //   - REDDIT_PASSWORD: Optional password for user authentication
 //   - REDDIT_USER_AGENT: Optional custom user agent string
+//   - REDDIT_STORE: Optional boolean to enable storage (default: false)
+//   - REDDIT_DB_PATH: Optional path to SQLite database file (default: ~/.reddit/data.db)
 //
 // Returns an error if required fields are missing.
 func FromEnv() (*Config, error) {
+	dbPath := os.Getenv("REDDIT_DB_PATH")
+
+	if dbPath == "" {
+		// Default path - expand tilde
+		homeDir, err := os.UserHomeDir()
+		if err == nil {
+			dbPath = filepath.Join(homeDir, ".reddit", "data.db")
+		} else {
+			// Fall back to literal path if home directory cannot be determined
+			dbPath = "~/.reddit/data.db"
+		}
+	} else {
+		// User-provided path - expand tilde if present
+		if strings.HasPrefix(dbPath, "~/") {
+			homeDir, err := os.UserHomeDir()
+			if err == nil {
+				dbPath = filepath.Join(homeDir, dbPath[2:])
+			}
+		} else if dbPath == "~" {
+			homeDir, err := os.UserHomeDir()
+			if err == nil {
+				dbPath = filepath.Join(homeDir, ".reddit", "data.db")
+			}
+		}
+	}
+
 	cfg := &Config{
 		ClientID:     os.Getenv("REDDIT_CLIENT_ID"),
 		ClientSecret: os.Getenv("REDDIT_CLIENT_SECRET"),
 		Username:     os.Getenv("REDDIT_USERNAME"),
 		Password:     os.Getenv("REDDIT_PASSWORD"),
 		UserAgent:    os.Getenv("REDDIT_USER_AGENT"),
+		Store:        os.Getenv("REDDIT_STORE") == "true",
+		DBPath:       dbPath,
 		Output:       "text",
 		Limit:        25,
 	}
@@ -77,7 +117,7 @@ func (c *Config) ValidateCredentials() error {
 }
 
 // Validate checks that non-credential configuration fields are valid.
-// It validates output format and pagination limits.
+// It validates output format, pagination limits, and storage configuration.
 // For credential validation, use ValidateCredentials() instead.
 // Returns an error if any fields are invalid.
 func (c *Config) Validate() error {
@@ -87,6 +127,10 @@ func (c *Config) Validate() error {
 
 	if c.Output != "json" && c.Output != "table" && c.Output != "text" {
 		return fmt.Errorf("output format must be json, table, or text, got %q", c.Output)
+	}
+
+	if c.Store && c.DBPath == "" {
+		return fmt.Errorf("database path is required when storage is enabled (set REDDIT_DB_PATH or use -db-path)")
 	}
 
 	return nil
@@ -110,4 +154,13 @@ func (c *Config) ToRedditConfig() *graw.Config {
 	}
 
 	return cfg
+}
+
+// String returns a string representation of the configuration for logging/debugging.
+// It includes the database path but does not include sensitive credentials.
+func (c *Config) String() string {
+	return fmt.Sprintf(
+		"Config{ClientID: %s, Username: %s, Output: %s, Limit: %d, Verbose: %v, Debug: %v, Store: %v, DBPath: %s, SubredditFilter: %s, MinScoreFilter: %d}",
+		c.ClientID, c.Username, c.Output, c.Limit, c.Verbose, c.Debug, c.Store, c.DBPath, c.SubredditFilter, c.MinScoreFilter,
+	)
 }
