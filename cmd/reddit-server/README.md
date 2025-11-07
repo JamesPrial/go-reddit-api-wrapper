@@ -48,6 +48,7 @@ The server is configured entirely through environment variables. All variables e
 | `PORT` | HTTP server port (1-65535) | `8080` | `3000` |
 | `SHUTDOWN_TIMEOUT` | Graceful shutdown timeout (max 5 minutes) | `30s` | `45s`, `1m` |
 | `REQUEST_TIMEOUT` | HTTP request timeout (max 5 minutes) | `30s` | `60s`, `2m` |
+| `API_KEYS` | Comma-separated API keys for HTTP endpoint authentication | _(auto-generated)_ | `key1,key2,key3` |
 | `REDDIT_USERNAME` | Reddit username for user authentication | _(none)_ | `your-username` |
 | `REDDIT_PASSWORD` | Reddit password for user authentication | _(none)_ | `your-password` |
 | `REDDIT_USER_AGENT` | Custom user agent string | `reddit-api-server/1.0 (host:hostname)` | `MyApp/1.0` |
