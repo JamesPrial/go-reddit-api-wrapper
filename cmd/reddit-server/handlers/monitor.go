@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -190,8 +191,8 @@ func (h *Handlers) StartMonitor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Start monitor
-	instance, err := h.monitorMgr.Start(r.Context(), config)
+	// Start monitor with background context to ensure it runs independently of HTTP request lifecycle
+	instance, err := h.monitorMgr.Start(context.Background(), config)
 	if err != nil {
 		// Check for specific error types
 		if errors.Is(err, monitor.ErrMonitorAlreadyRunning) {
