@@ -2,22 +2,64 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 
+	"github.com/jamesprial/go-reddit-api-wrapper/cmd/reddit-server/monitor"
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 	graw "github.com/jamesprial/go-reddit-api-wrapper/reddit"
 	"github.com/jamesprial/go-reddit-api-wrapper/storage"
 )
 
+// MonitorManager defines the interface for monitor lifecycle management.
+// It provides thread-safe operations for starting, stopping, and querying
+// the status of background Reddit monitoring operations.
+//
+// All methods are thread-safe and can be called concurrently. The implementation
+// must ensure proper context handling and graceful shutdown semantics.
+//
+// Start begins a new monitoring session with the given configuration. It returns
+// an error if a monitor is already running or if the configuration is invalid.
+// The returned MonitorInstance contains the metadata about the started monitor.
+//
+// Stop gracefully terminates the currently running monitor, if any. It returns
+// ErrNoMonitorRunning if no monitor is currently active. The stop operation
+// waits for the monitor loop to finish cleanly before returning.
+//
+// GetStatus returns the current status of the monitor. It returns a MonitorStatus
+// struct with "stopped" status if no monitor is running, or "running" status with
+// detailed statistics if a monitor is active.
+//
+// IsRunning returns true if a monitor is currently active, false otherwise.
+// This is useful for quick status checks without fetching full status details.
+type MonitorManager interface {
+	Start(ctx context.Context, config MonitorConfig) (*MonitorInstance, error)
+	Stop() error
+	GetStatus() (*MonitorStatus, error)
+	IsRunning() bool
+}
+
+// Type aliases for monitor package types - these ensure compatibility
+// between the handlers package and the monitor package implementation.
+type (
+	MonitorConfig   = monitor.MonitorConfig
+	MonitorInstance = monitor.MonitorInstance
+	MonitorStatus   = monitor.MonitorStatus
+	StatsSnapshot   = monitor.StatsSnapshot
+)
+
 // Handlers contains dependencies for all HTTP handlers.
 type Handlers struct {
-	client RedditClient
-	store  storage.Store
+	client     RedditClient
+	store      storage.Store
+	monitorMgr MonitorManager
+	setOnce    sync.Once
 }
 
 // NewHandlers creates a new Handlers instance with the provided Reddit client and storage.
@@ -28,6 +70,19 @@ func NewHandlers(client RedditClient, store storage.Store) *Handlers {
 		client: client,
 		store:  store,
 	}
+}
+
+// SetMonitorManager sets the monitor manager for the handlers.
+// This is called after creating the Handlers to inject the monitor dependency.
+// The method is thread-safe and ensures the manager is set only once.
+// If called with a nil manager, it will panic as this indicates a programmer error.
+func (h *Handlers) SetMonitorManager(mgr MonitorManager) {
+	h.setOnce.Do(func() {
+		if mgr == nil {
+			panic("monitor manager cannot be nil")
+		}
+		h.monitorMgr = mgr
+	})
 }
 
 // mapErrorToStatus maps Reddit API errors to HTTP status codes.

@@ -66,6 +66,7 @@ import (
 	"github.com/jamesprial/go-reddit-api-wrapper/cmd/reddit-server/config"
 	"github.com/jamesprial/go-reddit-api-wrapper/cmd/reddit-server/handlers"
 	"github.com/jamesprial/go-reddit-api-wrapper/cmd/reddit-server/middleware"
+	"github.com/jamesprial/go-reddit-api-wrapper/cmd/reddit-server/monitor"
 	graw "github.com/jamesprial/go-reddit-api-wrapper/reddit"
 	"github.com/jamesprial/go-reddit-api-wrapper/storage"
 	_ "github.com/jamesprial/go-reddit-api-wrapper/storage/sqlite"
@@ -130,6 +131,11 @@ func main() {
 	// Create HTTP handlers
 	h := handlers.NewHandlers(redditClient, store)
 
+	// Create monitor manager
+	monitorMgr := monitor.NewMonitorManager(redditClient, store, logger)
+	h.SetMonitorManager(monitorMgr)
+	logger.Info("monitor manager created")
+
 	// Setup HTTP router
 	mux := http.NewServeMux()
 
@@ -145,6 +151,11 @@ func main() {
 	mux.HandleFunc("/api/v1/storage/posts", routeStoragePosts(h))
 	mux.HandleFunc("/api/v1/storage/stats", h.GetStorageStats)
 	mux.HandleFunc("/api/v1/storage/bulk-save", h.BulkSaveFromSubreddit)
+
+	// Monitor endpoints
+	mux.HandleFunc("/api/v1/monitor/start", h.StartMonitor)
+	mux.HandleFunc("/api/v1/monitor/stop", h.StopMonitor)
+	mux.HandleFunc("/api/v1/monitor/status", h.GetMonitorStatus)
 
 	// Register static file handler (serves frontend at /app/)
 	mux.Handle("/app/", http.StripPrefix("/app/", StaticHandler(logger)))
@@ -211,6 +222,15 @@ func main() {
 		// Create context with timeout for graceful shutdown
 		ctx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 		defer cancel()
+
+		// Stop active monitors
+		logger.Info("stopping active monitors")
+		if err := monitorMgr.Stop(); err != nil {
+			// Only log if error is not "no monitor running"
+			if !errors.Is(err, monitor.ErrNoMonitorRunning) {
+				logger.Error("error stopping monitor", "error", err)
+			}
+		}
 
 		// Attempt graceful shutdown
 		logger.Info("shutting down server", "timeout", cfg.ShutdownTimeout)

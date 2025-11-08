@@ -520,6 +520,212 @@ curl -X POST http://localhost:8080/api/v1/posts/t3_abc123/more-comments \
 
 ---
 
+### Monitor Endpoints
+
+The monitor endpoints allow you to start, stop, and check the status of background monitoring for one or more subreddits. Only one monitor can run at a time.
+
+#### Start Monitor
+
+`POST /api/v1/monitor/start`
+
+Starts monitoring one or more subreddits for new posts. Posts (and optionally comments) are automatically saved to the database at the specified interval.
+
+**Request Headers:**
+- `X-API-Key: <your-api-key>` (required)
+- `Content-Type: application/json`
+
+**Request Body:**
+```json
+{
+  "subreddits": ["golang", "programming"],
+  "interval": "30s",
+  "limit": 25,
+  "fetch_comments": true
+}
+```
+
+**Request Fields:**
+- `subreddits` (array of strings, required): List of subreddit names to monitor (1-10 subreddits)
+- `interval` (string, required): Polling interval (minimum 10s, e.g., "30s", "1m", "5m")
+- `limit` (integer, required): Number of posts to fetch per request (1-100)
+- `fetch_comments` (boolean, required): Whether to fetch and save comments for each post
+
+**Response (201 Created):**
+```json
+{
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "status": "running",
+  "started_at": "2025-11-07T10:30:00Z"
+}
+```
+
+**Error Responses:**
+- `400 Bad Request`: Invalid configuration (empty subreddits, invalid interval, limit out of range)
+- `409 Conflict`: Monitor already running
+- `500 Internal Server Error`: Server error
+
+**Example:**
+```bash
+curl -X POST http://localhost:8080/api/v1/monitor/start \
+  -H "X-API-Key: your-api-key-here" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "subreddits": ["golang", "programming"],
+    "interval": "30s",
+    "limit": 25,
+    "fetch_comments": true
+  }'
+```
+
+---
+
+#### Stop Monitor
+
+`POST /api/v1/monitor/stop`
+
+Stops the currently running monitor and returns final statistics.
+
+**Request Headers:**
+- `X-API-Key: <your-api-key>` (required)
+
+**Response (200 OK):**
+```json
+{
+  "status": "stopped",
+  "stats": {
+    "total_fetches": 120,
+    "total_posts": 450,
+    "total_comments": 3200,
+    "last_fetch_time": "2025-11-07T11:00:00Z",
+    "last_error": ""
+  }
+}
+```
+
+**Error Responses:**
+- `404 Not Found`: No monitor currently running
+- `500 Internal Server Error`: Server error
+
+**Example:**
+```bash
+curl -X POST http://localhost:8080/api/v1/monitor/stop \
+  -H "X-API-Key: your-api-key-here"
+```
+
+---
+
+#### Get Monitor Status
+
+`GET /api/v1/monitor/status`
+
+Returns the current status of the monitor, including real-time statistics if running.
+
+**Request Headers:**
+- `X-API-Key: <your-api-key>` (required)
+
+**Response (200 OK) - When Running:**
+```json
+{
+  "status": "running",
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "subreddits": ["golang", "programming"],
+  "interval": "30s",
+  "started_at": "2025-11-07T10:30:00Z",
+  "stats": {
+    "total_fetches": 120,
+    "total_posts": 450,
+    "total_comments": 3200,
+    "last_fetch_time": "2025-11-07T11:00:00Z",
+    "last_error": ""
+  }
+}
+```
+
+**Response (200 OK) - When Stopped:**
+```json
+{
+  "status": "stopped"
+}
+```
+
+**Error Responses:**
+- `500 Internal Server Error`: Server error
+
+**Example:**
+```bash
+curl http://localhost:8080/api/v1/monitor/status \
+  -H "X-API-Key: your-api-key-here"
+```
+
+---
+
+#### Monitor Usage Example
+
+Here's a complete example of starting a monitor, checking its status, and stopping it:
+
+```bash
+# 1. Start monitoring r/golang and r/programming
+curl -X POST http://localhost:8080/api/v1/monitor/start \
+  -H "X-API-Key: your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "subreddits": ["golang", "programming"],
+    "interval": "30s",
+    "limit": 25,
+    "fetch_comments": true
+  }'
+
+# Response:
+# {
+#   "id": "550e8400-e29b-41d4-a716-446655440000",
+#   "status": "running",
+#   "started_at": "2025-11-07T10:30:00Z"
+# }
+
+# 2. Check monitor status (wait a minute for some data)
+curl http://localhost:8080/api/v1/monitor/status \
+  -H "X-API-Key: your-api-key"
+
+# Response:
+# {
+#   "status": "running",
+#   "id": "550e8400-e29b-41d4-a716-446655440000",
+#   "subreddits": ["golang", "programming"],
+#   "interval": "30s",
+#   "started_at": "2025-11-07T10:30:00Z",
+#   "stats": {
+#     "total_fetches": 4,
+#     "total_posts": 100,
+#     "total_comments": 850,
+#     "last_fetch_time": "2025-11-07T10:32:00Z"
+#   }
+# }
+
+# 3. Stop the monitor
+curl -X POST http://localhost:8080/api/v1/monitor/stop \
+  -H "X-API-Key: your-api-key"
+
+# Response:
+# {
+#   "status": "stopped",
+#   "stats": {
+#     "total_fetches": 4,
+#     "total_posts": 100,
+#     "total_comments": 850,
+#     "last_fetch_time": "2025-11-07T10:32:00Z"
+#   }
+# }
+```
+
+**Notes:**
+- Only one monitor can run at a time. Starting a second monitor while one is running returns a 409 Conflict error.
+- The monitor runs in the background and does not block other API requests.
+- Monitoring continues until explicitly stopped via the API or the server shuts down.
+- All monitored posts and comments are saved to the configured storage backend.
+- Use intervals of at least 30 seconds to avoid hitting Reddit's rate limits.
+
+---
+
 ## Storage API Endpoints
 
 The server includes built-in SQLite storage for saving Reddit posts and comments locally.
