@@ -5,9 +5,18 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 
 	graw "github.com/jamesprial/go-reddit-api-wrapper/reddit"
+)
+
+// Default values for monitor configuration
+const (
+	DefaultMonitorInterval = 5 * time.Minute
+	DefaultMonitorLimit    = 25
+	DefaultFetchComments   = true
 )
 
 // Config represents the CLI configuration combining environment variables and CLI flags.
@@ -39,6 +48,11 @@ type Config struct {
 	SubredditFilter string // Filter posts by subreddit name
 	MinScoreFilter  int    // Filter posts with minimum score threshold (can be negative)
 
+	// Monitor configuration
+	MonitorInterval time.Duration // Polling interval for monitor command (default: DefaultMonitorInterval)
+	MonitorLimit    int           // Posts per fetch for monitor command (default: DefaultMonitorLimit)
+	FetchComments   bool          // Fetch comments for posts in monitor mode (default: DefaultFetchComments, false disables comment fetching to save API quota)
+
 	// User agent string (auto-generated if not provided)
 	UserAgent string
 }
@@ -52,6 +66,9 @@ type Config struct {
 //   - REDDIT_USER_AGENT: Optional custom user agent string
 //   - REDDIT_STORE: Optional boolean to enable storage (default: false)
 //   - REDDIT_DB_PATH: Optional path to SQLite database file (default: ~/.reddit/data.db)
+//   - REDDIT_MONITOR_INTERVAL: Optional polling interval for monitor command (default: 5m)
+//   - REDDIT_MONITOR_LIMIT: Optional posts per fetch for monitor command (default: 25)
+//   - REDDIT_FETCH_COMMENTS: Optional boolean to fetch comments in monitor mode (default: true)
 //
 // Returns an error if required fields are missing.
 func FromEnv() (*Config, error) {
@@ -91,6 +108,43 @@ func FromEnv() (*Config, error) {
 		DBPath:       dbPath,
 		Output:       "text",
 		Limit:        25,
+	}
+
+	// Parse monitor configuration
+	if interval := os.Getenv("REDDIT_MONITOR_INTERVAL"); interval != "" {
+		duration, err := time.ParseDuration(interval)
+		if err != nil {
+			return nil, fmt.Errorf("invalid REDDIT_MONITOR_INTERVAL: %w", err)
+		}
+		cfg.MonitorInterval = duration
+	}
+
+	if limitStr := os.Getenv("REDDIT_MONITOR_LIMIT"); limitStr != "" {
+		limit, err := strconv.Atoi(limitStr)
+		if err != nil {
+			return nil, fmt.Errorf("invalid REDDIT_MONITOR_LIMIT: %w", err)
+		}
+		cfg.MonitorLimit = limit
+	}
+
+	if commentsStr := os.Getenv("REDDIT_FETCH_COMMENTS"); commentsStr != "" {
+		fetchComments, err := strconv.ParseBool(commentsStr)
+		if err != nil {
+			return nil, fmt.Errorf("invalid REDDIT_FETCH_COMMENTS: %w", err)
+		}
+		cfg.FetchComments = fetchComments
+	} else {
+		// Default to true if not specified
+		cfg.FetchComments = true
+	}
+
+	// Set monitor defaults if not configured
+	if cfg.MonitorInterval == 0 {
+		cfg.MonitorInterval = DefaultMonitorInterval
+	}
+
+	if cfg.MonitorLimit == 0 {
+		cfg.MonitorLimit = DefaultMonitorLimit
 	}
 
 	if cfg.ClientID == "" {
@@ -133,6 +187,19 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("database path is required when storage is enabled (set REDDIT_DB_PATH or use -db-path)")
 	}
 
+	// Monitor validation - interval must be positive and at least 1 second
+	if c.MonitorInterval <= 0 {
+		return fmt.Errorf("monitor interval must be positive, got %v", c.MonitorInterval)
+	}
+	if c.MonitorInterval < 1*time.Second {
+		return fmt.Errorf("monitor interval must be at least 1 second to avoid rate limiting, got %v", c.MonitorInterval)
+	}
+
+	// Monitor limit validation - enforce Reddit API constraints (1-100)
+	if c.MonitorLimit < 1 || c.MonitorLimit > 100 {
+		return fmt.Errorf("monitor limit must be between 1 and 100, got %d", c.MonitorLimit)
+	}
+
 	return nil
 }
 
@@ -160,7 +227,7 @@ func (c *Config) ToRedditConfig() *graw.Config {
 // It includes the database path but does not include sensitive credentials.
 func (c *Config) String() string {
 	return fmt.Sprintf(
-		"Config{ClientID: %s, Username: %s, Output: %s, Limit: %d, Verbose: %v, Debug: %v, Store: %v, DBPath: %s, SubredditFilter: %s, MinScoreFilter: %d}",
-		c.ClientID, c.Username, c.Output, c.Limit, c.Verbose, c.Debug, c.Store, c.DBPath, c.SubredditFilter, c.MinScoreFilter,
+		"Config{ClientID: %s, Username: %s, Output: %s, Limit: %d, Verbose: %v, Debug: %v, Store: %v, DBPath: %s, SubredditFilter: %s, MinScoreFilter: %d, MonitorInterval: %v, MonitorLimit: %d, FetchComments: %v}",
+		c.ClientID, c.Username, c.Output, c.Limit, c.Verbose, c.Debug, c.Store, c.DBPath, c.SubredditFilter, c.MinScoreFilter, c.MonitorInterval, c.MonitorLimit, c.FetchComments,
 	)
 }

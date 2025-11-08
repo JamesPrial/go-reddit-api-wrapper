@@ -4,6 +4,7 @@ package internal
 import (
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 	graw "github.com/jamesprial/go-reddit-api-wrapper/reddit"
@@ -239,4 +240,24 @@ func TruncateString(s string, maxLen int) string {
 		return "..."
 	}
 	return s[:maxLen-3] + "..."
+}
+
+// ParseInterval parses a duration string (e.g., "5m", "1h30m") and validates it.
+// Returns an error if the duration is invalid or non-positive.
+// This is useful for parsing monitor polling intervals and other time-based configuration.
+func ParseInterval(s string) (time.Duration, error) {
+	if s == "" {
+		return 0, fmt.Errorf("interval cannot be empty")
+	}
+
+	duration, err := time.ParseDuration(s)
+	if err != nil {
+		return 0, fmt.Errorf("invalid interval format: %w", err)
+	}
+
+	if duration <= 0 {
+		return 0, fmt.Errorf("interval must be positive, got %v", duration)
+	}
+
+	return duration, nil
 }

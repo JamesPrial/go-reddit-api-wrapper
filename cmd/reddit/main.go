@@ -1,71 +1,32 @@
-// Command reddit provides a CLI interface to the Reddit API.
-// It supports authentication, fetching posts, comments, and subreddit information.
+// Command reddit provides a CLI for interacting with the Reddit API.
 //
 // Usage:
 //
-//	reddit [flags] <command> [args]
+//	reddit [flags] <command> [args...]
 //
-// Global Flags:
+// For complete usage information, run:
 //
-//	-client-id string
-//		Reddit OAuth2 client ID (default: REDDIT_CLIENT_ID env var)
-//	-client-secret string
-//		Reddit OAuth2 client secret (default: REDDIT_CLIENT_SECRET env var)
-//	-username string
-//		Reddit username for user authentication (default: REDDIT_USERNAME env var)
-//	-password string
-//		Reddit password for user authentication (default: REDDIT_PASSWORD env var)
-//	-user-agent string
-//		Custom user agent string (default: auto-generated)
-//	-output format
-//		Output format: json, table, or text (default: text)
-//	-limit int
-//		Maximum number of items to fetch (default: 25, max: 100)
-//	-after string
-//		Pagination token to fetch next page
-//	-before string
-//		Pagination token to fetch previous page
-//	-verbose
-//		Enable verbose output
-//	-debug
-//		Enable debug logging
-//	-store
-//		Enable storage of posts and comments (env: REDDIT_STORE)
-//	-db-path string
-//		Path to SQLite database file (env: REDDIT_DB_PATH, default: ~/.reddit/data.db)
+//	reddit help
 //
-// Commands:
+// Common commands:
 //
-//	me                           Show authenticated user information
-//	subreddit <name>             Get information about a subreddit
-//	hot <subreddit>              Fetch hot posts from a subreddit (or front page if omitted)
-//	new <subreddit>              Fetch new posts from a subreddit (or front page if omitted)
-//	comments <sub> <post-id>     Get comments for a specific post
-//	more-comments <link-id> <id> Load additional comments by ID [id...]
+//	me              Get authenticated user info
+//	hot [subreddit] Get hot posts
+//	monitor <sub>   Monitor subreddit(s) indefinitely
 //
-// Examples:
+// Environment variables:
 //
-//	# Set up credentials
-//	export REDDIT_CLIENT_ID="your-client-id"
-//	export REDDIT_CLIENT_SECRET="your-client-secret"
+//	REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET (required)
+//	REDDIT_USERNAME, REDDIT_PASSWORD (optional, for user auth)
+//	See 'reddit help' for complete list
 //
-//	# Show authenticated user info
-//	reddit me
+// Exit codes:
 //
-//	# Fetch hot posts from golang subreddit
-//	reddit hot golang
-//
-//	# Get new posts with custom limit and JSON output
-//	reddit -limit 50 -output json new programming
-//
-//	# Get subreddit info
-//	reddit subreddit golang
-//
-//	# Fetch comments for a post
-//	reddit comments golang abc123def
-//
-//	# Load additional comments by ID
-//	reddit more-comments abc123def comment1 comment2 comment3
+//	0 - Success
+//	1 - General error
+//	2 - Configuration/validation error
+//	3 - Authentication error
+//	4 - Network error
 package main
 
 import (
@@ -75,8 +36,10 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/jamesprial/go-reddit-api-wrapper/cmd/reddit/commands"
@@ -98,22 +61,31 @@ const (
 	ExitNetwork    = 4 // Network error
 )
 
+// Timeout constants
+const (
+	// DefaultAuthTimeout is the timeout for Reddit OAuth authentication
+	DefaultAuthTimeout = 60 * time.Second
+)
+
 // Global flags
 var (
-	flagClientID     = flag.String("client-id", "", "Reddit OAuth2 client ID (env: REDDIT_CLIENT_ID)")
-	flagClientSecret = flag.String("client-secret", "", "Reddit OAuth2 client secret (env: REDDIT_CLIENT_SECRET)")
-	flagUsername     = flag.String("username", "", "Reddit username for user auth (env: REDDIT_USERNAME)")
-	flagPassword     = flag.String("password", "", "Reddit password for user auth (env: REDDIT_PASSWORD)")
-	flagUserAgent    = flag.String("user-agent", "", "Custom user agent string")
-	flagOutput       = flag.String("output", "text", "Output format: json, table, or text")
-	flagLimit        = flag.Int("limit", 25, "Max items to fetch (1-100)")
-	flagAfter        = flag.String("after", "", "Pagination token for next page")
-	flagBefore       = flag.String("before", "", "Pagination token for previous page")
-	flagVerbose      = flag.Bool("verbose", false, "Enable verbose output")
-	flagDebug        = flag.Bool("debug", false, "Enable debug logging")
-	flagTimeout      = flag.Duration("timeout", 30*time.Second, "HTTP request timeout")
-	flagStore        = flag.Bool("store", false, "Enable storage of posts and comments (env: REDDIT_STORE)")
-	flagDBPath       = flag.String("db-path", "", "Path to SQLite database file (env: REDDIT_DB_PATH)")
+	flagClientID        = flag.String("client-id", "", "Reddit OAuth2 client ID (env: REDDIT_CLIENT_ID)")
+	flagClientSecret    = flag.String("client-secret", "", "Reddit OAuth2 client secret (env: REDDIT_CLIENT_SECRET)")
+	flagUsername        = flag.String("username", "", "Reddit username for user auth (env: REDDIT_USERNAME)")
+	flagPassword        = flag.String("password", "", "Reddit password for user auth (env: REDDIT_PASSWORD)")
+	flagUserAgent       = flag.String("user-agent", "", "Custom user agent string")
+	flagOutput          = flag.String("output", "text", "Output format: json, table, or text")
+	flagLimit           = flag.Int("limit", 25, "Max items to fetch (1-100)")
+	flagAfter           = flag.String("after", "", "Pagination token for next page")
+	flagBefore          = flag.String("before", "", "Pagination token for previous page")
+	flagVerbose         = flag.Bool("verbose", false, "Enable verbose output")
+	flagDebug           = flag.Bool("debug", false, "Enable debug logging")
+	flagTimeout         = flag.Duration("timeout", 30*time.Second, "HTTP request timeout")
+	flagStore           = flag.Bool("store", false, "Enable storage of posts and comments (env: REDDIT_STORE)")
+	flagDBPath          = flag.String("db-path", "", "Path to SQLite database file (env: REDDIT_DB_PATH)")
+	flagMonitorInterval = flag.String("monitor-interval", "5m", "Polling interval for monitor command")
+	flagMonitorLimit    = flag.Int("monitor-limit", 25, "Posts per fetch for monitor command")
+	flagFetchComments   = flag.Bool("fetch-comments", true, "Fetch comments for posts in monitor mode")
 )
 
 func main() {
@@ -142,9 +114,16 @@ func main() {
 		os.Exit(ExitValidation)
 	}
 
-	// Create context with timeout for command execution
-	cmdCtx, cmdCancel := context.WithTimeout(context.Background(), *flagTimeout)
+	// Setup signal handling for graceful shutdown
+	cmdCtx, cmdCancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cmdCancel()
+
+	// Apply timeout if configured
+	if *flagTimeout > 0 {
+		var timeoutCancel context.CancelFunc
+		cmdCtx, timeoutCancel = context.WithTimeout(cmdCtx, *flagTimeout)
+		defer timeoutCancel()
+	}
 
 	// Initialize storage if enabled
 	var store storage.Store
@@ -249,6 +228,21 @@ func loadConfig() (*config.Config, error) {
 	if *flagDBPath != "" {
 		cfg.DBPath = *flagDBPath
 	}
+
+	// Monitor flag overrides
+	if *flagMonitorInterval != "" {
+		duration, err := time.ParseDuration(*flagMonitorInterval)
+		if err != nil {
+			return nil, fmt.Errorf("invalid --monitor-interval: %w", err)
+		}
+		cfg.MonitorInterval = duration
+	}
+	if *flagMonitorLimit != 25 { // Respect default
+		cfg.MonitorLimit = *flagMonitorLimit
+	}
+	// fetchComments flag handling
+	// Note: flag default (true) matches config default, so we can safely use flag value
+	cfg.FetchComments = *flagFetchComments
 
 	// Validate configuration (but not credentials yet)
 	if err := cfg.Validate(); err != nil {
@@ -357,6 +351,33 @@ func executeCommand(ctx context.Context, cfg *config.Config, command string, arg
 		}
 		return commands.ShowStats(ctx, store, cfg)
 
+	case "monitor":
+		if len(args) < 1 {
+			return fmt.Errorf("monitor requires at least one subreddit (comma-separated for multiple)")
+		}
+
+		// Parse comma-separated subreddit list
+		subreddits := strings.Split(args[0], ",")
+		for i, sub := range subreddits {
+			subreddits[i] = strings.TrimSpace(sub)
+		}
+
+		// Require storage for monitor command
+		if store == nil {
+			return fmt.Errorf("monitor command requires --store flag (e.g., --store --db-path ~/.reddit/data.db)")
+		}
+
+		// Create client
+		if err := cfg.ValidateCredentials(); err != nil {
+			return err
+		}
+		client, err := createRedditClient(ctx, cfg)
+		if err != nil {
+			return err
+		}
+
+		return commands.MonitorSubreddits(ctx, client, subreddits, cfg.MonitorInterval, cfg.MonitorLimit, cfg.FetchComments, store)
+
 	default:
 		return fmt.Errorf("unknown command: %q", command)
 	}
@@ -365,7 +386,7 @@ func executeCommand(ctx context.Context, cfg *config.Config, command string, arg
 // createRedditClient creates an authenticated Reddit API client.
 func createRedditClient(ctx context.Context, cfg *config.Config) (*graw.Reddit, error) {
 	// Create client with a longer timeout for authentication.
-	authCtx, authCancel := context.WithTimeout(ctx, 60*time.Second)
+	authCtx, authCancel := context.WithTimeout(ctx, DefaultAuthTimeout)
 	defer authCancel()
 
 	client, err := graw.NewClientWithContext(authCtx, cfg.ToRedditConfig())
@@ -527,6 +548,12 @@ Global Flags:
         Enable storage of posts and comments (env: REDDIT_STORE)
   -db-path string
         Path to SQLite database file (env: REDDIT_DB_PATH, default: ~/.reddit/data.db)
+  -monitor-interval string
+        Polling interval for monitor command (default: 5m)
+  -monitor-limit int
+        Posts per fetch for monitor command (default: 25)
+  -fetch-comments
+        Fetch comments for posts in monitor mode (default: true)
 
 Commands:
   me                           Show authenticated user information
@@ -537,6 +564,7 @@ Commands:
   more-comments <link-id> <id> Load additional comments by ID [id...]
   list-posts                   List all stored posts (requires --store)
   stats                        Show storage statistics (requires --store)
+  monitor <subreddit[,subreddit2,...]>  Monitor subreddit(s) indefinitely (requires --store)
   help                         Show this help message
 
 Examples:
@@ -566,6 +594,9 @@ Examples:
 
   # Show storage statistics
   reddit -store stats
+
+  # Monitor multiple subreddits with custom interval
+  reddit -store -monitor-interval 10m monitor golang,programming,rust
 
 Set environment variables for credentials:
   export REDDIT_CLIENT_ID="your-client-id"
