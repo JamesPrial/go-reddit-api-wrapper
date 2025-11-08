@@ -71,6 +71,7 @@ function createAbortTimeout(timeout) {
  * @param {string} options.method - HTTP method (GET, POST, etc.)
  * @param {object} options.body - Request body (will be JSON encoded)
  * @param {boolean} options.retry - Whether to retry on network errors (default: true)
+ * @param {object} options.headers - Custom headers to include in the request
  * @returns {Promise<object>} Parsed JSON response
  * @throws {Error} User-friendly error message
  */
@@ -79,6 +80,7 @@ async function makeRequest(url, options = {}) {
     method = 'GET',
     body = null,
     retry = true,
+    headers: customHeaders = {},
   } = options;
 
   const apiKey = getApiKey();
@@ -90,10 +92,11 @@ async function makeRequest(url, options = {}) {
     const headers = {
       'Content-Type': 'application/json',
       'Accept': 'application/json',
+      ...customHeaders,
     };
 
-    // Add authorization header if API key is available
-    if (apiKey) {
+    // Add API key header if available and not overridden
+    if (apiKey && !customHeaders['X-API-Key'] && !customHeaders['Authorization']) {
       headers['Authorization'] = 'Bearer ' + apiKey;
     }
 
@@ -123,6 +126,13 @@ async function makeRequest(url, options = {}) {
     // Handle not found
     if (response.status === 404) {
       throw new Error('Resource not found.');
+    }
+
+    // Handle conflict (e.g., monitor already running)
+    if (response.status === 409) {
+      const error = await response.json().catch(() => null);
+      const message = error?.error || 'Conflict: resource already exists.';
+      throw new Error(message);
     }
 
     // Handle bad request
@@ -800,6 +810,98 @@ async function bulkSaveFromSubreddit(subreddit, sort, limit) {
 }
 
 /**
+ * Monitor Functions
+ */
+
+/**
+ * Start monitoring subreddits.
+ * @param {Object} config - Monitor configuration
+ * @param {string[]} config.subreddits - Array of subreddit names (1-10)
+ * @param {string} config.interval - Poll interval (e.g., "30s", "1m")
+ * @param {number} config.limit - Posts per fetch (1-100)
+ * @param {boolean} config.fetch_comments - Whether to fetch comments
+ * @returns {Promise<Object>} Monitor instance with id, status, started_at
+ */
+async function startMonitor(config) {
+  // Validate config object
+  if (!config || typeof config !== 'object') {
+    throw new Error('Monitor configuration object is required.');
+  }
+
+  // Validate subreddits
+  if (!Array.isArray(config.subreddits) || config.subreddits.length === 0) {
+    throw new Error('At least one subreddit is required.');
+  }
+
+  if (config.subreddits.length > 10) {
+    throw new Error('Maximum 10 subreddits allowed.');
+  }
+
+  // Validate each subreddit name
+  for (let i = 0; i < config.subreddits.length; i++) {
+    const sub = config.subreddits[i];
+    if (typeof sub !== 'string' || sub.trim() === '') {
+      throw new Error('Each subreddit must be a non-empty string.');
+    }
+    if (sub.length > 21) {
+      throw new Error('Subreddit "' + sub + '" exceeds 21 character limit.');
+    }
+  }
+
+  // Validate interval
+  if (!config.interval || typeof config.interval !== 'string') {
+    throw new Error('Interval is required (e.g., "30s", "1m").');
+  }
+
+  // Validate limit
+  if (typeof config.limit !== 'number' || config.limit < 1 || config.limit > 100) {
+    throw new Error('Limit must be a number between 1 and 100.');
+  }
+
+  // Validate fetch_comments
+  if (typeof config.fetch_comments !== 'boolean') {
+    throw new Error('fetch_comments must be a boolean value.');
+  }
+
+  const apiKey = getApiKey();
+  return makeRequest('/api/v1/monitor/start', {
+    method: 'POST',
+    body: config,
+    headers: {
+      'X-API-Key': apiKey,
+    },
+  });
+}
+
+/**
+ * Stop the currently running monitor.
+ * @returns {Promise<Object>} Final status with stats
+ */
+async function stopMonitor() {
+  const apiKey = getApiKey();
+  return makeRequest('/api/v1/monitor/stop', {
+    method: 'POST',
+    headers: {
+      'X-API-Key': apiKey,
+    },
+  });
+}
+
+/**
+ * Get current monitor status and statistics.
+ * @returns {Promise<Object>} Status object (running or stopped)
+ */
+async function getMonitorStatus() {
+  const apiKey = getApiKey();
+  return makeRequest('/api/v1/monitor/status', {
+    method: 'GET',
+    headers: {
+      'X-API-Key': apiKey,
+    },
+  });
+}
+
+/**
  * State Management Helper
  */
 
@@ -875,6 +977,11 @@ window.api = {
   getStorageStats: getStorageStats,
   bulkSaveFromSubreddit: bulkSaveFromSubreddit,
 
+  // Monitor operations
+  startMonitor: startMonitor,
+  stopMonitor: stopMonitor,
+  getMonitorStatus: getMonitorStatus,
+
   // Utilities
   formatTimestamp: formatTimestamp,
   formatScore: formatScore,
@@ -906,6 +1013,9 @@ if (window.location.hostname === 'localhost' || window.location.hostname === '12
   console.log('- api.getSavedComments(postId, options)');
   console.log('- api.getStorageStats()');
   console.log('- api.bulkSaveFromSubreddit(subreddit, sort, limit)');
+  console.log('- api.startMonitor(config)');
+  console.log('- api.stopMonitor()');
+  console.log('- api.getMonitorStatus()');
   console.log('- api.formatTimestamp(unixTime)');
   console.log('- api.formatScore(score)');
   console.log('- api.truncateText(text, maxLength)');

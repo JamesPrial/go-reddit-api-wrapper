@@ -51,6 +51,9 @@
                     <button @click="view = 'bulk'" :class="{ 'active': view === 'bulk' }" class="tab-button">
                         Bulk Download
                     </button>
+                    <button @click="view = 'monitor'; loadMonitorStatus()" :class="{ 'active': view === 'monitor' }" class="tab-button">
+                        Monitor
+                    </button>
                 </nav>
             </template>
 
@@ -66,7 +69,7 @@
             <template x-if="success">
                 <div class="success-banner" role="alert">
                     <span x-text="success"></span>
-                    <button @click="success = ''" class="btn-close">×</button>
+                    <button @click="success = ''" class="btn-close" aria-label="Close success message">×</button>
                 </div>
             </template>
 
@@ -364,6 +367,179 @@
                             <div class="progress-bar">
                                 <div class="progress-fill" :style="`width: ${(bulkProgress.saved / bulkProgress.total) * 100}%`"></div>
                             </div>
+                        </div>
+                    </template>
+                </section>
+            </template>
+
+            <!-- Monitor View Section (shown when in monitor mode) -->
+            <template x-if="authenticated && view === 'monitor'">
+                <section class="monitor-section">
+                    <h2>Reddit Monitor</h2>
+
+                    <!-- Stopped State: Configuration Form -->
+                    <template x-if="monitorStatus === 'stopped'">
+                        <div class="monitor-config-form">
+                            <h3>Start Monitor</h3>
+                            <p>Automatically fetch new posts from subreddits at regular intervals.</p>
+
+                            <!-- Subreddit Tags Input -->
+                            <div class="form-group">
+                                <label>Subreddits (1-10 required):</label>
+                                <div class="subreddit-input-group">
+                                    <input
+                                        type="text"
+                                        x-model="currentSubredditInput"
+                                        @keyup.enter="addMonitorSubreddit()"
+                                        placeholder="e.g., golang"
+                                        :disabled="monitorSubreddits.length >= 10"
+                                        maxlength="21"
+                                    >
+                                    <button
+                                        type="button"
+                                        @click="addMonitorSubreddit()"
+                                        :disabled="monitorSubreddits.length >= 10 || loading || !currentSubredditInput.trim()"
+                                    >
+                                        + Add
+                                    </button>
+                                </div>
+
+                                <!-- Subreddit Tags Display -->
+                                <div class="subreddit-tags">
+                                    <template x-if="monitorSubreddits.length === 0">
+                                        <div class="empty-tags-hint" style="color: var(--text-secondary); font-size: 0.9rem; font-style: italic;">
+                                            No subreddits added yet. Add 1-10 subreddits to monitor.
+                                        </div>
+                                    </template>
+                                    <template x-for="(sub, index) in monitorSubreddits" :key="index">
+                                        <span class="subreddit-tag">
+                                            r/<span x-text="sub"></span>
+                                            <button
+                                                type="button"
+                                                @click="removeMonitorSubreddit(index)"
+                                                :disabled="loading"
+                                                class="remove-tag"
+                                                :aria-label="`Remove r/${sub} from monitoring list`"
+                                            >
+                                                ×
+                                            </button>
+                                        </span>
+                                    </template>
+                                </div>
+                            </div>
+
+                            <!-- Interval Dropdown -->
+                            <div class="form-group">
+                                <label for="monitor-interval">Polling Interval:</label>
+                                <select id="monitor-interval" x-model="monitorInterval">
+                                    <option value="30s">30 seconds</option>
+                                    <option value="1m">1 minute</option>
+                                    <option value="5m">5 minutes</option>
+                                    <option value="15m">15 minutes</option>
+                                    <option value="30m">30 minutes</option>
+                                    <option value="1h">1 hour</option>
+                                </select>
+                            </div>
+
+                            <!-- Limit Input -->
+                            <div class="form-group">
+                                <label for="monitor-limit">Posts per fetch (1-100):</label>
+                                <input
+                                    type="number"
+                                    id="monitor-limit"
+                                    x-model.number="monitorLimit"
+                                    min="1"
+                                    max="100"
+                                >
+                            </div>
+
+                            <!-- Fetch Comments Checkbox -->
+                            <div class="form-group">
+                                <label>
+                                    <input
+                                        type="checkbox"
+                                        x-model="monitorFetchComments"
+                                    >
+                                    Fetch comments for each post
+                                </label>
+                            </div>
+
+                            <!-- Start Button -->
+                            <button
+                                type="button"
+                                @click="startMonitor()"
+                                :disabled="monitorSubreddits.length === 0 || loading"
+                                class="btn-primary"
+                            >
+                                <span x-show="!loading">▶ Start Monitoring</span>
+                                <span x-show="loading">Starting...</span>
+                            </button>
+                        </div>
+                    </template>
+
+                    <!-- Running State: Status Dashboard -->
+                    <template x-if="monitorStatus === 'running'">
+                        <div class="monitor-status-dashboard">
+                            <div class="status-header">
+                                <div class="status-indicator">
+                                    <span class="status-dot running"></span>
+                                    <span class="status-text">Running</span>
+                                </div>
+                                <button
+                                    type="button"
+                                    @click="stopMonitor()"
+                                    :disabled="loading"
+                                    class="stop-button"
+                                >
+                                    <span x-show="!loading">■ Stop</span>
+                                    <span x-show="loading">Stopping...</span>
+                                </button>
+                            </div>
+
+                            <!-- Current Configuration -->
+                            <div class="monitor-info">
+                                <p><strong>Monitoring:</strong> <span x-text="monitorSubreddits.map(s => 'r/' + s).join(', ')"></span></p>
+                                <p><strong>Interval:</strong> <span x-text="monitorInterval"></span></p>
+                                <p><strong>Started:</strong> <span x-text="new Date(monitorStartedAt).toLocaleString()"></span></p>
+                            </div>
+
+                            <!-- Statistics Cards -->
+                            <div class="monitor-stats-grid">
+                                <div class="monitor-stat-card">
+                                    <div class="stat-value" x-text="monitorStats.totalFetches"></div>
+                                    <div class="stat-label">Total Fetches</div>
+                                </div>
+                                <div class="monitor-stat-card">
+                                    <div class="stat-value" x-text="monitorStats.totalPosts"></div>
+                                    <div class="stat-label">Posts Saved</div>
+                                </div>
+                                <div class="monitor-stat-card">
+                                    <div class="stat-value" x-text="monitorStats.totalComments"></div>
+                                    <div class="stat-label">Comments Saved</div>
+                                </div>
+                            </div>
+
+                            <!-- Last Fetch Info -->
+                            <div class="monitor-last-fetch">
+                                <p x-show="monitorStats.lastFetchTime">
+                                    <strong>Last fetch:</strong>
+                                    <span x-text="monitorStats.lastFetchTime ? new Date(monitorStats.lastFetchTime).toLocaleString() : 'N/A'"></span>
+                                </p>
+                                <p x-show="monitorStats.lastError" class="error-text">
+                                    <strong>Last error:</strong>
+                                    <span x-text="monitorStats.lastError"></span>
+                                </p>
+                            </div>
+
+                            <!-- Manual Refresh Button -->
+                            <button
+                                type="button"
+                                @click="loadMonitorStatus(false)"
+                                :disabled="loading"
+                                class="btn-secondary"
+                            >
+                                🔄 Refresh Stats
+                            </button>
                         </div>
                     </template>
                 </section>

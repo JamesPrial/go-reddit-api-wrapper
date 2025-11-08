@@ -76,11 +76,45 @@ function appState() {
       commentCount: 0,
     },
 
+    // ========== Monitor State ==========
+    monitorStatus: 'stopped', // 'stopped' | 'running'
+    monitorId: '',
+    monitorStartedAt: null,
+    monitorSubreddits: [], // Array of subreddit names for tag-style input
+    currentSubredditInput: '', // Temporary input field value
+    monitorInterval: '30s', // Selected interval
+    monitorLimit: 25, // Posts per fetch
+    monitorFetchComments: true,
+    monitorStats: {
+      totalFetches: 0,
+      totalPosts: 0,
+      totalComments: 0,
+      lastFetchTime: null,
+      lastError: '',
+    },
+    monitorRefreshInterval: null, // Timer ID for auto-refresh
+    monitorStatusLoading: false,  // Prevents concurrent status loads
+
     // ========== UI State ==========
     loading: false,
     error: '',
     success: '',
     _messageTimeoutId: null,
+
+    // ========== LIFECYCLE ==========
+
+    /**
+     * Initialize reactive watchers
+     * Called automatically by Alpine.js when component mounts
+     */
+    init() {
+      // Clean up auto-refresh when leaving monitor view
+      this.$watch('view', (newView, oldView) => {
+        if (oldView === 'monitor' && newView !== 'monitor') {
+          this.clearAutoRefresh();
+        }
+      });
+    },
 
     // ========== INITIALIZATION ==========
 
@@ -98,6 +132,8 @@ function appState() {
           if (isValid) {
             this.authenticated = true;
             await this.loadStorageStats();
+            // Load monitor status on startup (show errors if it fails)
+            await this.loadMonitorStatus(false);
           } else {
             this.authenticated = false;
             window.api.clearApiKey();
@@ -607,6 +643,236 @@ function appState() {
         // Silently log stats errors to avoid disrupting save operations
         console.error('Failed to load storage stats:', err.message);
         // Keep existing stats on failure
+      }
+    },
+
+    // ========== MONITOR OPERATIONS ==========
+
+    /**
+     * Add a subreddit to the monitor list
+     * Validates and adds the subreddit from the input field
+     */
+    addMonitorSubreddit() {
+      const subreddit = this.currentSubredditInput.trim();
+
+      // Validation
+      if (!subreddit) {
+        this.error = 'Subreddit name cannot be empty';
+        return;
+      }
+
+      if (subreddit.length > 21) {
+        this.error = 'Subreddit name cannot exceed 21 characters';
+        return;
+      }
+
+      // Add format validation - must start with letter, only letters/numbers/underscores
+      const subredditRegex = /^[a-zA-Z][a-zA-Z0-9_]*$/;
+      if (!subredditRegex.test(subreddit)) {
+        this.error = 'Invalid subreddit name format (must start with letter, contain only letters, numbers, and underscores)';
+        return;
+      }
+
+      // Normalize to lowercase for duplicate checking (subreddits are case-insensitive)
+      const normalizedSubreddit = subreddit.toLowerCase();
+      if (this.monitorSubreddits.map(s => s.toLowerCase()).includes(normalizedSubreddit)) {
+        this.error = 'Subreddit already added';
+        return;
+      }
+
+      if (this.monitorSubreddits.length >= 10) {
+        this.error = 'Maximum 10 subreddits allowed';
+        return;
+      }
+
+      // Add to list
+      this.monitorSubreddits.push(subreddit);
+      this.currentSubredditInput = '';
+      this.error = '';  // Clear any previous errors
+    },
+
+    /**
+     * Remove a subreddit from the monitor list
+     *
+     * @param {number} index - The index of the subreddit to remove
+     */
+    removeMonitorSubreddit(index) {
+      this.monitorSubreddits.splice(index, 1);
+    },
+
+    /**
+     * Start the monitor with current configuration
+     * Validates settings and starts monitoring the configured subreddits
+     */
+    async startMonitor() {
+      // Validate at least one subreddit
+      if (this.monitorSubreddits.length === 0) {
+        this.error = 'Please add at least one subreddit to monitor';
+        return;
+      }
+
+      this.loading = true;
+      this.error = '';
+
+      // Reset stats for new monitor (prevents showing old stats)
+      this.monitorStats = {
+        totalFetches: 0,
+        totalPosts: 0,
+        totalComments: 0,
+        lastFetchTime: null,
+        lastError: '',
+      };
+
+      try {
+        // Build config object
+        const config = {
+          subreddits: this.monitorSubreddits,
+          interval: this.monitorInterval,
+          limit: this.monitorLimit,
+          fetch_comments: this.monitorFetchComments,
+        };
+
+        const result = await window.api.startMonitor(config);
+
+        // Update state on success
+        this.monitorStatus = 'running';
+        this.monitorId = result.id || '';
+        this.monitorStartedAt = result.started_at || null;
+
+        // Start auto-refresh
+        this.pollMonitorStatus();
+
+        this.showSuccess('Monitor started successfully');
+      } catch (err) {
+        this.showError('Failed to start monitor: ' + err.message);
+      } finally {
+        this.loading = false;
+      }
+    },
+
+    /**
+     * Stop the currently running monitor
+     */
+    async stopMonitor() {
+      // Add confirmation dialog
+      if (!confirm('Are you sure you want to stop the monitor? This will end the current monitoring session.')) {
+        return;
+      }
+
+      this.loading = true;
+      this.error = '';
+
+      try {
+        const result = await window.api.stopMonitor();
+
+        // Update state on success
+        this.monitorStatus = 'stopped';
+
+        // Save final stats
+        if (result.stats) {
+          this.monitorStats = {
+            totalFetches: result.stats.total_fetches || 0,
+            totalPosts: result.stats.total_posts || 0,
+            totalComments: result.stats.total_comments || 0,
+            lastFetchTime: result.stats.last_fetch_time || null,
+            lastError: result.stats.last_error || '',
+          };
+        }
+
+        // Clear refresh interval
+        if (this.monitorRefreshInterval) {
+          clearInterval(this.monitorRefreshInterval);
+          this.monitorRefreshInterval = null;
+        }
+
+        this.showSuccess('Monitor stopped successfully');
+      } catch (err) {
+        this.showError('Failed to stop monitor: ' + err.message);
+      } finally {
+        this.loading = false;
+      }
+    },
+
+    /**
+     * Load the current monitor status from the server
+     * Updates monitor state with the latest information
+     */
+    async loadMonitorStatus(silent = true) {
+      // Prevent concurrent loads
+      if (this.monitorStatusLoading) {
+        return;
+      }
+
+      this.monitorStatusLoading = true;
+      try {
+        const result = await window.api.getMonitorStatus();
+
+        if (result.status === 'running') {
+          // Update all monitor state
+          this.monitorStatus = 'running';
+          this.monitorId = result.id || '';
+          this.monitorStartedAt = result.started_at || null;
+
+          if (result.config) {
+            this.monitorSubreddits = result.config.subreddits || [];
+            this.monitorInterval = result.config.interval || '30s';
+            this.monitorLimit = result.config.limit || 25;
+            this.monitorFetchComments = result.config.fetch_comments !== false;
+          }
+
+          if (result.stats) {
+            this.monitorStats = {
+              totalFetches: result.stats.total_fetches || 0,
+              totalPosts: result.stats.total_posts || 0,
+              totalComments: result.stats.total_comments || 0,
+              lastFetchTime: result.stats.last_fetch_time || null,
+              lastError: result.stats.last_error || '',
+            };
+          }
+
+          // Start auto-refresh if not already running
+          if (!this.monitorRefreshInterval) {
+            this.pollMonitorStatus();
+          }
+        } else {
+          // Not running - update status and clear refresh
+          this.monitorStatus = 'stopped';
+          this.clearAutoRefresh();
+        }
+      } catch (err) {
+        if (silent) {
+          console.error('Failed to load monitor status:', err.message);
+        } else {
+          this.error = 'Failed to load monitor status: ' + err.message;
+        }
+      } finally {
+        this.monitorStatusLoading = false;
+      }
+    },
+
+    /**
+     * Auto-refresh monitor status
+     * Polls the server every 5 seconds to update monitor stats
+     */
+    pollMonitorStatus() {
+      // Clear any existing interval first
+      if (this.monitorRefreshInterval) {
+        clearInterval(this.monitorRefreshInterval);
+      }
+
+      // Poll status every 5 seconds
+      this.monitorRefreshInterval = setInterval(() => {
+        this.loadMonitorStatus(true);  // Silent for auto-refresh
+      }, 5000);
+    },
+
+    /**
+     * Clear auto-refresh interval (prevents memory leaks)
+     */
+    clearAutoRefresh() {
+      if (this.monitorRefreshInterval) {
+        clearInterval(this.monitorRefreshInterval);
+        this.monitorRefreshInterval = null;
       }
     },
 
