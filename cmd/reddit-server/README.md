@@ -56,6 +56,9 @@ The server is configured entirely through environment variables. All variables e
 | `STORAGE_DSN` | SQLite database path or `:memory:` | `~/.local/share/reddit-server/reddit.db` | `/var/lib/reddit-server/reddit.db` or `:memory:` |
 | `STORAGE_MAX_OPEN_CONNS` | Maximum open database connections | `10` | `25` |
 | `STORAGE_MAX_IDLE_CONNS` | Maximum idle database connections | `5` | `10` |
+| `LOG_LEVEL` | Log level (debug, info, warn, error) | `info` | `debug` |
+| `LOG_FORMAT` | Log output format (json, text) | `json` | `text` |
+| `LOG_FILE` | Path to log file (must be absolute path; logs to stderr + file when set) | _(empty)_ | `/var/log/reddit-server/app.log` |
 
 **Notes:**
 - Duration values accept Go duration strings (e.g., `30s`, `1m`, `1m30s`)
@@ -97,6 +100,48 @@ export REQUEST_TIMEOUT=60s
 export ALLOWED_ORIGINS="http://localhost:5173,https://example.com"
 ./reddit-server
 ```
+
+### Logging Configuration
+
+The server supports flexible logging configuration through environment variables:
+
+**Basic file logging (info level, JSON format):**
+
+```bash
+export REDDIT_CLIENT_ID="your-client-id"
+export REDDIT_CLIENT_SECRET="your-client-secret"
+export LOG_FILE=/var/log/reddit-server/app.log
+./reddit-server
+```
+
+**Debug logging to file:**
+
+```bash
+export REDDIT_CLIENT_ID="your-client-id"
+export REDDIT_CLIENT_SECRET="your-client-secret"
+export LOG_LEVEL=debug
+export LOG_FILE=/tmp/reddit-server-debug.log
+./reddit-server
+```
+
+**Text format logging:**
+
+```bash
+export REDDIT_CLIENT_ID="your-client-id"
+export REDDIT_CLIENT_SECRET="your-client-secret"
+export LOG_FORMAT=text
+export LOG_LEVEL=info
+./reddit-server
+```
+
+**Notes:**
+- When `LOG_FILE` is set, logs are written to both stderr and the specified file
+- Parent directories are created automatically if they don't exist (server will fail to start if creation fails due to permissions)
+- Parent directories are created with 0700 permissions (owner read/write/execute only)
+- Log files are created with 0600 permissions (owner read/write only)
+- Log file path must not contain '..' (directory traversal protection)
+- Log levels are case-insensitive (debug, info, warn, error)
+- Text format is human-readable, JSON format is structured for log aggregation
 
 ### Verify Server is Running
 

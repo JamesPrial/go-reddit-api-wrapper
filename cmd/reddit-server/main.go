@@ -55,6 +55,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -73,23 +74,58 @@ import (
 )
 
 func main() {
-	// Setup structured logging
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
-	}))
-	slog.SetDefault(logger)
+	exitCode := 0
+	defer func() {
+		if exitCode != 0 {
+			os.Exit(exitCode)
+		}
+	}()
 
-	// Load and validate configuration
+	// Load and validate configuration first
 	cfg, generatedKey, err := config.Load()
 	if err != nil {
-		logger.Error("failed to load configuration", "error", err)
-		os.Exit(1)
+		// Use temporary logger for config load errors
+		tempLogger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
+			Level: slog.LevelInfo,
+		}))
+		tempLogger.Error("failed to load configuration", "error", err)
+		exitCode = 1
+		return
 	}
 
 	if err := cfg.Validate(); err != nil {
-		logger.Error("invalid configuration", "error", err)
-		os.Exit(1)
+		// Use temporary logger for validation errors
+		tempLogger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
+			Level: slog.LevelInfo,
+		}))
+		tempLogger.Error("invalid configuration", "error", err)
+		exitCode = 1
+		return
 	}
+
+	// Create logger from configuration with multi-writer support
+	logger, logFile, err := createLoggerFromConfig(cfg)
+	if err != nil {
+		// Use temporary logger for logger creation errors
+		tempLogger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
+			Level: slog.LevelInfo,
+		}))
+		tempLogger.Error("failed to create logger", "error", err)
+		exitCode = 1
+		return
+	}
+	defer func() {
+		if logFile != nil {
+			// Sync to ensure all data is written to disk
+			if err := logFile.Sync(); err != nil {
+				fmt.Fprintf(os.Stderr, "error syncing log file: %v\n", err)
+			}
+			if err := logFile.Close(); err != nil {
+				fmt.Fprintf(os.Stderr, "error closing log file: %v\n", err)
+			}
+		}
+	}()
+	slog.SetDefault(logger)
 
 	logger.Info("server configuration loaded", "config", cfg.String())
 
@@ -102,7 +138,8 @@ func main() {
 	redditClient, err := createRedditClient(cfg)
 	if err != nil {
 		logger.Error("failed to create Reddit client", "error", err)
-		os.Exit(1)
+		exitCode = 1
+		return
 	}
 
 	logger.Info("Reddit client created successfully")
@@ -123,7 +160,8 @@ func main() {
 	store, err := storage.New(initCtx, storeCfg)
 	if err != nil {
 		logger.Error("failed to create storage", "error", err)
-		os.Exit(1)
+		exitCode = 1
+		return
 	}
 
 	logger.Info("storage initialized successfully", "dsn", cfg.StorageDSN)
@@ -213,7 +251,8 @@ func main() {
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.Error("server error", "error", err)
 			signal.Stop(shutdown)
-			os.Exit(1)
+			exitCode = 1
+			return
 		}
 
 	case sig := <-shutdown:
@@ -245,13 +284,15 @@ func main() {
 			if storeErr := store.Close(); storeErr != nil {
 				logger.Error("error closing storage during forced shutdown", "error", storeErr)
 			}
-			os.Exit(1)
+			exitCode = 1
+			return
 		}
 
 		logger.Info("server shutdown complete, closing storage")
 		if err := store.Close(); err != nil {
 			logger.Error("error closing storage", "error", err)
-			os.Exit(1)
+			exitCode = 1
+			return
 		}
 
 		logger.Info("storage closed successfully")
@@ -351,6 +392,64 @@ func routeStoragePosts(h *handlers.Handlers) http.HandlerFunc {
 		// Invalid path
 		http.Error(w, "Not Found", http.StatusNotFound)
 	}
+}
+
+// createLoggerFromConfig creates a structured logger from the server configuration.
+// It supports configurable log levels and formats, with optional file output in addition to stderr.
+// Returns the logger, the file handle (or nil), and an error if creation fails.
+// The caller is responsible for closing the returned file handle.
+func createLoggerFromConfig(cfg *config.Config) (*slog.Logger, *os.File, error) {
+	// Map log level string to slog.Level
+	logLevel := slog.LevelInfo // default
+	switch cfg.LogLevel {
+	case "debug":
+		logLevel = slog.LevelDebug
+	case "info":
+		logLevel = slog.LevelInfo
+	case "warn":
+		logLevel = slog.LevelWarn
+	case "error":
+		logLevel = slog.LevelError
+	}
+
+	// Create multi-writer for logging (stderr + optional file)
+	// Use stderr for consistency with early startup error logging
+	var logWriters []io.Writer
+	logWriters = append(logWriters, os.Stderr)
+
+	var logFile *os.File
+	if cfg.LogFile != "" {
+		var err error
+		// Use 0600 permissions for security (owner read/write only, consistent with directory 0o700)
+		logFile, err = os.OpenFile(cfg.LogFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to open log file %q: %w", cfg.LogFile, err)
+		}
+		logWriters = append(logWriters, logFile)
+	}
+
+	multiWriter := io.MultiWriter(logWriters...)
+
+	// Create handler based on configured format
+	var handler slog.Handler
+	switch cfg.LogFormat {
+	case "json":
+		handler = slog.NewJSONHandler(multiWriter, &slog.HandlerOptions{
+			Level: logLevel,
+		})
+	case "text":
+		handler = slog.NewTextHandler(multiWriter, &slog.HandlerOptions{
+			Level: logLevel,
+		})
+	default:
+		// Default to JSON if unknown format (should not happen due to validation)
+		handler = slog.NewJSONHandler(multiWriter, &slog.HandlerOptions{
+			Level: logLevel,
+		})
+	}
+
+	logger := slog.New(handler)
+	return logger, logFile, nil
 }
 
 // createRedditClient creates and configures a Reddit API client from the server configuration.

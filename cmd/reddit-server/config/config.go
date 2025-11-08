@@ -42,6 +42,11 @@ type Config struct {
 	StorageDSN          string // Database connection string (from STORAGE_DSN, default: ~/.local/share/reddit-server/reddit.db)
 	StorageMaxOpenConns int    // Maximum open database connections (from STORAGE_MAX_OPEN_CONNS, default: 10)
 	StorageMaxIdleConns int    // Maximum idle database connections (from STORAGE_MAX_IDLE_CONNS, default: 5)
+
+	// Logging configuration
+	LogLevel  string // Log level (from LOG_LEVEL, default: "info", valid: "debug", "info", "warn", "error")
+	LogFormat string // Log format (from LOG_FORMAT, default: "json", valid: "json", "text")
+	LogFile   string // Log file path (from LOG_FILE, default: "" - empty means stderr only, must be absolute path)
 }
 
 // Load reads configuration from environment variables and returns a Config with defaults applied.
@@ -61,10 +66,14 @@ type Config struct {
 //   - STORAGE_DSN: Database connection string (default: XDG_DATA_HOME/reddit-server/reddit.db or ~/.local/share/reddit-server/reddit.db)
 //   - STORAGE_MAX_OPEN_CONNS: Maximum open database connections (default: 10)
 //   - STORAGE_MAX_IDLE_CONNS: Maximum idle database connections (default: 5)
+//   - LOG_LEVEL: Log level (default: "info", valid: "debug", "info", "warn", "error")
+//   - LOG_FORMAT: Log format (default: "json", valid: "json", "text")
+//   - LOG_FILE: Log file path (default: "" - empty means stderr only, must be absolute path if provided)
 //
 // Returns the config, a generated API key (if one was auto-generated), and an error if any required fields are missing or invalid.
 // If API_KEYS is empty, a secure random API key is generated and stored in Config.APIKeys.
 // The storage DSN directory is created if it doesn't exist.
+// If LOG_FILE is provided, its parent directory is created if it doesn't exist.
 func Load() (*Config, string, error) {
 	cfg := &Config{
 		Port:                8080,
@@ -72,6 +81,9 @@ func Load() (*Config, string, error) {
 		RequestTimeout:      30 * time.Second,
 		StorageMaxOpenConns: 10,
 		StorageMaxIdleConns: 5,
+		LogLevel:            "info",
+		LogFormat:           "json",
+		LogFile:             "",
 	}
 
 	// Parse port
@@ -194,6 +206,27 @@ func Load() (*Config, string, error) {
 		cfg.StorageMaxIdleConns = maxIdle
 	}
 
+	// Parse logging configuration
+	if logLevelStr := os.Getenv("LOG_LEVEL"); logLevelStr != "" {
+		cfg.LogLevel = strings.ToLower(logLevelStr)
+	}
+
+	if logFormatStr := os.Getenv("LOG_FORMAT"); logFormatStr != "" {
+		cfg.LogFormat = strings.ToLower(logFormatStr)
+	}
+
+	if logFileStr := os.Getenv("LOG_FILE"); logFileStr != "" {
+		cfg.LogFile = strings.TrimSpace(logFileStr)
+
+		// Create parent directory if it doesn't exist (matches storage DSN pattern)
+		if cfg.LogFile != "" {
+			dir := filepath.Dir(cfg.LogFile)
+			if err := os.MkdirAll(dir, 0o700); err != nil {
+				return nil, "", fmt.Errorf("failed to create log file directory %q: %w", dir, err)
+			}
+		}
+	}
+
 	return cfg, generatedKey, nil
 }
 
@@ -206,8 +239,11 @@ func Load() (*Config, string, error) {
 //   - CORS origins (must start with http:// or https://)
 //   - Storage DSN (must not be empty)
 //   - Storage pool sizes (must be positive)
+//   - Log level (must be one of: "debug", "info", "warn", "error")
+//   - Log format (must be one of: "json", "text")
+//   - Log file (must be absolute path if provided, no directory traversal, max 4096 characters, parent directory must exist)
 //
-// Returns an error if any validation fails.
+// Returns an error if any validation fails. Note: Log file parent directory is created in Load(), not Validate().
 func (c *Config) Validate() error {
 	var errs []error
 
@@ -320,6 +356,61 @@ func (c *Config) Validate() error {
 		errs = append(errs, fmt.Errorf("storage max idle connections (%d) must not exceed max open connections (%d)", c.StorageMaxIdleConns, c.StorageMaxOpenConns))
 	}
 
+	// Validate logging configuration
+	validLogLevels := map[string]bool{
+		"debug": true,
+		"info":  true,
+		"warn":  true,
+		"error": true,
+	}
+	if !validLogLevels[c.LogLevel] {
+		errs = append(errs, fmt.Errorf("log level must be one of (debug, info, warn, error), got %q", c.LogLevel))
+	}
+
+	validLogFormats := map[string]bool{
+		"json": true,
+		"text": true,
+	}
+	if !validLogFormats[c.LogFormat] {
+		errs = append(errs, fmt.Errorf("log format must be one of (json, text), got %q", c.LogFormat))
+	}
+
+	if c.LogFile != "" {
+		// Validate path length
+		const maxPathLength = 4096
+		if len(c.LogFile) > maxPathLength {
+			errs = append(errs, fmt.Errorf("log file path too long: %d characters (max %d)", len(c.LogFile), maxPathLength))
+		}
+
+		// Check for path traversal and normalization issues (., .., duplicate slashes, etc.)
+		cleanPath := filepath.Clean(c.LogFile)
+		if cleanPath != c.LogFile {
+			errs = append(errs, fmt.Errorf("log file path must be clean (no ., .., or duplicate slashes), got %q, expected %q", c.LogFile, cleanPath))
+		}
+
+		// Ensure path is absolute for security
+		if !filepath.IsAbs(c.LogFile) {
+			errs = append(errs, fmt.Errorf("log file must be an absolute path, got %q", c.LogFile))
+		}
+
+		// Check parent directory exists (don't create it - that's done in Load())
+		dir := filepath.Dir(c.LogFile)
+		if info, err := os.Stat(dir); err != nil {
+			if os.IsNotExist(err) {
+				errs = append(errs, fmt.Errorf("log file parent directory %q does not exist", dir))
+			} else {
+				errs = append(errs, fmt.Errorf("cannot access log file parent directory %q: %w", dir, err))
+			}
+		} else if !info.IsDir() {
+			errs = append(errs, fmt.Errorf("log file parent %q is not a directory", dir))
+		}
+
+		// Ensure LogFile itself is not a directory
+		if info, err := os.Stat(c.LogFile); err == nil && info.IsDir() {
+			errs = append(errs, fmt.Errorf("log file %q is a directory, not a file", c.LogFile))
+		}
+	}
+
 	if len(errs) > 0 {
 		return errors.Join(errs...)
 	}
@@ -334,8 +425,19 @@ func (c *Config) String() string {
 	for i := range c.APIKeys {
 		redactedKeys[i] = redact(c.APIKeys[i])
 	}
+	// Format LogFile for display (show relative to home if possible)
+	logFileDisplay := redact(c.LogFile)
+	if c.LogFile != "" {
+		homeDir, err := os.UserHomeDir()
+		if err == nil {
+			if rel, err := filepath.Rel(homeDir, c.LogFile); err == nil && !strings.HasPrefix(rel, "..") {
+				logFileDisplay = "~/" + rel
+			}
+		}
+	}
+
 	return fmt.Sprintf(
-		"Config{Port: %d, ShutdownTimeout: %v, RequestTimeout: %v, RedditClientID: %s, RedditClientSecret: %s, RedditUsername: %s, RedditPassword: %s, APIKeys: %v, AllowedOrigins: %v, StorageDSN: %s, StorageMaxOpenConns: %d, StorageMaxIdleConns: %d}",
+		"Config{Port: %d, ShutdownTimeout: %v, RequestTimeout: %v, RedditClientID: %s, RedditClientSecret: %s, RedditUsername: %s, RedditPassword: %s, APIKeys: %v, AllowedOrigins: %v, StorageDSN: %s, StorageMaxOpenConns: %d, StorageMaxIdleConns: %d, LogLevel: %s, LogFormat: %s, LogFile: %s}",
 		c.Port,
 		c.ShutdownTimeout,
 		c.RequestTimeout,
@@ -348,6 +450,9 @@ func (c *Config) String() string {
 		redact(c.StorageDSN),
 		c.StorageMaxOpenConns,
 		c.StorageMaxIdleConns,
+		c.LogLevel,
+		c.LogFormat,
+		logFileDisplay,
 	)
 }
 

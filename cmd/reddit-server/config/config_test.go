@@ -269,18 +269,7 @@ func TestLoad_AllowedOriginsCommaSeparated(t *testing.T) {
 }
 
 func TestValidate_Success(t *testing.T) {
-	cfg := &Config{
-		Port:                8080,
-		ShutdownTimeout:     30 * time.Second,
-		RequestTimeout:      30 * time.Second,
-		RedditClientID:      "test-id",
-		RedditClientSecret:  "test-secret",
-		APIKeys:             []string{"dGVzdC1rZXktdGhhdC1pcy1sb25nLWVub3VnaC1mb3ItdmFsaWRhdGlvbg"},
-		AllowedOrigins:      []string{"http://localhost:3000", "https://example.com"},
-		StorageDSN:          "/tmp/test.db",
-		StorageMaxOpenConns: 10,
-		StorageMaxIdleConns: 5,
-	}
+	cfg := newTestConfig()
 
 	err := cfg.Validate()
 	if err != nil {
@@ -289,14 +278,8 @@ func TestValidate_Success(t *testing.T) {
 }
 
 func TestValidate_MissingClientID(t *testing.T) {
-	cfg := &Config{
-		Port:               8080,
-		ShutdownTimeout:    30 * time.Second,
-		RequestTimeout:     30 * time.Second,
-		RedditClientID:     "", // Missing
-		RedditClientSecret: "test-secret",
-		APIKeys:            []string{"dGVzdC1rZXktdGhhdC1pcy1sb25nLWVub3VnaC1mb3ItdmFsaWRhdGlvbg"},
-	}
+	cfg := newTestConfig()
+	cfg.RedditClientID = "" // Missing
 
 	err := cfg.Validate()
 	if err == nil {
@@ -309,14 +292,8 @@ func TestValidate_MissingClientID(t *testing.T) {
 }
 
 func TestValidate_MissingClientSecret(t *testing.T) {
-	cfg := &Config{
-		Port:               8080,
-		ShutdownTimeout:    30 * time.Second,
-		RequestTimeout:     30 * time.Second,
-		RedditClientID:     "test-id",
-		RedditClientSecret: "", // Missing
-		APIKeys:            []string{"dGVzdC1rZXktdGhhdC1pcy1sb25nLWVub3VnaC1mb3ItdmFsaWRhdGlvbg"},
-	}
+	cfg := newTestConfig()
+	cfg.RedditClientSecret = "" // Missing
 
 	err := cfg.Validate()
 	if err == nil {
@@ -341,14 +318,8 @@ func TestValidate_InvalidPortRange(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg := &Config{
-				Port:               tt.port,
-				ShutdownTimeout:    30 * time.Second,
-				RequestTimeout:     30 * time.Second,
-				RedditClientID:     "test-id",
-				RedditClientSecret: "test-secret",
-				APIKeys:            []string{"dGVzdC1rZXktdGhhdC1pcy1sb25nLWVub3VnaC1mb3ItdmFsaWRhdGlvbg"},
-			}
+			cfg := newTestConfig()
+			cfg.Port = tt.port
 
 			err := cfg.Validate()
 			if err == nil {
@@ -397,14 +368,9 @@ func TestValidate_NegativeTimeout(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg := &Config{
-				Port:               8080,
-				ShutdownTimeout:    tt.shutdownTimeout,
-				RequestTimeout:     tt.requestTimeout,
-				RedditClientID:     "test-id",
-				RedditClientSecret: "test-secret",
-				APIKeys:            []string{"dGVzdC1rZXktdGhhdC1pcy1sb25nLWVub3VnaC1mb3ItdmFsaWRhdGlvbg"},
-			}
+			cfg := newTestConfig()
+			cfg.ShutdownTimeout = tt.shutdownTimeout
+			cfg.RequestTimeout = tt.requestTimeout
 
 			err := cfg.Validate()
 			if err == nil {
@@ -447,17 +413,9 @@ func TestValidate_ExcessiveTimeout(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg := &Config{
-				Port:                8080,
-				ShutdownTimeout:     tt.shutdownTimeout,
-				RequestTimeout:      tt.requestTimeout,
-				RedditClientID:      "test-id",
-				RedditClientSecret:  "test-secret",
-				APIKeys:             []string{"dGVzdC1rZXktdGhhdC1pcy1sb25nLWVub3VnaC1mb3ItdmFsaWRhdGlvbg"},
-				StorageDSN:          "/tmp/test.db",
-				StorageMaxOpenConns: 10,
-				StorageMaxIdleConns: 5,
-			}
+			cfg := newTestConfig()
+			cfg.ShutdownTimeout = tt.shutdownTimeout
+			cfg.RequestTimeout = tt.requestTimeout
 
 			err := cfg.Validate()
 			if tt.errorContains == "" {
@@ -501,15 +459,8 @@ func TestValidate_InvalidCORSOrigin(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg := &Config{
-				Port:               8080,
-				ShutdownTimeout:    30 * time.Second,
-				RequestTimeout:     30 * time.Second,
-				RedditClientID:     "test-id",
-				RedditClientSecret: "test-secret",
-				AllowedOrigins:     tt.origins,
-				APIKeys:            []string{"dGVzdC1rZXktdGhhdC1pcy1sb25nLWVub3VnaC1mb3ItdmFsaWRhdGlvbg"},
-			}
+			cfg := newTestConfig()
+			cfg.AllowedOrigins = tt.origins
 
 			err := cfg.Validate()
 			if err == nil {
@@ -524,14 +475,13 @@ func TestValidate_InvalidCORSOrigin(t *testing.T) {
 }
 
 func TestValidate_MultipleErrors(t *testing.T) {
-	cfg := &Config{
-		Port:               0,                          // Invalid
-		ShutdownTimeout:    -1 * time.Second,           // Invalid
-		RequestTimeout:     0,                          // Invalid
-		RedditClientID:     "",                         // Missing
-		RedditClientSecret: "",                         // Missing
-		AllowedOrigins:     []string{"invalid-origin"}, // Invalid
-	}
+	cfg := newTestConfig()
+	cfg.Port = 0                                    // Invalid
+	cfg.ShutdownTimeout = -1 * time.Second          // Invalid
+	cfg.RequestTimeout = 0                          // Invalid
+	cfg.RedditClientID = ""                         // Missing
+	cfg.RedditClientSecret = ""                     // Missing
+	cfg.AllowedOrigins = []string{"invalid-origin"} // Invalid
 
 	err := cfg.Validate()
 	if err == nil {
@@ -568,16 +518,9 @@ func TestValidate_MultipleErrors(t *testing.T) {
 }
 
 func TestString_Redaction(t *testing.T) {
-	cfg := &Config{
-		Port:               8080,
-		ShutdownTimeout:    30 * time.Second,
-		RequestTimeout:     30 * time.Second,
-		RedditClientID:     "test-client-id",
-		RedditClientSecret: "test-client-secret",
-		RedditUsername:     "test-user",
-		RedditPassword:     "test-pass",
-		AllowedOrigins:     []string{"http://localhost:3000"},
-	}
+	cfg := newTestConfig()
+	cfg.RedditUsername = "test-user"
+	cfg.RedditPassword = "test-pass"
 
 	str := cfg.String()
 
@@ -621,6 +564,8 @@ func TestString_EmptyCredentials(t *testing.T) {
 		RedditClientSecret: "",
 		RedditUsername:     "",
 		RedditPassword:     "",
+		LogLevel:           "info",
+		LogFormat:          "json",
 	}
 
 	str := cfg.String()
@@ -630,7 +575,7 @@ func TestString_EmptyCredentials(t *testing.T) {
 		t.Error("String() does not contain '<empty>' marker for empty credentials")
 	}
 
-	// Verify "<redacted>" is not present since all credentials are empty
+	// Verify "<redacted>" is not present since all credentials are empty and no APIKeys
 	if strings.Contains(str, "<redacted>") {
 		t.Error("String() contains '<redacted>' marker when all credentials are empty")
 	}
@@ -748,14 +693,8 @@ func TestLoad_APIKeys_GeneratedFormat(t *testing.T) {
 }
 
 func TestValidate_APIKeys_TooShort(t *testing.T) {
-	cfg := &Config{
-		Port:               8080,
-		ShutdownTimeout:    30 * time.Second,
-		RequestTimeout:     30 * time.Second,
-		RedditClientID:     "test-id",
-		RedditClientSecret: "test-secret",
-		APIKeys:            []string{"short"},
-	}
+	cfg := newTestConfig()
+	cfg.APIKeys = []string{"short"}
 
 	err := cfg.Validate()
 	if err == nil {
@@ -768,14 +707,8 @@ func TestValidate_APIKeys_TooShort(t *testing.T) {
 }
 
 func TestValidate_APIKeys_InvalidBase64(t *testing.T) {
-	cfg := &Config{
-		Port:               8080,
-		ShutdownTimeout:    30 * time.Second,
-		RequestTimeout:     30 * time.Second,
-		RedditClientID:     "test-id",
-		RedditClientSecret: "test-secret",
-		APIKeys:            []string{"this-is-not-valid-base64!!!!!!!"}, // 32 chars but not valid base64
-	}
+	cfg := newTestConfig()
+	cfg.APIKeys = []string{"this-is-not-valid-base64!!!!!!!"} // 32 chars but not valid base64
 
 	err := cfg.Validate()
 	if err == nil {
@@ -788,14 +721,8 @@ func TestValidate_APIKeys_InvalidBase64(t *testing.T) {
 }
 
 func TestValidate_APIKeys_Missing(t *testing.T) {
-	cfg := &Config{
-		Port:               8080,
-		ShutdownTimeout:    30 * time.Second,
-		RequestTimeout:     30 * time.Second,
-		RedditClientID:     "test-id",
-		RedditClientSecret: "test-secret",
-		APIKeys:            []string{}, // Empty slice
-	}
+	cfg := newTestConfig()
+	cfg.APIKeys = []string{} // Empty slice
 
 	err := cfg.Validate()
 	if err == nil {
@@ -808,14 +735,8 @@ func TestValidate_APIKeys_Missing(t *testing.T) {
 }
 
 func TestConfig_String_RedactsAPIKeys(t *testing.T) {
-	cfg := &Config{
-		Port:               8080,
-		ShutdownTimeout:    30 * time.Second,
-		RequestTimeout:     30 * time.Second,
-		RedditClientID:     "test-id",
-		RedditClientSecret: "test-secret",
-		APIKeys:            []string{"dGVzdC1hcGkta2V5LXRoYXQtaXMtYXQtbGVhc3QtMzItY2hhcnM"},
-	}
+	cfg := newTestConfig()
+	cfg.APIKeys = []string{"dGVzdC1hcGkta2V5LXRoYXQtaXMtYXQtbGVhc3QtMzItY2hhcnM"}
 
 	str := cfg.String()
 
@@ -938,17 +859,8 @@ func TestLoad_InvalidStorageMaxIdleConns(t *testing.T) {
 }
 
 func TestValidate_StorageEmptyDSN(t *testing.T) {
-	cfg := &Config{
-		Port:                8080,
-		ShutdownTimeout:     30 * time.Second,
-		RequestTimeout:      30 * time.Second,
-		RedditClientID:      "test-id",
-		RedditClientSecret:  "test-secret",
-		APIKeys:             []string{"dGVzdC1rZXktdGhhdC1pcy1sb25nLWVub3VnaC1mb3ItdmFsaWRhdGlvbg"},
-		StorageDSN:          "", // Empty
-		StorageMaxOpenConns: 10,
-		StorageMaxIdleConns: 5,
-	}
+	cfg := newTestConfig()
+	cfg.StorageDSN = "" // Empty
 
 	err := cfg.Validate()
 	if err == nil {
@@ -961,17 +873,8 @@ func TestValidate_StorageEmptyDSN(t *testing.T) {
 }
 
 func TestValidate_StorageNegativeMaxOpenConns(t *testing.T) {
-	cfg := &Config{
-		Port:                8080,
-		ShutdownTimeout:     30 * time.Second,
-		RequestTimeout:      30 * time.Second,
-		RedditClientID:      "test-id",
-		RedditClientSecret:  "test-secret",
-		APIKeys:             []string{"dGVzdC1rZXktdGhhdC1pcy1sb25nLWVub3VnaC1mb3ItdmFsaWRhdGlvbg"},
-		StorageDSN:          "/tmp/test.db",
-		StorageMaxOpenConns: -1, // Invalid
-		StorageMaxIdleConns: 5,
-	}
+	cfg := newTestConfig()
+	cfg.StorageMaxOpenConns = -1 // Invalid
 
 	err := cfg.Validate()
 	if err == nil {
@@ -984,17 +887,8 @@ func TestValidate_StorageNegativeMaxOpenConns(t *testing.T) {
 }
 
 func TestValidate_StorageNegativeMaxIdleConns(t *testing.T) {
-	cfg := &Config{
-		Port:                8080,
-		ShutdownTimeout:     30 * time.Second,
-		RequestTimeout:      30 * time.Second,
-		RedditClientID:      "test-id",
-		RedditClientSecret:  "test-secret",
-		APIKeys:             []string{"dGVzdC1rZXktdGhhdC1pcy1sb25nLWVub3VnaC1mb3ItdmFsaWRhdGlvbg"},
-		StorageDSN:          "/tmp/test.db",
-		StorageMaxOpenConns: 10,
-		StorageMaxIdleConns: -1, // Invalid
-	}
+	cfg := newTestConfig()
+	cfg.StorageMaxIdleConns = -1 // Invalid
 
 	err := cfg.Validate()
 	if err == nil {
@@ -1007,17 +901,9 @@ func TestValidate_StorageNegativeMaxIdleConns(t *testing.T) {
 }
 
 func TestValidate_StorageIdleExceedsOpen(t *testing.T) {
-	cfg := &Config{
-		Port:                8080,
-		ShutdownTimeout:     30 * time.Second,
-		RequestTimeout:      30 * time.Second,
-		RedditClientID:      "test-id",
-		RedditClientSecret:  "test-secret",
-		APIKeys:             []string{"dGVzdC1rZXktdGhhdC1pcy1sb25nLWVub3VnaC1mb3ItdmFsaWRhdGlvbg"},
-		StorageDSN:          "/tmp/test.db",
-		StorageMaxOpenConns: 5,
-		StorageMaxIdleConns: 10, // Exceeds max open
-	}
+	cfg := newTestConfig()
+	cfg.StorageMaxOpenConns = 5
+	cfg.StorageMaxIdleConns = 10 // Exceeds max open
 
 	err := cfg.Validate()
 	if err == nil {
@@ -1030,17 +916,10 @@ func TestValidate_StorageIdleExceedsOpen(t *testing.T) {
 }
 
 func TestString_StorageConfiguration(t *testing.T) {
-	cfg := &Config{
-		Port:                8080,
-		ShutdownTimeout:     30 * time.Second,
-		RequestTimeout:      30 * time.Second,
-		RedditClientID:      "test-id",
-		RedditClientSecret:  "test-secret",
-		APIKeys:             []string{"dGVzdC1rZXktdGhhdC1pcy1sb25nLWVub3VnaC1mb3ItdmFsaWRhdGlvbg"},
-		StorageDSN:          "/home/user/.local/share/reddit-server/reddit.db",
-		StorageMaxOpenConns: 15,
-		StorageMaxIdleConns: 8,
-	}
+	cfg := newTestConfig()
+	cfg.StorageDSN = "/home/user/.local/share/reddit-server/reddit.db"
+	cfg.StorageMaxOpenConns = 15
+	cfg.StorageMaxIdleConns = 8
 
 	str := cfg.String()
 
@@ -1078,4 +957,23 @@ func setenv(t *testing.T, key, value string) {
 			os.Unsetenv(key)
 		}
 	})
+}
+
+// newTestConfig returns a Config with all required fields set to valid defaults for testing.
+func newTestConfig() *Config {
+	return &Config{
+		Port:                8080,
+		ShutdownTimeout:     30 * time.Second,
+		RequestTimeout:      30 * time.Second,
+		RedditClientID:      "test-id",
+		RedditClientSecret:  "test-secret",
+		APIKeys:             []string{"dGVzdC1rZXktdGhhdC1pcy1sb25nLWVub3VnaC1mb3ItdmFsaWRhdGlvbg"},
+		AllowedOrigins:      []string{"http://localhost:3000", "https://example.com"},
+		StorageDSN:          "/tmp/test.db",
+		StorageMaxOpenConns: 10,
+		StorageMaxIdleConns: 5,
+		LogLevel:            "info",
+		LogFormat:           "json",
+		LogFile:             "",
+	}
 }
