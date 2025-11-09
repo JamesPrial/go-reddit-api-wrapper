@@ -20,6 +20,10 @@ fi
 # Create logs directory if it doesn't exist
 mkdir -p ./logs
 
+# Export Reddit credentials
+export REDDIT_CLIENT_ID
+export REDDIT_CLIENT_SECRET
+
 # Set API key for server authentication
 export API_KEYS="$TEST_KEY"
 
