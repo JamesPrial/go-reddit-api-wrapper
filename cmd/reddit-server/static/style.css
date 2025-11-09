@@ -335,6 +335,22 @@ section {
     background-color: rgba(255, 255, 255, 0.4);
 }
 
+.btn-shutdown {
+    background-color: var(--danger-color);
+    color: white;
+    padding: 0.5rem 1rem;
+}
+
+.btn-shutdown:hover:not(:disabled) {
+    background-color: #d32f2f;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.btn-shutdown:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
 .btn-close {
     background-color: transparent;
     color: var(--text-secondary);
@@ -878,6 +894,7 @@ button:disabled {
     .app-footer,
     .controls-group,
     .btn-logout,
+    .btn-shutdown,
     .btn-back {
         display: none;
     }

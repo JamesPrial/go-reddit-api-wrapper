@@ -876,6 +876,45 @@ function appState() {
       }
     },
 
+    // ========== SERVER MANAGEMENT ==========
+
+    /**
+     * Shutdown the server
+     * Displays a confirmation dialog and initiates graceful server shutdown
+     *
+     * Expected flow:
+     * 1. Client sends POST /api/v1/shutdown
+     * 2. Server returns 202 Accepted with {"message": "server shutdown initiated"}
+     * 3. Client shows success message
+     * 4. Server completes graceful shutdown (30s timeout)
+     * 5. Connection drops (client may be disconnected by then)
+     */
+    async shutdown() {
+      if (!confirm('Are you sure you want to shutdown the server? This will terminate all active connections.')) {
+        return;
+      }
+
+      this.loading = true;
+      this.error = '';
+
+      try {
+        const result = await window.api.shutdownServer();
+        // Server returned 202 Accepted - shutdown initiated successfully
+        this.success = result.message || 'Server shutdown initiated';
+        this.loading = false;
+      } catch (err) {
+        // True errors: 401 auth, 503 service unavailable, network failure
+        // Check for authentication failure (401)
+        if (err.message.includes('Authentication required')) {
+          this.error = err.message;
+        } else {
+          // All other errors are real failures (network timeout, 503, etc)
+          this.error = 'Failed to shutdown server: ' + err.message;
+        }
+        this.loading = false;
+      }
+    },
+
     // ========== UI HELPERS ==========
 
     /**

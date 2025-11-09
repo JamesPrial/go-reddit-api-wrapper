@@ -902,6 +902,22 @@ async function getMonitorStatus() {
 }
 
 /**
+ * Server Management Functions
+ */
+
+/**
+ * Shuts down the HTTP server gracefully.
+ * @requires Authentication - Must have valid API key
+ * @returns {Promise<object>} Response with shutdown message
+ * @throws {Error} If request fails or authentication invalid
+ */
+async function shutdownServer() {
+  return makeRequest('/api/v1/server/shutdown', {
+    method: 'POST',
+  });
+}
+
+/**
  * State Management Helper
  */
 
@@ -981,6 +997,9 @@ window.api = {
   startMonitor: startMonitor,
   stopMonitor: stopMonitor,
   getMonitorStatus: getMonitorStatus,
+
+  // Server management
+  shutdownServer: shutdownServer,
 
   // Utilities
   formatTimestamp: formatTimestamp,

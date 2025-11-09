@@ -26,6 +26,8 @@
                             <span class="status-badge" x-text="`💬 ${stats.commentCount} comments`"></span>
                         </div>
                         <button @click="logout()" class="btn-logout">Logout</button>
+                        <span style="margin: 0 0.5rem; border-left: 1px solid rgba(255,255,255,0.3); height: 1.5rem; display: inline-block;"></span>
+                        <button @click="shutdown()" :disabled="loading" class="btn-shutdown">⏹ Shutdown Server</button>
                     </template>
                     <template x-if="!authenticated">
                         <span class="status-badge status-unauthenticated">
