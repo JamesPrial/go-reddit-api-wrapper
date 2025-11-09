@@ -172,3 +172,76 @@ func isExemptPath(path string, exemptPaths []string) bool {
 	}
 	return false
 }
+
+// JWTAuthValidator defines the interface for JWT validation in middleware.
+type JWTAuthValidator interface {
+	ValidateToken(tokenString string) (interface{}, error)
+}
+
+// JWTAuth returns middleware that validates JWT authentication from the Authorization header.
+//
+// The middleware:
+//   - Extracts the JWT token from the Authorization header (expected format: "Bearer <token>")
+//   - Validates the token signature and expiry using the provided JWT validator
+//   - Skips authentication for paths in the exemptPaths slice (prefix match for paths ending with "/")
+//   - Returns 401 Unauthorized for missing, malformed, or invalid tokens
+//   - Logs failed authentication attempts with structured logging
+//
+// Example usage:
+//
+//	jwtValidator := ... // JWT service implementing JWTAuthValidator
+//	exemptPaths := []string{"/health", "/api/v1/auth/login"}
+//	handler := JWTAuth(jwtValidator, exemptPaths)(myHandler)
+func JWTAuth(validator JWTAuthValidator, exemptPaths []string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Skip authentication for exempt paths
+			if isExemptPath(r.URL.Path, exemptPaths) {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			// Extract Authorization header
+			authHeader := r.Header.Get("Authorization")
+
+			// Check if Authorization header is present
+			if authHeader == "" {
+				slog.Warn("missing authorization header",
+					"path", r.URL.Path,
+					"remote_addr", r.RemoteAddr,
+				)
+				respondError(w, http.StatusUnauthorized, "authentication required")
+				return
+			}
+
+			// Parse Bearer token
+			token, err := parseBearerToken(authHeader)
+			if err != nil {
+				slog.Warn("invalid authorization header format",
+					"path", r.URL.Path,
+					"remote_addr", r.RemoteAddr,
+					"error", err.Error(),
+				)
+				respondError(w, http.StatusUnauthorized, "authentication required")
+				return
+			}
+
+			// Validate JWT token
+			_, err = validator.ValidateToken(token)
+			if err != nil {
+				slog.Warn("invalid JWT token",
+					"path", r.URL.Path,
+					"remote_addr", r.RemoteAddr,
+					"error", err.Error(),
+				)
+				respondError(w, http.StatusUnauthorized, "authentication required")
+				return
+			}
+
+			slog.Debug("JWT token validated", "path", r.URL.Path)
+
+			// Token is valid, call the next handler
+			next.ServeHTTP(w, r)
+		})
+	}
+}

@@ -64,6 +64,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jamesprial/go-reddit-api-wrapper/cmd/reddit-server/auth"
 	"github.com/jamesprial/go-reddit-api-wrapper/cmd/reddit-server/config"
 	"github.com/jamesprial/go-reddit-api-wrapper/cmd/reddit-server/handlers"
 	"github.com/jamesprial/go-reddit-api-wrapper/cmd/reddit-server/middleware"
@@ -177,8 +178,55 @@ func main() {
 	h.SetMonitorManager(monitorMgr)
 	logger.Info("monitor manager created")
 
+	// Initialize authentication system if enabled
+	var jwtService handlers.JWTService
+	var authHandlers *handlers.AuthHandlers
+	if cfg.Auth != nil && cfg.Auth.Enabled {
+		// Create user store from configuration
+		users := make([]*auth.User, len(cfg.Auth.Users))
+		for i, userCfg := range cfg.Auth.Users {
+			users[i] = &auth.User{
+				Username:     userCfg.Username,
+				PasswordHash: userCfg.PasswordHash,
+				Role:         userCfg.Role,
+				CreatedAt:    time.Now(),
+			}
+		}
+		authUserStore := auth.NewInMemoryUserStore(users)
+
+		// Create JWT service
+		jwtSvc, err := auth.NewJWTService(cfg.Auth.JWTSecret, "reddit-server")
+		if err != nil {
+			logger.Error("failed to create JWT service", "error", err)
+			exitCode = 1
+			return
+		}
+
+		// Use adapters to implement handlers interfaces
+		handlersUserStore := auth.NewHandlersUserStore(authUserStore)
+		jwtService = auth.NewHandlersJWTService(jwtSvc)
+
+		// Create auth handlers with configured token expiry
+		authHandlers = handlers.NewAuthHandlers(handlersUserStore, jwtService, logger, cfg.Auth.TokenExpiry)
+
+		logger.Info("authentication system initialized",
+			"user_count", len(cfg.Auth.Users),
+			"token_expiry", cfg.Auth.TokenExpiry,
+		)
+	} else {
+		logger.Debug("authentication system disabled")
+	}
+
 	// Setup HTTP router
 	mux := http.NewServeMux()
+
+	// Register auth routes if authentication is enabled
+	if authHandlers != nil {
+		mux.HandleFunc("/api/v1/auth/login", authHandlers.Login)
+		mux.HandleFunc("/api/v1/auth/logout", authHandlers.Logout)
+		mux.HandleFunc("/api/v1/auth/refresh", authHandlers.Refresh)
+		mux.HandleFunc("/api/v1/auth/status", authHandlers.Status)
+	}
 
 	// Register routes
 	mux.HandleFunc("/health", h.Health)
@@ -220,12 +268,49 @@ func main() {
 		http.NotFound(w, r)
 	})
 
-	// Apply middleware stack: APIKey → CORS → Logging → Recovery
+	// Apply middleware stack in order (innermost to outermost):
+	// 1. Recovery - catches panics and returns 500 errors
+	// 2. Logging - logs all requests and responses
+	// 3. CORS - handles cross-origin requests
+	// 4. JWT Auth (if enabled) - primary authentication (validates JWT tokens)
+	// 5. API Key - fallback authentication (for programmatic access)
+	//
+	// Authentication priority:
+	// - If JWT token is present and valid, request is authenticated
+	// - If JWT is missing/invalid, falls through to API key check
+	// - If API key is valid, request is authenticated
+	// - If both fail, request is rejected with 401
+	//
+	// Exempt paths bypass authentication:
+	// - /health: Health check endpoint
+	// - /: Root redirect
+	// - /app/: Static files and frontend application
+	// - /api/v1/auth/login: Login endpoint (needs anonymous access)
+	// - /api/v1/auth/logout: Logout endpoint (accessible with valid JWT)
 	var handler http.Handler = mux
 	handler = middleware.Recovery(logger)(handler)
 	handler = middleware.Logging(logger)(handler)
 	handler = middleware.CORS(cfg.AllowedOrigins)(handler)
-	handler = middleware.APIKey(cfg.APIKeys, []string{"/health", "/", "/app/"})(handler)
+
+	if jwtService != nil {
+		// JWT auth as primary, exempt public endpoints
+		jwtValidator := &jwtValidatorAdapter{jwtService: jwtService}
+		handler = middleware.JWTAuth(jwtValidator, []string{
+			"/health",
+			"/",
+			"/app/",
+			"/api/v1/auth/login",
+			"/api/v1/auth/logout",
+		})(handler)
+	}
+
+	// API key as fallback for programmatic access (applied after JWT)
+	handler = middleware.APIKey(cfg.APIKeys, []string{
+		"/health",
+		"/",
+		"/app/",
+		"/api/v1/auth/", // All auth endpoints accessible with API key
+	})(handler)
 
 	// Create HTTP server
 	addr := fmt.Sprintf(":%d", cfg.Port)
@@ -242,7 +327,12 @@ func main() {
 	// Start server in a goroutine
 	serverErrors := make(chan error, 1)
 	go func() {
-		logger.Info("starting HTTP server", "addr", addr, "port", cfg.Port)
+		authEnabled := cfg.Auth != nil && cfg.Auth.Enabled
+		logger.Info("starting HTTP server",
+			"addr", addr,
+			"port", cfg.Port,
+			"auth_enabled", authEnabled,
+		)
 		serverErrors <- srv.ListenAndServe()
 	}()
 
@@ -497,4 +587,22 @@ func createRedditClient(cfg *config.Config) (*graw.Reddit, error) {
 	}
 
 	return client, nil
+}
+
+// jwtValidatorAdapter adapts handlers.JWTService to middleware.JWTAuthValidator interface
+// by converting the return type from *handlers.UserData to interface{}.
+type jwtValidatorAdapter struct {
+	jwtService handlers.JWTService
+}
+
+// ValidateToken validates a JWT token and returns nil for valid tokens, error otherwise.
+// This implements the middleware.JWTAuthValidator interface.
+func (a *jwtValidatorAdapter) ValidateToken(tokenString string) (interface{}, error) {
+	// JWTService.ValidateToken returns (*handlers.UserData, error)
+	// We need to return (interface{}, error) for the middleware
+	userData, err := a.jwtService.ValidateToken(tokenString)
+	if err != nil {
+		return nil, err
+	}
+	return userData, nil
 }

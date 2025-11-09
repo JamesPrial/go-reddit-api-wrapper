@@ -1,0 +1,308 @@
+# JWT User Authentication Configuration
+# Copy this file to users.yaml and customize as needed
+# This file defines user accounts for JWT-based authentication on the admin panel
+
+# JWT Secret Key
+# Used to sign and verify JWT tokens. Keep this secret and secure!
+# If empty, a random 32-byte secret will be auto-generated on startup
+# Can also be set via JWT_SECRET environment variable (overrides this setting)
+#
+# To generate a strong secret manually:
+#   - Linux/macOS: openssl rand -hex 64
+#   - Windows PowerShell: -join ((48..57) + (65..70) + (97..102) | Get-Random -Count 128 | ForEach-Object {[char]$_})
+#   - Go: hex.EncodeToString(buf)
+jwt_secret: ""
+
+# Token Expiry Duration
+# How long JWT tokens remain valid after issuance before requiring re-authentication
+# Format: Go duration string (e.g., "1h", "24h", "1h30m", "30m")
+# Default: 24h
+# Minimum: 15m (prevents excessive re-authentication)
+# Maximum: 720h (30 days - prevents indefinite token validity)
+#
+# Examples:
+#   - 30m: 30 minutes (short-lived, frequent re-auth required)
+#   - 1h: 1 hour (balanced security and convenience)
+#   - 8h: 8 hours (typical work day)
+#   - 24h: 24 hours (one day, default)
+#   - 7d: 7 days (one week)
+token_expiry: "24h"
+
+# User Accounts for Admin Panel Access
+# Define users who can authenticate to the dashboard and access protected endpoints
+# Each user requires: username, password_hash, and role assignment
+users:
+  # Example: Admin user with full access
+  - username: admin
+    # Password Hash (bcrypt format with cost 12)
+    # IMPORTANT: This is an example hash for password "admin123" - CHANGE THIS!
+    # DO NOT use the example hash in production - generate your own (see instructions below)
+    #
+    # How to generate a bcrypt hash:
+    #
+    # Method 1 - Using htpasswd (Apache tool, usually pre-installed):
+    #   htpasswd -nBC 12 "" your-password | cut -d: -f2
+    #   Example: htpasswd -nBC 12 "" mySecurePass123! | cut -d: -f2
+    #
+    # Method 2 - Using Go one-liner:
+    #   go run -
+    #   package main
+    #   import ("fmt"; "golang.org/x/crypto/bcrypt")
+    #   func main() {
+    #       hash, _ := bcrypt.GenerateFromPassword([]byte("your-password"), 12)
+    #       fmt.Println(string(hash))
+    #   }
+    #   ^D (Ctrl+D to send EOF)
+    #
+    # Method 3 - Using Python (if available):
+    #   python3 << 'EOF'
+    #   import bcrypt
+    #   password = b"your-password"
+    #   hashed = bcrypt.hashpw(password, bcrypt.gensalt(rounds=12))
+    #   print(hashed.decode())
+    #   EOF
+    #
+    # Method 4 - Using Node.js (if available):
+    #   node -e "require('bcrypt').hash('your-password', 12, (err, hash) => console.log(hash))"
+    #
+    # SECURITY NOTES:
+    # - Bcrypt cost factor must be 10-14 (12 is recommended)
+    # - Higher cost = more secure but slower (use 12-13)
+    # - Lower cost = faster but less secure against attacks
+    # - Never store plain text passwords!
+    # - Each password should have a unique hash (different salt)
+    password_hash: "$2a$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5GyYzpLhvOhfa"
+
+    # User Role - determines permissions and capabilities
+    # Supported roles:
+    #   admin: Full access to all endpoints (read, write, execute, delete)
+    #   viewer: Read-only access (GET endpoints only, no modifications)
+    role: admin
+
+  # Example: Viewer user with read-only access
+  # Uncomment and customize to add this user
+  # - username: viewer
+  #   password_hash: "$2a$12$EXAMPLE_HASH_REPLACE_WITH_REAL_HASH"
+  #   role: viewer
+
+  # Example: Analyst user with read access to reports
+  # - username: analyst
+  #   password_hash: "$2a$12$EXAMPLE_HASH_REPLACE_WITH_REAL_HASH"
+  #   role: viewer
+
+# ==============================================================================
+# SECURITY BEST PRACTICES
+# ==============================================================================
+
+# 1. JWT Secret Management
+#    - Generate a cryptographically secure random secret (32+ bytes)
+#    - Store the secret securely (use environment variables in production)
+#    - Never commit the secret to version control
+#    - Rotate secrets periodically (invalidates all existing tokens)
+#    - Use different secrets for development, staging, and production
+
+# 2. Password Security
+#    - Require strong passwords (12+ characters minimum)
+#    - Combine uppercase, lowercase, numbers, and special characters
+#    - Never use default or example passwords in production
+#    - Never store plain text passwords - always hash with bcrypt
+#    - Use bcrypt cost factor 12 or higher (slower = more secure)
+#    - Regenerate hashes for all users when rotating security policies
+
+# 3. File Permissions and Access Control
+#    - Restrict file permissions: chmod 600 users.yaml
+#    - Only the application process should read this file
+#    - Ensure parent directory (cmd/reddit-server/) is not world-readable
+#    - In production, consider storing in a secure vault (HashiCorp Vault, AWS Secrets Manager)
+#    - Use a configuration management system to prevent accidental commits
+
+# 4. Role-Based Access Control (RBAC)
+#    - Assign the minimum required role to each user
+#    - Review and audit user permissions regularly
+#    - Remove inactive accounts promptly
+#    - Use separate accounts for different purposes
+#    - Never share user credentials between team members
+
+# 5. Token Management
+#    - Set token expiry to reasonable values (1-24 hours typical)
+#    - Shorter expiry = more secure but requires more frequent re-authentication
+#    - Longer expiry = more convenient but security risk if token is compromised
+#    - Consider sliding window expiry (auto-refresh on use)
+#    - Monitor and log all failed authentication attempts
+
+# 6. Deployment and Environment Variables
+#    - In production, use environment variables instead of files
+#    - Set JWT_SECRET as an environment variable (overrides file value)
+#    - Use secrets management service for credential distribution
+#    - Never commit this file with real credentials to git
+#    - Add 'users.yaml' and 'users-*.yaml' to .gitignore
+
+# ==============================================================================
+# ENVIRONMENT VARIABLE CONFIGURATION
+# ==============================================================================
+
+# For production deployments, use environment variables instead of files:
+#
+# export JWT_SECRET="$(openssl rand -hex 64)"  # Hex-encoded 64-byte secret
+# export TOKEN_EXPIRY="24h"
+# export USERS='[
+#   {
+#     "username":"admin",
+#     "password_hash":"$2a$12$...",
+#     "role":"admin"
+#   },
+#   {
+#     "username":"viewer",
+#     "password_hash":"$2a$12$...",
+#     "role":"viewer"
+#   }
+# ]'
+
+# ==============================================================================
+# MIGRATION FROM API KEY TO JWT AUTHENTICATION
+# ==============================================================================
+
+# If migrating from API key authentication:
+# 1. Ensure JWT configuration is properly set up in config.yaml or via env vars
+# 2. Deploy both API key and JWT authentication initially (backward compatibility)
+# 3. Gradually migrate clients to use JWT tokens
+# 4. Monitor usage of API key authentication
+# 5. Once API keys are no longer used, disable the middleware
+# 6. Remove API keys from configuration entirely
+#
+# JWT provides better user management and granular permissions compared to
+# global API key authentication.
+
+# ==============================================================================
+# TROUBLESHOOTING AND COMMON ISSUES
+# ==============================================================================
+
+# Issue: "invalid password hash format"
+#   Solution: Ensure password hashes start with "$2a$", "$2b$", or "$2y$"
+#             and are valid bcrypt format (60 characters for cost 10-12)
+
+# Issue: "token expired"
+#   Solution: Adjust token_expiry to a longer duration in this file
+#             or set TOKEN_EXPIRY environment variable
+
+# Issue: "authentication required"
+#   Solution: Verify JWT secret matches between client and server
+#             Check Authorization header format: "Bearer <token>"
+#             Verify user account exists and role is correctly assigned
+
+# Issue: "role does not have permission"
+#   Solution: Verify user has the required role for the endpoint
+#             Check endpoint documentation for required permissions
+#             Consider upgrading user to admin role if appropriate
+
+# Issue: "YAML parsing error"
+#   Solution: Check YAML syntax - use a YAML linter
+#             Verify indentation (use spaces, not tabs)
+#             Ensure quoted strings for special characters
+#             Check file encoding is UTF-8
+
+# ==============================================================================
+# ROLE PERMISSIONS REFERENCE
+# ==============================================================================
+
+# admin: Full Administrative Access
+#   - All GET endpoints (read data)
+#   - All POST endpoints (create/modify data)
+#   - All DELETE endpoints (remove data)
+#   - Admin panel features (user management, settings)
+#   - Sensitive logs and diagnostics
+#   - Configuration changes
+#
+# viewer: Read-Only Access
+#   - All GET endpoints (read data)
+#   - Dashboard and reports
+#   - History and logs (read-only)
+#   - Statistics and analytics
+#   - Cannot modify or delete any data
+#   - Cannot access admin panel
+#   - Cannot change configuration
+
+# ==============================================================================
+# EXAMPLES: CREATING MULTIPLE USERS
+# ==============================================================================
+
+# Example 1: Team with different roles
+# users:
+#   - username: sarah_admin
+#     password_hash: "$2a$12$..." # Sarah has admin access
+#     role: admin
+#   - username: john_viewer
+#     password_hash: "$2a$12$..." # John can only view reports
+#     role: viewer
+#   - username: mike_analyst
+#     password_hash: "$2a$12$..." # Mike can analyze data
+#     role: viewer
+
+# Example 2: Service account for automation
+# users:
+#   - username: monitoring_service
+#     password_hash: "$2a$12$..." # Service account for monitoring
+#     role: viewer
+#   - username: backup_admin
+#     password_hash: "$2a$12$..." # Service account for backups
+#     role: admin
+
+# Example 3: Development team
+# users:
+#   - username: dev1
+#     password_hash: "$2a$12$..." # Developer 1
+#     role: admin
+#   - username: dev2
+#     password_hash: "$2a$12$..." # Developer 2
+#     role: admin
+#   - username: qa_user
+#     password_hash: "$2a$12$..." # QA tester
+#     role: viewer
+
+# ==============================================================================
+# VALIDATION RULES
+# ==============================================================================
+
+# Username Requirements:
+#   - Minimum 3 characters, maximum 64 characters
+#   - Alphanumeric characters, hyphens, underscores only
+#   - Must be unique (no duplicate usernames)
+#   - Case-sensitive (admin != Admin)
+
+# Password Hash Requirements:
+#   - Must be valid bcrypt format (60+ characters)
+#   - Must start with $2a$, $2b$, or $2y$
+#   - Cost factor must be between 10-14
+#   - Invalid or empty hashes will cause authentication to fail
+
+# Role Requirements:
+#   - Must be one of: "admin" or "viewer"
+#   - Other values will cause configuration validation errors
+#   - Case-sensitive (admin != Admin)
+
+# Token Expiry Requirements:
+#   - Valid Go duration format (e.g., "1h", "30m", "24h")
+#   - Minimum: 15 minutes
+#   - Maximum: 720 hours (30 days)
+#   - Empty value defaults to 24h
+
+# ==============================================================================
+# TESTING YOUR CONFIGURATION
+# ==============================================================================
+
+# 1. Validate YAML syntax:
+#    go run ./cmd/reddit-server validate-config
+#
+# 2. Test user authentication locally:
+#    curl -X POST http://localhost:8080/api/auth/login \
+#      -H "Content-Type: application/json" \
+#      -d '{"username":"admin","password":"admin123"}'
+#
+# 3. Verify JWT token:
+#    curl -X GET http://localhost:8080/api/v1/user/me \
+#      -H "Authorization: Bearer <your-jwt-token>"
+#
+# 4. Check user permissions:
+#    # Make API calls and verify role-based access control
+
+# ==============================================================================

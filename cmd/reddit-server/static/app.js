@@ -12,40 +12,57 @@
 // Configuration
 const CONFIG = {
   API_BASE_URL: window.location.origin,
-  API_KEY_STORAGE: 'reddit_api_key',
+  JWT_TOKEN_STORAGE: 'jwt_token',
+  JWT_EXPIRES_STORAGE: 'jwt_expires_at',
+  USER_INFO_STORAGE: 'user_info',
   REQUEST_TIMEOUT: 30000, // 30 seconds
   MAX_RETRIES: 3,
 };
 
 /**
- * Storage Management
+ * Authentication State Management
  */
+const auth = {
+  token: localStorage.getItem(CONFIG.JWT_TOKEN_STORAGE),
+  expiresAt: localStorage.getItem(CONFIG.JWT_EXPIRES_STORAGE),
+  user: JSON.parse(localStorage.getItem(CONFIG.USER_INFO_STORAGE) || 'null'),
 
-/**
- * Saves the API key to localStorage.
- * @param {string} key - The API key to save
- */
-function saveApiKey(key) {
-  if (!key || typeof key !== 'string') {
-    throw new Error('Invalid API key');
+  /**
+   * Check if the user is authenticated with a valid token
+   * @returns {boolean} True if authenticated and token not expired
+   */
+  isAuthenticated() {
+    if (!this.token || !this.expiresAt) return false;
+    return new Date(this.expiresAt) > new Date();
+  },
+
+  /**
+   * Set authentication data in memory and localStorage
+   * @param {string} token - JWT token
+   * @param {string} expiresAt - ISO 8601 expiration timestamp
+   * @param {object} user - User information object
+   */
+  setAuth(token, expiresAt, user) {
+    this.token = token;
+    this.expiresAt = expiresAt;
+    this.user = user;
+    localStorage.setItem(CONFIG.JWT_TOKEN_STORAGE, token);
+    localStorage.setItem(CONFIG.JWT_EXPIRES_STORAGE, expiresAt);
+    localStorage.setItem(CONFIG.USER_INFO_STORAGE, JSON.stringify(user));
+  },
+
+  /**
+   * Clear authentication data from memory and localStorage
+   */
+  clearAuth() {
+    this.token = null;
+    this.expiresAt = null;
+    this.user = null;
+    localStorage.removeItem(CONFIG.JWT_TOKEN_STORAGE);
+    localStorage.removeItem(CONFIG.JWT_EXPIRES_STORAGE);
+    localStorage.removeItem(CONFIG.USER_INFO_STORAGE);
   }
-  localStorage.setItem(CONFIG.API_KEY_STORAGE, key.trim());
-}
-
-/**
- * Retrieves the API key from localStorage.
- * @returns {string|null} The stored API key, or null if not found
- */
-function getApiKey() {
-  return localStorage.getItem(CONFIG.API_KEY_STORAGE);
-}
-
-/**
- * Clears the API key from localStorage.
- */
-function clearApiKey() {
-  localStorage.removeItem(CONFIG.API_KEY_STORAGE);
-}
+};
 
 /**
  * HTTP Request Handling
@@ -83,7 +100,16 @@ async function makeRequest(url, options = {}) {
     headers: customHeaders = {},
   } = options;
 
-  const apiKey = getApiKey();
+  // Auto-refresh token if expiring soon
+  if (shouldRefreshToken()) {
+    try {
+      await refreshToken();
+    } catch (error) {
+      console.error('Auto token refresh failed:', error);
+      // Continue with existing token, will fail with 401 if truly expired
+    }
+  }
+
   const fullUrl = CONFIG.API_BASE_URL + url;
 
   const { controller, timeoutId } = createAbortTimeout(CONFIG.REQUEST_TIMEOUT);
@@ -95,9 +121,10 @@ async function makeRequest(url, options = {}) {
       ...customHeaders,
     };
 
-    // Add API key header if available and not overridden
-    if (apiKey && !customHeaders['X-API-Key'] && !customHeaders['Authorization']) {
-      headers['Authorization'] = 'Bearer ' + apiKey;
+    // Add JWT token header if authenticated and not overridden
+    const token = auth.token;
+    if (token && auth.isAuthenticated()) {
+      headers['Authorization'] = 'Bearer ' + token;
     }
 
     const fetchOptions = {
@@ -112,10 +139,10 @@ async function makeRequest(url, options = {}) {
 
     const response = await fetch(fullUrl, fetchOptions);
 
-    // Handle 401 - clear stored API key for re-authentication
+    // Handle 401 - clear auth and require login
     if (response.status === 401) {
-      clearApiKey();
-      throw new Error('Authentication required. Please provide a valid API key.');
+      auth.clearAuth();
+      throw new Error('Authentication required. Please log in again.');
     }
 
     // Handle rate limiting
@@ -188,15 +215,116 @@ async function makeRequest(url, options = {}) {
  */
 
 /**
+ * Login with username and password to obtain JWT token.
+ * @param {string} username - The username
+ * @param {string} password - The password
+ * @returns {Promise<object>} Authentication response with token, expires_at, and user info
+ * @throws {Error} If login fails
+ */
+async function login(username, password) {
+  try {
+    const response = await fetch(CONFIG.API_BASE_URL + '/api/v1/auth/login', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      body: JSON.stringify({ username, password }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => null);
+      throw new Error(error?.error || 'Login failed');
+    }
+
+    const data = await response.json();
+    auth.setAuth(data.token, data.expires_at, data.user);
+
+    return data;
+  } catch (error) {
+    console.error('Login error:', error);
+    throw error;
+  }
+}
+
+/**
+ * Logout and clear authentication data.
+ * @returns {Promise<void>}
+ */
+async function logout() {
+  try {
+    if (auth.isAuthenticated()) {
+      await fetch(CONFIG.API_BASE_URL + '/api/v1/auth/logout', {
+        method: 'POST',
+        headers: {
+          'Authorization': 'Bearer ' + auth.token,
+        },
+      });
+    }
+  } catch (error) {
+    console.error('Logout error:', error);
+  } finally {
+    auth.clearAuth();
+  }
+}
+
+/**
+ * Refresh the JWT token to extend the session.
+ * @returns {Promise<object>} New authentication data
+ * @throws {Error} If token refresh fails
+ */
+async function refreshToken() {
+  try {
+    const response = await fetch(CONFIG.API_BASE_URL + '/api/v1/auth/refresh', {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + auth.token,
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error('Token refresh failed');
+    }
+
+    const data = await response.json();
+    auth.setAuth(data.token, data.expires_at, auth.user);
+
+    return data;
+  } catch (error) {
+    console.error('Token refresh error:', error);
+    auth.clearAuth();
+    throw error;
+  }
+}
+
+/**
+ * Check if token needs refresh (expires in <5 minutes)
+ * @returns {boolean} True if token should be refreshed
+ */
+function shouldRefreshToken() {
+  if (!auth.isAuthenticated()) return false;
+  if (!auth.expiresAt) return false;
+
+  const expiresAt = new Date(auth.expiresAt);
+  const now = new Date();
+  const expiresInMs = expiresAt - now;
+  const fiveMinutes = 5 * 60 * 1000;
+
+  return expiresInMs > 0 && expiresInMs < fiveMinutes;
+}
+
+/**
  * Checks if the provided API key is valid by making a test request.
+ * @deprecated Use login() instead for JWT authentication
  * @param {string} apiKey - The API key to validate
  * @returns {Promise<boolean>} True if the key is valid, false otherwise
  */
 async function checkAuth(apiKey) {
   try {
     // Temporarily set the key to test it
-    const originalKey = getApiKey();
-    saveApiKey(apiKey);
+    const originalToken = auth.token;
+    auth.token = apiKey;
+    localStorage.setItem(CONFIG.JWT_TOKEN_STORAGE, apiKey);
 
     // Try to fetch user info to validate the key
     const response = await makeRequest('/api/v1/user/me', {
@@ -205,11 +333,12 @@ async function checkAuth(apiKey) {
 
     return !!response;
   } catch (error) {
-    // Restore original key on failure
-    if (originalKey) {
-      saveApiKey(originalKey);
+    // Restore original token on failure
+    if (originalToken) {
+      auth.token = originalToken;
+      localStorage.setItem(CONFIG.JWT_TOKEN_STORAGE, originalToken);
     } else {
-      clearApiKey();
+      auth.clearAuth();
     }
     return false;
   }
@@ -863,13 +992,9 @@ async function startMonitor(config) {
     throw new Error('fetch_comments must be a boolean value.');
   }
 
-  const apiKey = getApiKey();
   return makeRequest('/api/v1/monitor/start', {
     method: 'POST',
     body: config,
-    headers: {
-      'X-API-Key': apiKey,
-    },
   });
 }
 
@@ -878,12 +1003,8 @@ async function startMonitor(config) {
  * @returns {Promise<Object>} Final status with stats
  */
 async function stopMonitor() {
-  const apiKey = getApiKey();
   return makeRequest('/api/v1/monitor/stop', {
     method: 'POST',
-    headers: {
-      'X-API-Key': apiKey,
-    },
   });
 }
 
@@ -892,12 +1013,8 @@ async function stopMonitor() {
  * @returns {Promise<Object>} Status object (running or stopped)
  */
 async function getMonitorStatus() {
-  const apiKey = getApiKey();
   return makeRequest('/api/v1/monitor/status', {
     method: 'GET',
-    headers: {
-      'X-API-Key': apiKey,
-    },
   });
 }
 
@@ -959,15 +1076,18 @@ function createState(initialValue) {
  * All API functions are accessible as window.api.*
  */
 window.api = {
-  // LocalStorage
-  saveApiKey: saveApiKey,
-  getApiKey: getApiKey,
-  clearApiKey: clearApiKey,
+  // Authentication state
+  auth: auth,
 
   // Request utilities
   makeRequest: makeRequest,
 
-  // Authentication
+  // JWT Authentication
+  login: login,
+  logout: logout,
+  refreshToken: refreshToken,
+
+  // Authentication (deprecated - use login instead)
   checkAuth: checkAuth,
   getCurrentUser: getCurrentUser,
 

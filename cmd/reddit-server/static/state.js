@@ -21,8 +21,10 @@ function appState() {
     PAGE_SIZE: 25,
 
     // ========== Authentication State ==========
-    apiKey: '',
+    username: '',
+    password: '',
     authenticated: false,
+    user: null,
 
     // ========== Navigation State ==========
     view: 'posts', // 'posts' | 'comments' | 'saved' | 'bulk'
@@ -120,24 +122,26 @@ function appState() {
 
     /**
      * Initialize the application
-     * Loads API key from localStorage, checks authentication, and loads statistics
+     * Checks for existing JWT token, validates it, and loads statistics
      */
     async initApp() {
       try {
-        const savedKey = window.api.getApiKey();
-        if (savedKey) {
-          this.apiKey = savedKey;
-          // Check if the saved key is still valid
-          const isValid = await window.api.checkAuth(savedKey);
-          if (isValid) {
+        // Check if user has valid JWT token
+        if (window.api.auth.isAuthenticated()) {
+          // Token exists and not expired - verify it's still valid
+          try {
+            const user = await window.api.getCurrentUser();
             this.authenticated = true;
+            this.user = window.api.auth.user || user;
             await this.loadStorageStats();
             // Load monitor status on startup (show errors if it fails)
             await this.loadMonitorStatus(false);
-          } else {
+          } catch (err) {
+            // Token invalid or expired - clear auth
+            window.api.auth.clearAuth();
             this.authenticated = false;
-            window.api.clearApiKey();
-            this.showError('Saved API key is no longer valid. Please authenticate again.');
+            this.user = null;
+            this.showError('Your session has expired. Please log in again.');
           }
         }
       } catch (err) {
@@ -148,12 +152,16 @@ function appState() {
     // ========== AUTHENTICATION ==========
 
     /**
-     * Authenticate with the provided API key
-     * Saves key to localStorage and validates it with the server
+     * Authenticate with username and password to obtain JWT token
      */
     async authenticate() {
-      if (!this.apiKey || !this.apiKey.trim()) {
-        this.showError('Please enter an API key');
+      if (!this.username || !this.username.trim()) {
+        this.showError('Please enter a username');
+        return;
+      }
+
+      if (!this.password || !this.password.trim()) {
+        this.showError('Please enter a password');
         return;
       }
 
@@ -162,20 +170,15 @@ function appState() {
       this.success = '';
 
       try {
-        const trimmedKey = this.apiKey.trim();
-        const isValid = await window.api.checkAuth(trimmedKey);
+        const result = await window.api.login(this.username.trim(), this.password);
 
-        if (!isValid) {
-          this.showError('Invalid API key. Please check and try again.');
-          return;
-        }
-
-        window.api.saveApiKey(trimmedKey);
         this.authenticated = true;
-        this.showSuccess('Authentication successful!');
+        this.user = result.user;
+        this.password = ''; // Clear password from memory
+        this.showSuccess('Login successful!');
         await this.loadStorageStats();
       } catch (err) {
-        this.showError('Authentication failed: ' + err.message);
+        this.showError('Login failed: ' + err.message);
       } finally {
         this.loading = false;
       }
@@ -184,11 +187,13 @@ function appState() {
     /**
      * Logout and clear all authentication data
      */
-    logout() {
-      if (confirm('Are you sure you want to logout? Your API key will be removed.')) {
-        window.api.clearApiKey();
-        this.apiKey = '';
+    async logout() {
+      if (confirm('Are you sure you want to logout?')) {
+        await window.api.logout();
+        this.username = '';
+        this.password = '';
         this.authenticated = false;
+        this.user = null;
         this.posts = [];
         this.comments = [];
         this.selectedPosts.clear();

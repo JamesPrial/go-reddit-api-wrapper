@@ -38,6 +38,9 @@ type Config struct {
 	// CORS configuration
 	AllowedOrigins []string // CORS allowed origins (from ALLOWED_ORIGINS, comma-separated)
 
+	// Authentication configuration
+	Auth *AuthConfig // JWT authentication configuration (optional, from AUTH_* environment variables)
+
 	// Storage configuration
 	StorageDSN          string // Database connection string (from STORAGE_DSN, default: ~/.local/share/reddit-server/reddit.db)
 	StorageMaxOpenConns int    // Maximum open database connections (from STORAGE_MAX_OPEN_CONNS, default: 10)
@@ -76,6 +79,13 @@ type Config struct {
 //   - LOG_LEVEL: Log level (default: "info", valid: "debug", "info", "warn", "error")
 //   - LOG_FORMAT: Log format (default: "json", valid: "json", "text")
 //   - LOG_FILE: Log file path (default: "" - empty means stderr only, must be absolute path if provided)
+//
+// Authentication Configuration (optional, only loaded if AUTH_ENABLED=true or "1"):
+//   - AUTH_ENABLED: Enable JWT authentication (default: false)
+//   - JWT_SECRET: Secret key for JWT signing (hex-encoded, auto-generated if empty, min 32 bytes)
+//   - TOKEN_EXPIRY: JWT token expiry duration (default: 24h, range: 1h-30d)
+//   - USERS: JSON array of user objects with username, password_hash, and role
+//     Example: [{"username":"admin","password_hash":"$2a$12$...","role":"admin"}]
 //
 // Returns the config, a generated API key (if one was auto-generated), and an error if any required fields are missing or invalid.
 // If API_KEYS is empty, a secure random API key is generated and stored in Config.APIKeys.
@@ -282,6 +292,13 @@ func Load() (*Config, string, error) {
 		}
 	}
 
+	// Load authentication configuration only if explicitly enabled
+	authCfg, err := LoadAuthConfig()
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to load auth config: %w", err)
+	}
+	cfg.Auth = authCfg
+
 	return cfg, generatedKey, nil
 }
 
@@ -463,6 +480,13 @@ func (c *Config) Validate() error {
 		// Ensure LogFile itself is not a directory
 		if info, err := os.Stat(c.LogFile); err == nil && info.IsDir() {
 			errs = append(errs, fmt.Errorf("log file %q is a directory, not a file", c.LogFile))
+		}
+	}
+
+	// Validate authentication configuration
+	if c.Auth != nil {
+		if err := c.Auth.Validate(); err != nil {
+			errs = append(errs, fmt.Errorf("auth config validation failed: %w", err))
 		}
 	}
 

@@ -16,22 +16,23 @@ import (
 // This uses a flat structure (no nesting) for simplicity.
 // Numeric fields use pointers to distinguish between "not set" (nil) and "explicitly set to zero" (non-nil).
 type fileConfig struct {
-	Port                *int     `yaml:"port"`
-	ShutdownTimeout     string   `yaml:"shutdown_timeout"` // Duration string (e.g., "30s", "1m")
-	RequestTimeout      string   `yaml:"request_timeout"`  // Duration string (e.g., "30s", "1m")
-	RedditClientID      string   `yaml:"reddit_client_id"`
-	RedditClientSecret  string   `yaml:"reddit_client_secret"`
-	RedditUsername      string   `yaml:"reddit_username"`
-	RedditPassword      string   `yaml:"reddit_password"`
-	RedditUserAgent     string   `yaml:"reddit_user_agent"`
-	APIKeys             []string `yaml:"api_keys"`
-	AllowedOrigins      []string `yaml:"allowed_origins"`
-	StorageDSN          string   `yaml:"storage_dsn"`
-	StorageMaxOpenConns *int     `yaml:"storage_max_open_conns"`
-	StorageMaxIdleConns *int     `yaml:"storage_max_idle_conns"`
-	LogLevel            string   `yaml:"log_level"`
-	LogFormat           string   `yaml:"log_format"`
-	LogFile             string   `yaml:"log_file"`
+	Port                *int            `yaml:"port"`
+	ShutdownTimeout     string          `yaml:"shutdown_timeout"` // Duration string (e.g., "30s", "1m")
+	RequestTimeout      string          `yaml:"request_timeout"`  // Duration string (e.g., "30s", "1m")
+	RedditClientID      string          `yaml:"reddit_client_id"`
+	RedditClientSecret  string          `yaml:"reddit_client_secret"`
+	RedditUsername      string          `yaml:"reddit_username"`
+	RedditPassword      string          `yaml:"reddit_password"`
+	RedditUserAgent     string          `yaml:"reddit_user_agent"`
+	APIKeys             []string        `yaml:"api_keys"`
+	AllowedOrigins      []string        `yaml:"allowed_origins"`
+	StorageDSN          string          `yaml:"storage_dsn"`
+	StorageMaxOpenConns *int            `yaml:"storage_max_open_conns"`
+	StorageMaxIdleConns *int            `yaml:"storage_max_idle_conns"`
+	LogLevel            string          `yaml:"log_level"`
+	LogFormat           string          `yaml:"log_format"`
+	LogFile             string          `yaml:"log_file"`
+	Auth                *fileAuthConfig `yaml:"auth"`
 }
 
 // LoadFromFile reads a YAML configuration file and returns a Config with defaults applied.
@@ -209,6 +210,14 @@ func fileConfigToConfig(fileCfg *fileConfig, configPath string) (*Config, error)
 		} else {
 			cfg.LogFile = fileCfg.LogFile
 		}
+	}
+
+	// Authentication configuration
+	authCfg, err := LoadAuthConfigFromFile(fileCfg.Auth)
+	if err != nil {
+		errs = append(errs, fmt.Errorf("invalid auth configuration: %w", err))
+	} else {
+		cfg.Auth = authCfg
 	}
 
 	if len(errs) > 0 {

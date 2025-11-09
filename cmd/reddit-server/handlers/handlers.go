@@ -5,12 +5,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
 	"sync"
 
+	"github.com/jamesprial/go-reddit-api-wrapper/cmd/reddit-server/middleware"
 	"github.com/jamesprial/go-reddit-api-wrapper/cmd/reddit-server/monitor"
 	"github.com/jamesprial/go-reddit-api-wrapper/pkg/types"
 	graw "github.com/jamesprial/go-reddit-api-wrapper/reddit"
@@ -230,5 +232,76 @@ func parsePagination(r *http.Request) types.Pagination {
 		Limit:  limit,
 		After:  query.Get("after"),
 		Before: query.Get("before"),
+	}
+}
+
+// GetUserFromContext extracts user information from the request context.
+// Returns username, role, and ok boolean indicating if user was found.
+//
+// This is a convenience wrapper around the middleware.GetUserFromContext function
+// that provides the same functionality. Use this in handlers to access authenticated user info
+// that was injected by JWT or other authentication middleware.
+//
+// Example:
+//
+//	username, role, ok := GetUserFromContext(r)
+//	if !ok {
+//		respondError(w, http.StatusUnauthorized, "authentication required")
+//		return
+//	}
+func GetUserFromContext(r *http.Request) (username string, role string, ok bool) {
+	return middleware.GetUserFromContext(r)
+}
+
+// IsAuthenticated checks if the request has an authenticated user.
+// Returns true if both username and role are present in the context.
+//
+// This is useful for quick checks before accessing user context values.
+func IsAuthenticated(r *http.Request) bool {
+	_, _, ok := GetUserFromContext(r)
+	return ok
+}
+
+// RequireRole checks if the user has the required role.
+// Returns an error if the user is not authenticated or doesn't have sufficient permissions.
+//
+// Role hierarchy: admin can access all endpoints that require any role.
+// A specific role requirement (e.g., "admin", "viewer") must match exactly,
+// unless the user has a higher privilege level (as defined in middleware.hasRequiredRole).
+//
+// Usage in handlers:
+//
+//	if err := RequireRole(r, "admin"); err != nil {
+//		respondError(w, http.StatusForbidden, err.Error())
+//		return
+//	}
+func RequireRole(r *http.Request, requiredRole string) error {
+	username, role, ok := GetUserFromContext(r)
+	if !ok {
+		return fmt.Errorf("user not authenticated")
+	}
+
+	// Admin role can access everything
+	if role == "admin" {
+		return nil
+	}
+
+	// Check for exact role match
+	if role == requiredRole {
+		return nil
+	}
+
+	return fmt.Errorf("insufficient permissions: user %s has role %s, requires %s",
+		username, role, requiredRole)
+}
+
+// SetUserHeaders adds user information to response headers for debugging purposes.
+// Only use this in development/debug mode to avoid exposing user details in production.
+// Adds X-Auth-User and X-Auth-Role headers if user is authenticated.
+func SetUserHeaders(w http.ResponseWriter, r *http.Request) {
+	username, role, ok := GetUserFromContext(r)
+	if ok {
+		w.Header().Set("X-Auth-User", username)
+		w.Header().Set("X-Auth-Role", role)
 	}
 }

@@ -17,17 +17,19 @@
                 <h1>Reddit API Browser</h1>
                 <div class="auth-status">
                     <template x-if="authenticated">
-                        <span class="status-badge status-authenticated">
-                            <span class="status-dot"></span>
-                            Authenticated
-                        </span>
-                        <div class="stats-badges">
-                            <span class="status-badge" x-text="`📝 ${stats.postCount} posts`"></span>
-                            <span class="status-badge" x-text="`💬 ${stats.commentCount} comments`"></span>
+                        <div style="display: flex; align-items: center; gap: 0.75rem;">
+                            <span class="status-badge status-authenticated">
+                                <span class="status-dot"></span>
+                                <span x-text="`Logged in as: ${user?.username || 'user'}`"></span>
+                            </span>
+                            <div class="stats-badges">
+                                <span class="status-badge" x-text="`📝 ${stats.postCount} posts`"></span>
+                                <span class="status-badge" x-text="`💬 ${stats.commentCount} comments`"></span>
+                            </div>
+                            <button @click="logout()" class="btn-logout">Logout</button>
+                            <span style="margin: 0 0.5rem; border-left: 1px solid rgba(255,255,255,0.3); height: 1.5rem; display: inline-block;"></span>
+                            <button @click="shutdown()" :disabled="loading" class="btn-shutdown">⏹ Shutdown Server</button>
                         </div>
-                        <button @click="logout()" class="btn-logout">Logout</button>
-                        <span style="margin: 0 0.5rem; border-left: 1px solid rgba(255,255,255,0.3); height: 1.5rem; display: inline-block;"></span>
-                        <button @click="shutdown()" :disabled="loading" class="btn-shutdown">⏹ Shutdown Server</button>
                     </template>
                     <template x-if="!authenticated">
                         <span class="status-badge status-unauthenticated">
@@ -75,24 +77,37 @@
                 </div>
             </template>
 
-            <!-- API Key Section (shown when not authenticated) -->
+            <!-- Login Form (shown when not authenticated) -->
             <template x-if="!authenticated">
                 <section class="auth-section">
-                    <h2>API Authentication</h2>
+                    <h2>Login to Reddit Server</h2>
+                    <p>Please enter your credentials to access the admin panel</p>
                     <form @submit.prevent="authenticate()" class="auth-form">
                         <div class="form-group">
-                            <label for="apiKeyInput">API Key</label>
+                            <label for="usernameInput">Username</label>
                             <input
-                                id="apiKeyInput"
-                                type="password"
-                                x-model="apiKey"
-                                placeholder="Enter your API key"
+                                id="usernameInput"
+                                type="text"
+                                x-model="username"
+                                placeholder="Enter your username"
                                 required
-                                aria-describedby="apiKeyHelp"
+                                autofocus
+                                aria-describedby="usernameHelp"
                             >
-                            <small id="apiKeyHelp">Your API key will be saved locally in your browser</small>
                         </div>
-                        <button type="submit" :disabled="loading || !apiKey" class="btn-primary" x-text="loading ? 'Authenticating...' : 'Authenticate'">
+                        <div class="form-group">
+                            <label for="passwordInput">Password</label>
+                            <input
+                                id="passwordInput"
+                                type="password"
+                                x-model="password"
+                                placeholder="Enter your password"
+                                required
+                                aria-describedby="passwordHelp"
+                            >
+                            <small id="passwordHelp">Your session will be saved securely in your browser</small>
+                        </div>
+                        <button type="submit" :disabled="loading || !username || !password" class="btn-primary" x-text="loading ? 'Logging in...' : 'Log In'">
                         </button>
                     </form>
                 </section>
