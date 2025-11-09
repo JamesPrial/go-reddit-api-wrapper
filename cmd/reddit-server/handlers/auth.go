@@ -372,6 +372,9 @@ func parseBearerToken(authHeader string) (string, error) {
 	// Extract the token part
 	token := strings.TrimPrefix(authHeader, bearerPrefix)
 
+	// Trim any leading/trailing whitespace from the token
+	token = strings.TrimSpace(token)
+
 	// Ensure the token is not empty
 	if token == "" {
 		return "", errors.New("bearer token is empty")
