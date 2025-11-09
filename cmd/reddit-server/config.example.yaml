@@ -1,0 +1,39 @@
+# Example configuration file for Reddit HTTP Server
+# Copy this file to config.yaml and customize as needed
+# All fields are optional - sensible defaults are provided
+
+# Server configuration
+port: 8080
+shutdown_timeout: 30s
+request_timeout: 30s
+
+# Reddit API credentials (required for actual use)
+reddit_client_id: "your-client-id-here"
+reddit_client_secret: "your-client-secret-here"
+
+# Optional: User authentication credentials
+reddit_username: "your-reddit-username"
+reddit_password: "your-reddit-password"
+
+# Optional: Custom user agent
+reddit_user_agent: "my-app/1.0"
+
+# API authentication keys (optional - will be auto-generated if not provided)
+# Keys must be at least 32 characters and valid base64-url-safe encoding
+api_keys:
+  - "your-base64-url-safe-api-key-at-least-32-chars-long"
+
+# CORS configuration (optional)
+allowed_origins:
+  - "http://localhost:3000"
+  - "https://example.com"
+
+# Storage configuration (optional - defaults to ~/.local/share/reddit-server/reddit.db)
+storage_dsn: "/path/to/database.db"
+storage_max_open_conns: 10
+storage_max_idle_conns: 5
+
+# Logging configuration (optional)
+log_level: "info"  # debug, info, warn, error
+log_format: "json"  # json, text
+log_file: "/var/log/reddit-server.log"  # absolute path, omit for stderr only

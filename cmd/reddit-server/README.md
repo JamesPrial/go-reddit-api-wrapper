@@ -34,6 +34,110 @@ go build -race -o reddit-server .
 
 The server is configured entirely through environment variables. All variables except Reddit credentials have sensible defaults.
 
+### Configuration Files
+
+The server supports two methods for configuration management: YAML configuration files and environment variable files.
+
+#### YAML Configuration Files
+
+For a more structured approach, you can use YAML configuration files:
+
+1. **Copy the example configuration:**
+   ```bash
+   cp config.example.yaml config.yaml
+   ```
+
+2. **Edit `config.yaml` with your actual credentials:**
+   ```bash
+   vim config.yaml
+   # or
+   nano config.yaml
+   ```
+
+3. **Run the server with the configuration file:**
+   ```bash
+   export CONFIG_FILE=config.yaml
+   ./reddit-server
+   ```
+
+**YAML Configuration Format:**
+
+```yaml
+# Server configuration
+port: 8080
+shutdown_timeout: 30s
+request_timeout: 30s
+
+# Reddit API credentials
+reddit_client_id: "your-client-id"
+reddit_client_secret: "your-client-secret"
+reddit_username: "your-username"  # optional
+reddit_password: "your-password"  # optional
+reddit_user_agent: "MyApp/1.0"    # optional
+
+# API keys for HTTP endpoint authentication
+api_keys:
+  - "your-generated-api-key-here"
+
+# CORS configuration
+allowed_origins:
+  - "http://localhost:5173"
+  - "https://example.com"
+
+# Storage configuration
+storage_dsn: "/var/lib/reddit-server/reddit.db"
+storage_max_open_conns: 10
+storage_max_idle_conns: 5
+
+# Logging configuration
+log_level: "info"
+log_format: "json"
+log_file: "/var/log/reddit-server/app.log"
+```
+
+**Environment Variable Precedence:**
+
+Environment variables **always take precedence** over values in the configuration file. This allows you to:
+- Store base configuration in a file
+- Override specific values via environment variables for different environments
+- Keep sensitive credentials in environment variables while using files for other settings
+
+**Example:**
+```bash
+# Load base config from file
+export CONFIG_FILE=config.yaml
+
+# Override port and log level via environment
+export PORT=3000
+export LOG_LEVEL=debug
+
+# Start server (will use port 3000 and debug logging, other values from config.yaml)
+./reddit-server
+```
+
+#### Environment Variable Files
+
+Alternatively, you can use `.env` files:
+
+1. **Copy the example configuration:**
+   ```bash
+   cp config.example.env .env
+   ```
+
+2. **Edit `.env` with your actual credentials:**
+   ```bash
+   vim .env
+   ```
+
+3. **Load the environment variables before running the server:**
+   ```bash
+   # Using export with source
+   set -a && source .env && set +a
+   ./reddit-server
+   ```
+
+Both `config.yaml` and `.env` files are already in `.gitignore` to prevent accidental commits of credentials.
+
 ### Required Environment Variables
 
 | Variable | Description | Example |

@@ -47,14 +47,21 @@ type Config struct {
 	LogLevel  string // Log level (from LOG_LEVEL, default: "info", valid: "debug", "info", "warn", "error")
 	LogFormat string // Log format (from LOG_FORMAT, default: "json", valid: "json", "text")
 	LogFile   string // Log file path (from LOG_FILE, default: "" - empty means stderr only, must be absolute path)
+
+	// Configuration file path (from CONFIG_FILE, default: "" - empty means env vars only)
+	ConfigFile string // Path to configuration file if loaded from file
 }
 
 // Load reads configuration from environment variables and returns a Config with defaults applied.
-// Required environment variables:
+// If CONFIG_FILE is set, it loads the base configuration from the file and merges with environment variables,
+// with environment variables taking precedence over file values.
+//
+// Required environment variables (or file values):
 //   - REDDIT_CLIENT_ID: OAuth2 client ID
 //   - REDDIT_CLIENT_SECRET: OAuth2 client secret
 //
 // Optional environment variables:
+//   - CONFIG_FILE: Path to configuration file (if set, loads base config from file, env vars override)
 //   - PORT: HTTP server port (default: 8080)
 //   - SHUTDOWN_TIMEOUT: Graceful shutdown timeout (default: 30s, accepts duration strings like "45s", "1m")
 //   - REQUEST_TIMEOUT: HTTP request timeout (default: 30s, accepts duration strings)
@@ -75,17 +82,55 @@ type Config struct {
 // The storage DSN directory is created if it doesn't exist.
 // If LOG_FILE is provided, its parent directory is created if it doesn't exist.
 func Load() (*Config, string, error) {
-	cfg := &Config{
-		Port:                8080,
-		ShutdownTimeout:     30 * time.Second,
-		RequestTimeout:      30 * time.Second,
-		StorageMaxOpenConns: 10,
-		StorageMaxIdleConns: 5,
-		LogLevel:            "info",
-		LogFormat:           "json",
-		LogFile:             "",
+	// Check if CONFIG_FILE is set
+	var cfg *Config
+	configFilePath := os.Getenv("CONFIG_FILE")
+
+	if configFilePath != "" {
+		// Load from file
+		fileCfg, err := LoadFromFile(configFilePath)
+		if err != nil {
+			return nil, "", err
+		}
+		cfg = fileCfg
+	} else {
+		// Start with defaults
+		cfg = &Config{
+			Port:                8080,
+			ShutdownTimeout:     30 * time.Second,
+			RequestTimeout:      30 * time.Second,
+			StorageMaxOpenConns: 10,
+			StorageMaxIdleConns: 5,
+			LogLevel:            "info",
+			LogFormat:           "json",
+			LogFile:             "",
+		}
 	}
 
+	// Apply defaults for fields not set in file (or when no file is used)
+	if cfg.Port == 0 {
+		cfg.Port = 8080
+	}
+	if cfg.ShutdownTimeout == 0 {
+		cfg.ShutdownTimeout = 30 * time.Second
+	}
+	if cfg.RequestTimeout == 0 {
+		cfg.RequestTimeout = 30 * time.Second
+	}
+	if cfg.StorageMaxOpenConns == 0 {
+		cfg.StorageMaxOpenConns = 10
+	}
+	if cfg.StorageMaxIdleConns == 0 {
+		cfg.StorageMaxIdleConns = 5
+	}
+	if cfg.LogLevel == "" {
+		cfg.LogLevel = "info"
+	}
+	if cfg.LogFormat == "" {
+		cfg.LogFormat = "json"
+	}
+
+	// Environment variables override file values
 	// Parse port
 	if portStr := os.Getenv("PORT"); portStr != "" {
 		port, err := strconv.Atoi(portStr)
@@ -113,14 +158,24 @@ func Load() (*Config, string, error) {
 		cfg.RequestTimeout = timeout
 	}
 
-	// Load Reddit credentials
-	cfg.RedditClientID = os.Getenv("REDDIT_CLIENT_ID")
-	cfg.RedditClientSecret = os.Getenv("REDDIT_CLIENT_SECRET")
-	cfg.RedditUsername = os.Getenv("REDDIT_USERNAME")
-	cfg.RedditPassword = os.Getenv("REDDIT_PASSWORD")
-	cfg.RedditUserAgent = os.Getenv("REDDIT_USER_AGENT")
+	// Load Reddit credentials (override file values if env vars are set)
+	if clientID := os.Getenv("REDDIT_CLIENT_ID"); clientID != "" {
+		cfg.RedditClientID = clientID
+	}
+	if clientSecret := os.Getenv("REDDIT_CLIENT_SECRET"); clientSecret != "" {
+		cfg.RedditClientSecret = clientSecret
+	}
+	if username := os.Getenv("REDDIT_USERNAME"); username != "" {
+		cfg.RedditUsername = username
+	}
+	if password := os.Getenv("REDDIT_PASSWORD"); password != "" {
+		cfg.RedditPassword = password
+	}
+	if userAgent := os.Getenv("REDDIT_USER_AGENT"); userAgent != "" {
+		cfg.RedditUserAgent = userAgent
+	}
 
-	// Parse API keys
+	// Parse API keys (override file values if env var is set)
 	if keysStr := os.Getenv("API_KEYS"); keysStr != "" {
 		keys := strings.Split(keysStr, ",")
 		cfg.APIKeys = make([]string, 0, len(keys))
@@ -143,7 +198,7 @@ func Load() (*Config, string, error) {
 		generatedKey = key
 	}
 
-	// Parse allowed origins
+	// Parse allowed origins (override file values if env var is set)
 	if originsStr := os.Getenv("ALLOWED_ORIGINS"); originsStr != "" {
 		origins := strings.Split(originsStr, ",")
 		cfg.AllowedOrigins = make([]string, 0, len(origins))
@@ -155,11 +210,11 @@ func Load() (*Config, string, error) {
 		}
 	}
 
-	// Parse storage configuration
+	// Parse storage configuration (override file value if env var is set)
 	if dsnStr := os.Getenv("STORAGE_DSN"); dsnStr != "" {
 		cfg.StorageDSN = dsnStr
-	} else {
-		// Build default DSN using XDG_DATA_HOME or ~/.local/share
+	} else if cfg.StorageDSN == "" {
+		// Build default DSN using XDG_DATA_HOME or ~/.local/share (only if not set by file)
 		dataHome := os.Getenv("XDG_DATA_HOME")
 		if dataHome != "" {
 			// XDG spec requires absolute path
@@ -206,7 +261,7 @@ func Load() (*Config, string, error) {
 		cfg.StorageMaxIdleConns = maxIdle
 	}
 
-	// Parse logging configuration
+	// Parse logging configuration (override file values if env vars are set)
 	if logLevelStr := os.Getenv("LOG_LEVEL"); logLevelStr != "" {
 		cfg.LogLevel = strings.ToLower(logLevelStr)
 	}
@@ -217,13 +272,13 @@ func Load() (*Config, string, error) {
 
 	if logFileStr := os.Getenv("LOG_FILE"); logFileStr != "" {
 		cfg.LogFile = strings.TrimSpace(logFileStr)
+	}
 
-		// Create parent directory if it doesn't exist (matches storage DSN pattern)
-		if cfg.LogFile != "" {
-			dir := filepath.Dir(cfg.LogFile)
-			if err := os.MkdirAll(dir, 0o700); err != nil {
-				return nil, "", fmt.Errorf("failed to create log file directory %q: %w", dir, err)
-			}
+	// Create log file parent directory if it doesn't exist and LogFile is set
+	if cfg.LogFile != "" {
+		dir := filepath.Dir(cfg.LogFile)
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return nil, "", fmt.Errorf("failed to create log file directory %q: %w", dir, err)
 		}
 	}
 
