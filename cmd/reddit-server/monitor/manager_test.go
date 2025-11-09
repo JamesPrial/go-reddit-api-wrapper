@@ -48,7 +48,7 @@ func (m *mockRedditClient) GetComments(ctx context.Context, req *types.CommentsR
 
 // mockStore mocks the storage layer for testing.
 type mockStore struct {
-	mu sync.RWMutex
+	mu                 sync.RWMutex
 	upsertPostsFunc    func(ctx context.Context, posts []*types.Post) error
 	upsertCommentsFunc func(ctx context.Context, comments []*types.Comment) error
 	callCounts         struct {
@@ -107,9 +107,9 @@ func (m *mockStore) GetComment(ctx context.Context, id string) (*types.Comment, 
 func (m *mockStore) GetCommentTree(ctx context.Context, postID string, opts *storage.CommentTreeOptions) ([]*types.Comment, error) {
 	return nil, nil
 }
-func (m *mockStore) DeleteComment(ctx context.Context, id string) error        { return nil }
-func (m *mockStore) Close() error                                              { return nil }
-func (m *mockStore) Ping(ctx context.Context) error                            { return nil }
+func (m *mockStore) DeleteComment(ctx context.Context, id string) error { return nil }
+func (m *mockStore) Close() error                                       { return nil }
+func (m *mockStore) Ping(ctx context.Context) error                     { return nil }
 func (m *mockStore) GetStats(ctx context.Context) (*storage.CacheStats, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

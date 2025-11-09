@@ -132,7 +132,7 @@ func TestStartMonitor_Success(t *testing.T) {
 		},
 	}
 
-	h := NewHandlers(nil, nil)
+	h := NewHandlers(nil, nil, nil)
 	h.SetMonitorManager(mockMgr)
 
 	req, err := makeStartMonitorRequest(http.MethodPost, createValidStartRequest())
@@ -181,7 +181,7 @@ func TestStartMonitor_InvalidMethod(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := NewHandlers(nil, nil)
+			h := NewHandlers(nil, nil, nil)
 			req := httptest.NewRequest(tt.method, "/api/v1/monitor/start", nil)
 			w := httptest.NewRecorder()
 
@@ -206,7 +206,7 @@ func TestStartMonitor_InvalidMethod(t *testing.T) {
 
 // TestStartMonitor_InvalidJSON tests that malformed JSON is rejected.
 func TestStartMonitor_InvalidJSON(t *testing.T) {
-	h := NewHandlers(nil, nil)
+	h := NewHandlers(nil, nil, nil)
 
 	// Create request with invalid JSON
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/monitor/start", strings.NewReader("{invalid json}"))
@@ -226,7 +226,7 @@ func TestStartMonitor_InvalidJSON(t *testing.T) {
 
 // TestStartMonitor_EmptySubreddits tests that empty subreddits array is rejected.
 func TestStartMonitor_EmptySubreddits(t *testing.T) {
-	h := NewHandlers(nil, nil)
+	h := NewHandlers(nil, nil, nil)
 
 	req := createValidStartRequest()
 	req.Subreddits = []string{}
@@ -251,7 +251,7 @@ func TestStartMonitor_EmptySubreddits(t *testing.T) {
 
 // TestStartMonitor_MissingInterval tests that missing interval is rejected.
 func TestStartMonitor_MissingInterval(t *testing.T) {
-	h := NewHandlers(nil, nil)
+	h := NewHandlers(nil, nil, nil)
 
 	req := createValidStartRequest()
 	req.Interval = ""
@@ -287,7 +287,7 @@ func TestStartMonitor_InvalidInterval(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := NewHandlers(nil, nil)
+			h := NewHandlers(nil, nil, nil)
 
 			req := createValidStartRequest()
 			req.Interval = tt.interval
@@ -329,7 +329,7 @@ func TestStartMonitor_ZeroOrNegativeInterval(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := NewHandlers(nil, nil)
+			h := NewHandlers(nil, nil, nil)
 
 			req := createValidStartRequest()
 			req.Interval = tt.interval
@@ -378,7 +378,7 @@ func TestStartMonitor_ValidIntervalFormats(t *testing.T) {
 				},
 			}
 
-			h := NewHandlers(nil, nil)
+			h := NewHandlers(nil, nil, nil)
 			h.SetMonitorManager(mockMgr)
 
 			req := createValidStartRequest()
@@ -412,7 +412,7 @@ func TestStartMonitor_InvalidLimit(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := NewHandlers(nil, nil)
+			h := NewHandlers(nil, nil, nil)
 			// Set a mock manager to avoid "service not available" error
 			h.SetMonitorManager(&mockMonitorManager{})
 
@@ -453,7 +453,7 @@ func TestStartMonitor_DefaultLimit(t *testing.T) {
 		},
 	}
 
-	h := NewHandlers(nil, nil)
+	h := NewHandlers(nil, nil, nil)
 	h.SetMonitorManager(mockMgr)
 
 	req := createValidStartRequest()
@@ -501,7 +501,7 @@ func TestStartMonitor_ValidLimitBoundaries(t *testing.T) {
 				},
 			}
 
-			h := NewHandlers(nil, nil)
+			h := NewHandlers(nil, nil, nil)
 			h.SetMonitorManager(mockMgr)
 
 			req := createValidStartRequest()
@@ -530,7 +530,7 @@ func TestStartMonitor_AlreadyRunning(t *testing.T) {
 		},
 	}
 
-	h := NewHandlers(nil, nil)
+	h := NewHandlers(nil, nil, nil)
 	h.SetMonitorManager(mockMgr)
 
 	req, err := makeStartMonitorRequest(http.MethodPost, createValidStartRequest())
@@ -559,7 +559,7 @@ func TestStartMonitor_ManagerError(t *testing.T) {
 		},
 	}
 
-	h := NewHandlers(nil, nil)
+	h := NewHandlers(nil, nil, nil)
 	h.SetMonitorManager(mockMgr)
 
 	req, err := makeStartMonitorRequest(http.MethodPost, createValidStartRequest())
@@ -577,7 +577,7 @@ func TestStartMonitor_ManagerError(t *testing.T) {
 
 // TestStartMonitor_RequestBodyTooLarge tests that request body > 1MB is rejected.
 func TestStartMonitor_RequestBodyTooLarge(t *testing.T) {
-	h := NewHandlers(nil, nil)
+	h := NewHandlers(nil, nil, nil)
 
 	// Create a large body (2MB)
 	largeBody := strings.NewReader(strings.Repeat("x", 2*1024*1024))
@@ -609,7 +609,7 @@ func TestStartMonitor_ConfigurationPassed(t *testing.T) {
 		},
 	}
 
-	h := NewHandlers(nil, nil)
+	h := NewHandlers(nil, nil, nil)
 	h.SetMonitorManager(mockMgr)
 
 	req := createValidStartRequest()
@@ -666,7 +666,7 @@ func TestStopMonitor_Success(t *testing.T) {
 		},
 	}
 
-	h := NewHandlers(nil, nil)
+	h := NewHandlers(nil, nil, nil)
 	h.SetMonitorManager(mockMgr)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/monitor/stop", nil)
@@ -712,7 +712,7 @@ func TestStopMonitor_NoMonitorRunning(t *testing.T) {
 		},
 	}
 
-	h := NewHandlers(nil, nil)
+	h := NewHandlers(nil, nil, nil)
 	h.SetMonitorManager(mockMgr)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/monitor/stop", nil)
@@ -744,7 +744,7 @@ func TestStopMonitor_InvalidMethod(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := NewHandlers(nil, nil)
+			h := NewHandlers(nil, nil, nil)
 			req := httptest.NewRequest(tt.method, "/api/v1/monitor/stop", nil)
 			w := httptest.NewRecorder()
 
@@ -775,7 +775,7 @@ func TestStopMonitor_ManagerError(t *testing.T) {
 		},
 	}
 
-	h := NewHandlers(nil, nil)
+	h := NewHandlers(nil, nil, nil)
 	h.SetMonitorManager(mockMgr)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/monitor/stop", nil)
@@ -799,7 +799,7 @@ func TestStopMonitor_StatusRetrievalFails(t *testing.T) {
 		},
 	}
 
-	h := NewHandlers(nil, nil)
+	h := NewHandlers(nil, nil, nil)
 	h.SetMonitorManager(mockMgr)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/monitor/stop", nil)
@@ -840,7 +840,7 @@ func TestGetMonitorStatus_Running(t *testing.T) {
 		},
 	}
 
-	h := NewHandlers(nil, nil)
+	h := NewHandlers(nil, nil, nil)
 	h.SetMonitorManager(mockMgr)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/monitor/status", nil)
@@ -904,7 +904,7 @@ func TestGetMonitorStatus_Stopped(t *testing.T) {
 		},
 	}
 
-	h := NewHandlers(nil, nil)
+	h := NewHandlers(nil, nil, nil)
 	h.SetMonitorManager(mockMgr)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/monitor/status", nil)
@@ -945,7 +945,7 @@ func TestGetMonitorStatus_InvalidMethod(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := NewHandlers(nil, nil)
+			h := NewHandlers(nil, nil, nil)
 			req := httptest.NewRequest(tt.method, "/api/v1/monitor/status", nil)
 			w := httptest.NewRecorder()
 
@@ -976,7 +976,7 @@ func TestGetMonitorStatus_ManagerError(t *testing.T) {
 		},
 	}
 
-	h := NewHandlers(nil, nil)
+	h := NewHandlers(nil, nil, nil)
 	h.SetMonitorManager(mockMgr)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/monitor/status", nil)
@@ -1000,7 +1000,7 @@ func TestStartMonitor_AllFieldsInResponse(t *testing.T) {
 		},
 	}
 
-	h := NewHandlers(nil, nil)
+	h := NewHandlers(nil, nil, nil)
 	h.SetMonitorManager(mockMgr)
 
 	req, err := makeStartMonitorRequest(http.MethodPost, createValidStartRequest())
@@ -1050,7 +1050,7 @@ func TestStartMonitor_VariousSubredditNames(t *testing.T) {
 				},
 			}
 
-			h := NewHandlers(nil, nil)
+			h := NewHandlers(nil, nil, nil)
 			h.SetMonitorManager(mockMgr)
 
 			req := createValidStartRequest()
@@ -1093,7 +1093,7 @@ func TestGetMonitorStatus_WithoutStats(t *testing.T) {
 		},
 	}
 
-	h := NewHandlers(nil, nil)
+	h := NewHandlers(nil, nil, nil)
 	h.SetMonitorManager(mockMgr)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/monitor/status", nil)
@@ -1126,7 +1126,7 @@ func TestStopMonitor_WithoutStats(t *testing.T) {
 		},
 	}
 
-	h := NewHandlers(nil, nil)
+	h := NewHandlers(nil, nil, nil)
 	h.SetMonitorManager(mockMgr)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/monitor/stop", nil)

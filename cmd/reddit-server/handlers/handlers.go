@@ -59,16 +59,19 @@ type Handlers struct {
 	client     RedditClient
 	store      storage.Store
 	monitorMgr MonitorManager
+	shutdownCh chan<- struct{}
 	setOnce    sync.Once
 }
 
 // NewHandlers creates a new Handlers instance with the provided Reddit client and storage.
 // The client parameter must implement the RedditClient interface.
 // The store parameter is the storage backend for persisting data.
-func NewHandlers(client RedditClient, store storage.Store) *Handlers {
+// The shutdownCh parameter is used to signal server shutdown from handlers.
+func NewHandlers(client RedditClient, store storage.Store, shutdownCh chan<- struct{}) *Handlers {
 	return &Handlers{
-		client: client,
-		store:  store,
+		client:     client,
+		store:      store,
+		shutdownCh: shutdownCh,
 	}
 }
 

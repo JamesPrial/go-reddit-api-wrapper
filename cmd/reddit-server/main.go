@@ -166,8 +166,11 @@ func main() {
 
 	logger.Info("storage initialized successfully", "dsn", cfg.StorageDSN)
 
+	// Create shutdown trigger channel
+	shutdownTrigger := make(chan struct{}, 1)
+
 	// Create HTTP handlers
-	h := handlers.NewHandlers(redditClient, store)
+	h := handlers.NewHandlers(redditClient, store, shutdownTrigger)
 
 	// Create monitor manager
 	monitorMgr := monitor.NewMonitorManager(redditClient, store, logger)
@@ -194,6 +197,9 @@ func main() {
 	mux.HandleFunc("/api/v1/monitor/start", h.StartMonitor)
 	mux.HandleFunc("/api/v1/monitor/stop", h.StopMonitor)
 	mux.HandleFunc("/api/v1/monitor/status", h.GetMonitorStatus)
+
+	// Server endpoints
+	mux.HandleFunc("/api/v1/server/shutdown", h.Shutdown)
 
 	// Register static file handler (serves frontend at /app/)
 	mux.Handle("/app/", http.StripPrefix("/app/", StaticHandler(logger)))
@@ -245,58 +251,67 @@ func main() {
 	signal.Notify(shutdown, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(shutdown)
 
-	// Wait for either server error or shutdown signal
+	// Wait for either server error, shutdown signal, or API shutdown trigger
 	select {
 	case err := <-serverErrors:
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.Error("server error", "error", err)
-			signal.Stop(shutdown)
 			exitCode = 1
 			return
 		}
 
 	case sig := <-shutdown:
 		logger.Info("shutdown signal received", "signal", sig.String())
+		exitCode = performGracefulShutdown(context.Background(), logger, srv, monitorMgr, store, cfg.ShutdownTimeout)
 
-		// Create context with timeout for graceful shutdown
-		ctx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
-		defer cancel()
-
-		// Stop active monitors
-		logger.Info("stopping active monitors")
-		if err := monitorMgr.Stop(); err != nil {
-			// Only log if error is not "no monitor running"
-			if !errors.Is(err, monitor.ErrNoMonitorRunning) {
-				logger.Error("error stopping monitor", "error", err)
-			}
-		}
-
-		// Attempt graceful shutdown
-		logger.Info("shutting down server", "timeout", cfg.ShutdownTimeout)
-		if err := srv.Shutdown(ctx); err != nil {
-			logger.Error("error during shutdown", "error", err)
-			// Force close after timeout
-			if closeErr := srv.Close(); closeErr != nil {
-				logger.Error("error closing server", "error", closeErr)
-			}
-			// Still attempt to close storage
-			logger.Info("closing storage after forced shutdown")
-			if storeErr := store.Close(); storeErr != nil {
-				logger.Error("error closing storage during forced shutdown", "error", storeErr)
-			}
-			exitCode = 1
-			return
-		}
-
-		logger.Info("server shutdown complete, closing storage")
-		if err := store.Close(); err != nil {
-			logger.Error("error closing storage", "error", err)
-			exitCode = 1
-			return
-		}
-
-		logger.Info("storage closed successfully")
+	case <-shutdownTrigger:
+		logger.Info("shutdown initiated via API endpoint")
+		signal.Stop(shutdown)
+		exitCode = performGracefulShutdown(context.Background(), logger, srv, monitorMgr, store, cfg.ShutdownTimeout)
 	}
+}
+
+// performGracefulShutdown orchestrates the graceful shutdown sequence for the server.
+// It stops active monitors, shuts down the HTTP server with the given timeout,
+// and closes the storage layer. Returns an exit code: 0 for success, 1 for errors.
+func performGracefulShutdown(ctx context.Context, logger *slog.Logger, srv *http.Server, monitorMgr *monitor.MonitorManager, store storage.Store, shutdownTimeout time.Duration) int {
+	// Create context with timeout for graceful shutdown
+	shutdownCtx, cancel := context.WithTimeout(ctx, shutdownTimeout)
+	defer cancel()
+
+	// Stop active monitors
+	logger.Info("stopping active monitors")
+	if err := monitorMgr.Stop(); err != nil {
+		// Only log if error is not "no monitor running"
+		if !errors.Is(err, monitor.ErrNoMonitorRunning) {
+			logger.Error("error stopping monitor", "error", err)
+		}
+	}
+
+	// Attempt graceful shutdown
+	logger.Info("shutting down server", "timeout", shutdownTimeout)
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		logger.Error("error during shutdown", "error", err)
+		// Force close after timeout
+		if closeErr := srv.Close(); closeErr != nil {
+			logger.Error("error closing server", "error", closeErr)
+		}
+		// Still attempt to close storage
+		logger.Info("closing storage after forced shutdown")
+		if storeErr := store.Close(); storeErr != nil {
+			logger.Error("error closing storage during forced shutdown", "error", storeErr)
+		}
+		return 1
+	}
+
+	logger.Info("server shutdown complete, closing storage")
+	if err := store.Close(); err != nil {
+		logger.Error("error closing storage", "error", err)
+		return 1
+	}
+
+	logger.Info("storage closed successfully")
+	return 0
 }
 
 // routePostsHandler routes requests under /api/v1/posts/ to the appropriate handler

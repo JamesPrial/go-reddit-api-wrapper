@@ -8,7 +8,7 @@ import (
 
 func TestHealth_GET_Success(t *testing.T) {
 	// Create handlers with nil client (health check doesn't use it)
-	h := NewHandlers(nil, nil)
+	h := NewHandlers(nil, nil, nil)
 
 	// Create request
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
@@ -37,7 +37,7 @@ func TestHealth_GET_Success(t *testing.T) {
 
 func TestHealth_POST_MethodNotAllowed(t *testing.T) {
 	// Create handlers with nil client
-	h := NewHandlers(nil, nil)
+	h := NewHandlers(nil, nil, nil)
 
 	// Create POST request
 	req := httptest.NewRequest(http.MethodPost, "/health", nil)
@@ -66,7 +66,7 @@ func TestHealth_POST_MethodNotAllowed(t *testing.T) {
 
 func TestHealth_ResponseFormat(t *testing.T) {
 	// Create handlers with nil client
-	h := NewHandlers(nil, nil)
+	h := NewHandlers(nil, nil, nil)
 
 	// Create request
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
@@ -124,7 +124,7 @@ func TestHealth_OtherMethods(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := NewHandlers(nil, nil)
+			h := NewHandlers(nil, nil, nil)
 			req := httptest.NewRequest(tt.method, "/health", nil)
 			w := httptest.NewRecorder()
 

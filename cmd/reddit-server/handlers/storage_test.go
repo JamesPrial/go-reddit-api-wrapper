@@ -29,7 +29,7 @@ func setupStorageTest(t *testing.T) (*Handlers, storage.Store, func()) {
 	}
 
 	// Create handlers with nil Reddit client and the test store
-	h := NewHandlers(nil, st)
+	h := NewHandlers(nil, st, nil)
 
 	// Return handlers, store, and cleanup function
 	cleanup := func() {
