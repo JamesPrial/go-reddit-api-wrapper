@@ -34,6 +34,7 @@ import (
 //   - client: authenticated Reddit API client
 //   - subreddits: slice of subreddit names to monitor (required, non-empty)
 //   - interval: polling interval for fetching new posts (must be > 0)
+//   - duration: maximum duration to run the monitor (if <= 0, run indefinitely until context cancelled)
 //   - limit: maximum number of posts to fetch per poll (passed to Reddit API)
 //   - fetchComments: whether to fetch and store comments for each new post
 //   - store: storage backend for persisting posts and comments (required)
@@ -45,9 +46,9 @@ import (
 //   - client is nil
 //   - a fatal authentication or validation error occurs
 //
-// Graceful shutdown occurs when the context is cancelled. All goroutines will complete
-// their current operation and exit cleanly.
-func MonitorSubreddits(ctx context.Context, client *graw.Reddit, subreddits []string, interval time.Duration, limit int, fetchComments bool, store storage.Store) error {
+// Graceful shutdown occurs when the context is cancelled, duration elapses, or a fatal error
+// occurs. All goroutines will complete their current operation and exit cleanly.
+func MonitorSubreddits(ctx context.Context, client *graw.Reddit, subreddits []string, interval time.Duration, duration time.Duration, limit int, fetchComments bool, store storage.Store) error {
 	// Validate inputs
 	if client == nil {
 		return fmt.Errorf("client cannot be nil")
@@ -79,8 +80,11 @@ func MonitorSubreddits(ctx context.Context, client *graw.Reddit, subreddits []st
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				// Replace with new map to free memory
-				seenPosts = &sync.Map{}
+				// Clear the map instead of replacing it (replacing creates a race condition)
+				seenPosts.Range(func(key, value interface{}) bool {
+					seenPosts.Delete(key)
+					return true
+				})
 				slog.Debug("cleared seen posts map to free memory")
 			}
 		}
@@ -98,7 +102,7 @@ func MonitorSubreddits(ctx context.Context, client *graw.Reddit, subreddits []st
 	for _, subreddit := range subreddits {
 		wg.Add(1)
 		go func(sub string) {
-			if err := monitorSingleSubreddit(ctx, client, sub, interval, limit, fetchComments, store, seenPosts, &wg); err != nil {
+			if err := monitorSingleSubreddit(ctx, client, sub, interval, duration, limit, fetchComments, store, seenPosts, &wg); err != nil {
 				// Only report fatal errors
 				if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 					errChan <- fmt.Errorf("monitor failed for %s: %w", sub, err)
@@ -132,30 +136,31 @@ func MonitorSubreddits(ctx context.Context, client *graw.Reddit, subreddits []st
 	return nil
 }
 
-// monitorSingleSubreddit monitors a single subreddit for new posts.
+// monitorSingleSubreddit monitors a single subreddit for new posts with change detection.
 //
 // This function runs in its own goroutine and periodically fetches new posts from the specified
-// subreddit. Posts are filtered using the shared seenPosts map to prevent duplicates across all
-// monitored subreddits. New posts are stored in the database, and their comments are optionally
-// fetched and stored concurrently based on the fetchComments parameter.
+// subreddit. For each fetch, it detects changes in comment counts by comparing against previous
+// snapshots, records change events, and optionally fetches new comments.
 //
-// The function includes panic recovery to prevent a crash in one monitor from affecting others.
-// Non-fatal errors (storage, network) are logged but do not stop the monitor. Fatal errors
-// (authentication, validation) are returned and will stop the monitor.
+// Posts are filtered using the shared seenPosts map to prevent duplicates across all monitored
+// subreddits. The function includes panic recovery to prevent a crash in one monitor from
+// affecting others. Non-fatal errors (storage, network) are logged but do not stop the monitor.
+// Fatal errors (authentication, validation) are returned and will stop the monitor.
 //
 // Parameters:
 //   - ctx: context for request cancellation and timeouts
 //   - client: authenticated Reddit API client
 //   - subreddit: name of the subreddit to monitor
 //   - interval: polling interval for fetching new posts
+//   - duration: maximum duration to monitor (if <= 0, monitor indefinitely)
 //   - limit: maximum number of posts to fetch per poll
 //   - fetchComments: whether to fetch and store comments for each new post
 //   - store: storage backend for persisting posts and comments
 //   - seenPosts: shared map for tracking seen posts across all monitors
 //   - wg: wait group for coordinating goroutine shutdown
 //
-// Returns an error if a fatal error occurs. Returns nil on clean shutdown.
-func monitorSingleSubreddit(ctx context.Context, client *graw.Reddit, subreddit string, interval time.Duration, limit int, fetchComments bool, store storage.Store, seenPosts *sync.Map, wg *sync.WaitGroup) error {
+// Returns an error if a fatal error occurs. Returns nil on clean shutdown or duration elapsed.
+func monitorSingleSubreddit(ctx context.Context, client *graw.Reddit, subreddit string, interval time.Duration, duration time.Duration, limit int, fetchComments bool, store storage.Store, seenPosts *sync.Map, wg *sync.WaitGroup) error {
 	defer func() {
 		if r := recover(); r != nil {
 			slog.Error("panic in monitor goroutine",
@@ -166,10 +171,17 @@ func monitorSingleSubreddit(ctx context.Context, client *graw.Reddit, subreddit 
 		wg.Done()
 	}()
 
+	startTime := time.Now()
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
-	slog.Info("started monitoring subreddit", "subreddit", subreddit, "interval", interval)
+	slog.Info("started monitoring subreddit", "subreddit", subreddit, "interval", interval, "duration", duration)
+
+	// Check if duration has already elapsed
+	if duration > 0 && time.Since(startTime) >= duration {
+		slog.Info("monitor duration elapsed before initial fetch", "subreddit", subreddit)
+		return nil
+	}
 
 	// Perform initial fetch immediately
 	if err := fetchAndProcessPosts(ctx, client, subreddit, limit, fetchComments, store, seenPosts); err != nil {
@@ -190,9 +202,21 @@ func monitorSingleSubreddit(ctx context.Context, client *graw.Reddit, subreddit 
 	for {
 		select {
 		case <-ctx.Done():
-			slog.Info("stopping monitor", "subreddit", subreddit, "reason", ctx.Err())
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				slog.Info("stopping monitor due to context timeout", "subreddit", subreddit)
+			} else if errors.Is(ctx.Err(), context.Canceled) {
+				slog.Info("stopping monitor due to context cancellation", "subreddit", subreddit)
+			} else {
+				slog.Info("stopping monitor", "subreddit", subreddit, "reason", ctx.Err())
+			}
 			return nil
 		case <-ticker.C:
+			// Check if duration has elapsed (if duration > 0)
+			if duration > 0 && time.Since(startTime) >= duration {
+				slog.Info("monitor duration elapsed, stopping", "subreddit", subreddit, "elapsed", time.Since(startTime))
+				return nil
+			}
+
 			slog.Debug("starting post fetch cycle", "subreddit", subreddit)
 			if err := fetchAndProcessPosts(ctx, client, subreddit, limit, fetchComments, store, seenPosts); err != nil {
 				// Check if error is due to context cancellation
@@ -372,6 +396,11 @@ func fetchAndStoreComments(ctx context.Context, client *graw.Reddit, store stora
 		slog.Debug("stored comments for post", "subreddit", subreddit, "post_id", postID, "count", len(response.Comments))
 	}
 }
+
+// Future enhancement: Change detection functionality
+// TODO: Implement pollAndTrackChanges to detect comment count changes
+// and automatically fetch new comments. This requires integration with
+// the snapshot storage layer.
 
 // isFatalError determines if an error should stop the monitor.
 //

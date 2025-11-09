@@ -117,7 +117,8 @@ func TestMonitorSubreddits_ValidationErrors(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// All validation tests should fail immediately without making API calls
-			err := MonitorSubreddits(ctx, tt.client, tt.subreddits, tt.interval, tt.limit, true, tt.store)
+			// Duration parameter is set to 0, meaning run indefinitely until context cancelled
+			err := MonitorSubreddits(ctx, tt.client, tt.subreddits, tt.interval, 0, tt.limit, true, tt.store)
 
 			if !tt.wantErr {
 				t.Fatalf("expected no error, got: %v", err)
@@ -282,4 +283,20 @@ func (m *minimalMockStore) GetStats(ctx context.Context) (*storage.CacheStats, e
 
 func (m *minimalMockStore) EvictStale(ctx context.Context, maxAge time.Duration) (int64, error) {
 	return 0, nil
+}
+
+func (m *minimalMockStore) GetCommentChangeEvents(ctx context.Context, postID string, limit int) ([]*storage.CommentChangeEvent, error) {
+	return nil, nil
+}
+
+func (m *minimalMockStore) SavePostSnapshot(ctx context.Context, snapshot *storage.PostSnapshot) error {
+	return nil
+}
+
+func (m *minimalMockStore) GetLatestSnapshot(ctx context.Context, postID string) (*storage.PostSnapshot, error) {
+	return nil, nil
+}
+
+func (m *minimalMockStore) SaveCommentChangeEvent(ctx context.Context, event *storage.CommentChangeEvent) error {
+	return nil
 }

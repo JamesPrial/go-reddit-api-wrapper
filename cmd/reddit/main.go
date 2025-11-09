@@ -83,6 +83,7 @@ var (
 	flagTimeout         = flag.Duration("timeout", 30*time.Second, "HTTP request timeout")
 	flagStore           = flag.Bool("store", false, "Enable storage of posts and comments (env: REDDIT_STORE)")
 	flagDBPath          = flag.String("db-path", "", "Path to SQLite database file (env: REDDIT_DB_PATH)")
+	flagMonitorDuration = flag.String("monitor-duration", "0", "How long to monitor (e.g., 1h, 30m). 0 means indefinite.")
 	flagMonitorInterval = flag.String("monitor-interval", "5m", "Polling interval for monitor command")
 	flagMonitorLimit    = flag.Int("monitor-limit", 25, "Posts per fetch for monitor command")
 	flagFetchComments   = flag.Bool("fetch-comments", true, "Fetch comments for posts in monitor mode")
@@ -230,6 +231,13 @@ func loadConfig() (*config.Config, error) {
 	}
 
 	// Monitor flag overrides
+	if *flagMonitorDuration != "0" {
+		duration, err := time.ParseDuration(*flagMonitorDuration)
+		if err != nil {
+			return nil, fmt.Errorf("invalid --monitor-duration: %w", err)
+		}
+		cfg.MonitorDuration = duration
+	}
 	if *flagMonitorInterval != "" {
 		duration, err := time.ParseDuration(*flagMonitorInterval)
 		if err != nil {
@@ -376,7 +384,7 @@ func executeCommand(ctx context.Context, cfg *config.Config, command string, arg
 			return err
 		}
 
-		return commands.MonitorSubreddits(ctx, client, subreddits, cfg.MonitorInterval, cfg.MonitorLimit, cfg.FetchComments, store)
+		return commands.MonitorSubreddits(ctx, client, subreddits, cfg.MonitorInterval, cfg.MonitorDuration, cfg.MonitorLimit, cfg.FetchComments, store)
 
 	default:
 		return fmt.Errorf("unknown command: %q", command)
@@ -548,6 +556,8 @@ Global Flags:
         Enable storage of posts and comments (env: REDDIT_STORE)
   -db-path string
         Path to SQLite database file (env: REDDIT_DB_PATH, default: ~/.reddit/data.db)
+  -monitor-duration string
+        How long to monitor (e.g., 1h, 30m). 0 means indefinite. (default: 0)
   -monitor-interval string
         Polling interval for monitor command (default: 5m)
   -monitor-limit int
@@ -597,6 +607,12 @@ Examples:
 
   # Monitor multiple subreddits with custom interval
   reddit -store -monitor-interval 10m monitor golang,programming,rust
+
+  # Monitor for 1 hour with 5-minute intervals
+  reddit -store -monitor-duration 1h -monitor-interval 5m monitor golang
+
+  # Monitor indefinitely with custom interval and fetch comments
+  reddit -store -monitor-interval 10m -fetch-comments monitor golang,programming
 
 Set environment variables for credentials:
   export REDDIT_CLIENT_ID="your-client-id"

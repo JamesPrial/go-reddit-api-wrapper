@@ -210,6 +210,12 @@ func NewSQLiteStore(cfg *Config) (*SQLiteStore, error) {
 
 	logger.Info("database migrations completed")
 
+	// After migrations run successfully, verify indexes
+	if err := store.verifyIndexes(); err != nil {
+		db.Close() // Clean up on index verification failure
+		return nil, err
+	}
+
 	return store, nil
 }
 
@@ -275,4 +281,218 @@ func (s *SQLiteStore) Ping(ctx context.Context) error {
 // This is called by the public package's init() function.
 func SetMigrationsFS(fs embed.FS) {
 	migrationsFS = fs
+}
+
+// SavePostSnapshot stores a snapshot of a post's current state.
+// The snapshot contains immutable data about the post at a specific point in time.
+// Returns an error if the operation fails.
+func (s *SQLiteStore) SavePostSnapshot(ctx context.Context, snapshot *storage.PostSnapshot) error {
+	if snapshot == nil {
+		return &storage.ValidationError{Operation: "SavePostSnapshot", Field: "snapshot", Reason: "snapshot cannot be nil"}
+	}
+	if snapshot.PostID == "" {
+		return &storage.ValidationError{Operation: "SavePostSnapshot", Field: "snapshot.PostID", Reason: "post ID cannot be empty"}
+	}
+	if snapshot.Fullname == "" {
+		return &storage.ValidationError{Operation: "SavePostSnapshot", Field: "snapshot.Fullname", Reason: "fullname cannot be empty"}
+	}
+
+	// Validate numeric fields
+	if snapshot.NumComments < 0 {
+		return &storage.ValidationError{
+			Operation: "SavePostSnapshot",
+			Field:     "snapshot.NumComments",
+			Reason:    "comment count cannot be negative",
+		}
+	}
+	// Note: Score can be negative on Reddit (downvoted posts), so no validation
+
+	s.logger.Debug("saving post snapshot", "post_id", snapshot.PostID, "num_comments", snapshot.NumComments, "score", snapshot.Score)
+
+	result, err := s.db.ExecContext(ctx, insertPostSnapshotQuery, snapshot.PostID, snapshot.Fullname, snapshot.NumComments, snapshot.Score)
+	if err != nil {
+		return &storage.DatabaseError{Operation: "SavePostSnapshot", Message: fmt.Sprintf("failed to insert snapshot for post %s", snapshot.PostID), Err: err}
+	}
+
+	// Get the last inserted ID for logging purposes
+	id, err := result.LastInsertId()
+	if err != nil {
+		s.logger.Warn("failed to retrieve snapshot ID", "post_id", snapshot.PostID, "error", err)
+	} else {
+		s.logger.Debug("successfully saved post snapshot", "post_id", snapshot.PostID, "snapshot_id", id)
+	}
+
+	return nil
+}
+
+// GetLatestSnapshot retrieves the most recent snapshot for a post.
+// The postID should be without prefix (e.g., "abc123").
+// Returns nil if no snapshot exists for the post (not an error).
+// Returns an error if the operation fails.
+func (s *SQLiteStore) GetLatestSnapshot(ctx context.Context, postID string) (*storage.PostSnapshot, error) {
+	if postID == "" {
+		return nil, &storage.ValidationError{Operation: "GetLatestSnapshot", Field: "postID", Reason: "post ID cannot be empty"}
+	}
+
+	s.logger.Debug("getting latest snapshot", "post_id", postID)
+
+	row := s.db.QueryRowContext(ctx, selectLatestSnapshotQuery, postID)
+
+	var snapshot storage.PostSnapshot
+	var createdAtUnix int64
+
+	err := row.Scan(&snapshot.ID, &snapshot.PostID, &snapshot.Fullname, &snapshot.NumComments, &snapshot.Score, &createdAtUnix)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			s.logger.Debug("no snapshot found for post", "post_id", postID)
+			return nil, nil
+		}
+		return nil, &storage.DatabaseError{Operation: "GetLatestSnapshot", Message: fmt.Sprintf("failed to query snapshot for post %s", postID), Err: err}
+	}
+
+	// Convert Unix timestamp (seconds) to time.Time
+	if createdAtUnix < 0 {
+		return nil, &storage.DatabaseError{
+			Operation: "GetLatestSnapshot",
+			Message:   fmt.Sprintf("invalid snapshot timestamp for post %s: negative Unix timestamp %d", postID, createdAtUnix),
+			Err:       nil,
+		}
+	}
+	snapshot.CreatedAt = time.Unix(createdAtUnix, 0).UTC()
+
+	s.logger.Debug("successfully retrieved latest snapshot", "post_id", postID, "snapshot_id", snapshot.ID)
+	return &snapshot, nil
+}
+
+// SaveCommentChangeEvent records when new comments are detected for a post.
+// The event captures the detected change in comment count between snapshots.
+// Returns an error if the operation fails.
+func (s *SQLiteStore) SaveCommentChangeEvent(ctx context.Context, event *storage.CommentChangeEvent) error {
+	if event == nil {
+		return &storage.ValidationError{Operation: "SaveCommentChangeEvent", Field: "event", Reason: "event cannot be nil"}
+	}
+	if event.PostID == "" {
+		return &storage.ValidationError{Operation: "SaveCommentChangeEvent", Field: "event.PostID", Reason: "post ID cannot be empty"}
+	}
+	if event.Fullname == "" {
+		return &storage.ValidationError{Operation: "SaveCommentChangeEvent", Field: "event.Fullname", Reason: "fullname cannot be empty"}
+	}
+
+	// Validate numeric fields
+	if event.PreviousCount < 0 {
+		return &storage.ValidationError{
+			Operation: "SaveCommentChangeEvent",
+			Field:     "event.PreviousCount",
+			Reason:    "previous count cannot be negative",
+		}
+	}
+	if event.NewCount < 0 {
+		return &storage.ValidationError{
+			Operation: "SaveCommentChangeEvent",
+			Field:     "event.NewCount",
+			Reason:    "new count cannot be negative",
+		}
+	}
+	// Validate that the delta is consistent
+	if event.CommentsAdded != (event.NewCount - event.PreviousCount) {
+		return &storage.ValidationError{
+			Operation: "SaveCommentChangeEvent",
+			Field:     "event.CommentsAdded",
+			Reason:    fmt.Sprintf("comments_added (%d) does not match delta between new_count (%d) and previous_count (%d)", event.CommentsAdded, event.NewCount, event.PreviousCount),
+		}
+	}
+
+	s.logger.Debug("saving comment change event", "post_id", event.PostID, "previous_count", event.PreviousCount, "new_count", event.NewCount, "comments_added", event.CommentsAdded)
+
+	result, err := s.db.ExecContext(ctx, insertCommentChangeEventQuery, event.PostID, event.Fullname, event.PreviousCount, event.NewCount, event.CommentsAdded)
+	if err != nil {
+		return &storage.DatabaseError{Operation: "SaveCommentChangeEvent", Message: fmt.Sprintf("failed to insert change event for post %s", event.PostID), Err: err}
+	}
+
+	// Get the last inserted ID for logging purposes
+	id, err := result.LastInsertId()
+	if err != nil {
+		s.logger.Warn("failed to retrieve change event ID", "post_id", event.PostID, "error", err)
+	} else {
+		s.logger.Debug("successfully saved comment change event", "post_id", event.PostID, "event_id", id)
+	}
+
+	return nil
+}
+
+// GetCommentChangeEvents retrieves all change events for a post, ordered by most recent first.
+// The postID should be without prefix (e.g., "abc123").
+// The limit parameter specifies the maximum number of events to return.
+// Returns an empty slice if no events exist for the post (not an error).
+// Returns an error if the operation fails.
+func (s *SQLiteStore) GetCommentChangeEvents(ctx context.Context, postID string, limit int) ([]*storage.CommentChangeEvent, error) {
+	if postID == "" {
+		return nil, &storage.ValidationError{Operation: "GetCommentChangeEvents", Field: "postID", Reason: "post ID cannot be empty"}
+	}
+	if limit < 1 {
+		return nil, &storage.ValidationError{Operation: "GetCommentChangeEvents", Field: "limit", Reason: "limit must be greater than 0"}
+	}
+
+	s.logger.Debug("getting comment change events", "post_id", postID, "limit", limit)
+
+	rows, err := s.db.QueryContext(ctx, selectCommentChangeEventsQuery, postID, limit)
+	if err != nil {
+		return nil, &storage.DatabaseError{Operation: "GetCommentChangeEvents", Message: fmt.Sprintf("failed to query change events for post %s", postID), Err: err}
+	}
+	defer rows.Close()
+
+	// Initialize as empty slice to return [] instead of nil when no rows
+	events := make([]*storage.CommentChangeEvent, 0)
+
+	for rows.Next() {
+		var event storage.CommentChangeEvent
+		var detectedAtUnix int64
+
+		err := rows.Scan(&event.ID, &event.PostID, &event.Fullname, &detectedAtUnix, &event.PreviousCount, &event.NewCount, &event.CommentsAdded)
+		if err != nil {
+			return nil, &storage.DatabaseError{Operation: "GetCommentChangeEvents", Message: "failed to scan change event row", Err: err}
+		}
+
+		// Convert Unix timestamp (seconds) to time.Time
+		if detectedAtUnix < 0 {
+			return nil, &storage.DatabaseError{
+				Operation: "GetCommentChangeEvents",
+				Message:   fmt.Sprintf("invalid change event timestamp for post %s: negative Unix timestamp %d", postID, detectedAtUnix),
+				Err:       nil,
+			}
+		}
+		event.DetectedAt = time.Unix(detectedAtUnix, 0).UTC()
+
+		events = append(events, &event)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, &storage.DatabaseError{Operation: "GetCommentChangeEvents", Message: "error iterating over change event rows", Err: err}
+	}
+
+	s.logger.Debug("successfully retrieved comment change events", "post_id", postID, "count", len(events))
+	return events, nil
+}
+
+// verifyIndexes checks that required indexes exist in the database.
+// This ensures migrations completed successfully and queries will perform well.
+func (s *SQLiteStore) verifyIndexes() error {
+	requiredIndexes := []string{
+		"idx_post_snapshots_post_created",
+		"idx_comment_change_events_post_detected",
+	}
+
+	for _, idx := range requiredIndexes {
+		var exists int
+		query := "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name=?"
+		err := s.db.QueryRow(query, idx).Scan(&exists)
+		if err != nil || exists == 0 {
+			return &storage.DatabaseError{
+				Operation: "verifyIndexes",
+				Message:   fmt.Sprintf("required index %s is missing", idx),
+				Err:       err,
+			}
+		}
+	}
+	return nil
 }

@@ -18,6 +18,9 @@ type Store interface {
 	// CommentOperations defines operations for managing comments.
 	CommentOperations
 
+	// SnapshotOperations defines operations for tracking post state over time.
+	SnapshotOperations
+
 	// UtilityOperations defines utility operations for store management.
 	UtilityOperations
 }
@@ -91,6 +94,36 @@ type CommentOperations interface {
 	// Returns an error if any operation fails.
 	// Implementations should aim for transactional behavior where possible.
 	UpsertComments(ctx context.Context, comments []*types.Comment) error
+}
+
+// SnapshotOperations defines methods for tracking post state over time.
+// All methods are thread-safe and can be called concurrently from multiple goroutines.
+// Implementations must ensure that concurrent snapshot operations do not result in
+// data corruption or deadlocks.
+type SnapshotOperations interface {
+	// SavePostSnapshot stores a snapshot of a post's current state.
+	// The snapshot contains immutable data about the post at a specific point in time.
+	// Returns an error if the operation fails.
+	SavePostSnapshot(ctx context.Context, snapshot *PostSnapshot) error
+
+	// GetLatestSnapshot retrieves the most recent snapshot for a post.
+	// The postID should be without prefix (e.g., "abc123").
+	// Returns the snapshot if found, or nil with no error if no snapshot exists.
+	// Returns an error if the operation fails.
+	GetLatestSnapshot(ctx context.Context, postID string) (*PostSnapshot, error)
+
+	// SaveCommentChangeEvent records when new comments are detected for a post.
+	// The event captures the detected change in comment count between snapshots.
+	// Returns an error if the operation fails.
+	SaveCommentChangeEvent(ctx context.Context, event *CommentChangeEvent) error
+
+	// GetCommentChangeEvents retrieves all change events for a post, ordered by most recent first.
+	// The postID should be without prefix (e.g., "abc123").
+	// The limit parameter specifies the maximum number of events to return. Must be greater than 0.
+	// If limit is 0 or negative, returns a ValidationError.
+	// Returns an empty slice if no events exist for the post.
+	// Returns an error if the operation fails.
+	GetCommentChangeEvents(ctx context.Context, postID string, limit int) ([]*CommentChangeEvent, error)
 }
 
 // UtilityOperations defines utility operations for store management and monitoring.
@@ -194,4 +227,58 @@ type CacheStats struct {
 	// This is implementation-specific and may be an estimate.
 	// Zero indicates either no data or size tracking is not supported.
 	TotalSizeBytes int64
+}
+
+// PostSnapshot represents a point-in-time snapshot of a post's state.
+// Snapshots are immutable records of post metrics taken at a specific moment,
+// useful for tracking changes over time and detecting new comments.
+type PostSnapshot struct {
+	// ID is the unique identifier for this snapshot within the store.
+	ID int64
+
+	// PostID is the Reddit post ID without prefix (e.g., "abc123").
+	PostID string
+
+	// Fullname is the Reddit fullname for this post (e.g., "t3_abc123").
+	// The prefix "t3_" indicates this is a post (link).
+	Fullname string
+
+	// NumComments is the number of comments on the post at snapshot time.
+	NumComments int
+
+	// Score is the post's score (upvotes minus downvotes) at snapshot time.
+	Score int
+
+	// CreatedAt is the time this snapshot was recorded.
+	// This field is set automatically by the database on insert using DEFAULT (strftime('%s', 'now'))
+	// and should be left as zero value by callers. Stored as Unix timestamp (seconds since epoch).
+	CreatedAt time.Time
+}
+
+// CommentChangeEvent represents a detected change in comment count for a post.
+// Events are created when comparing consecutive snapshots and detecting new comments.
+type CommentChangeEvent struct {
+	// ID is the unique identifier for this event within the store.
+	ID int64
+
+	// PostID is the Reddit post ID without prefix (e.g., "abc123").
+	PostID string
+
+	// Fullname is the Reddit fullname for this post (e.g., "t3_abc123").
+	Fullname string
+
+	// DetectedAt is the time when the comment count change was detected.
+	// This field is set automatically by the database on insert using DEFAULT (strftime('%s', 'now'))
+	// and should be left as zero value by callers. Stored as Unix timestamp (seconds since epoch).
+	DetectedAt time.Time
+
+	// PreviousCount is the number of comments from the previous snapshot.
+	PreviousCount int
+
+	// NewCount is the number of comments in the new snapshot.
+	NewCount int
+
+	// CommentsAdded is the difference between NewCount and PreviousCount.
+	// Calculated as: NewCount - PreviousCount
+	CommentsAdded int
 }

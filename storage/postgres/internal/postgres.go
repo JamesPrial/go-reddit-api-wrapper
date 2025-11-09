@@ -107,3 +107,39 @@ func (s *PostgresStore) Close() error {
 func (s *PostgresStore) Ping(ctx context.Context) error {
 	return fmt.Errorf("PostgreSQL storage not yet implemented")
 }
+
+// SavePostSnapshot stores a snapshot of a post's current state (stub implementation).
+func (p *PostgresStore) SavePostSnapshot(ctx context.Context, snapshot *storage.PostSnapshot) error {
+	return &storage.DatabaseError{
+		Operation: "SavePostSnapshot",
+		Message:   "PostgreSQL backend not yet implemented",
+		Err:       nil,
+	}
+}
+
+// GetLatestSnapshot retrieves the most recent snapshot for a post (stub implementation).
+func (p *PostgresStore) GetLatestSnapshot(ctx context.Context, postID string) (*storage.PostSnapshot, error) {
+	return nil, &storage.DatabaseError{
+		Operation: "GetLatestSnapshot",
+		Message:   "PostgreSQL backend not yet implemented",
+		Err:       nil,
+	}
+}
+
+// SaveCommentChangeEvent records when new comments are detected (stub implementation).
+func (p *PostgresStore) SaveCommentChangeEvent(ctx context.Context, event *storage.CommentChangeEvent) error {
+	return &storage.DatabaseError{
+		Operation: "SaveCommentChangeEvent",
+		Message:   "PostgreSQL backend not yet implemented",
+		Err:       nil,
+	}
+}
+
+// GetCommentChangeEvents retrieves all change events for a post (stub implementation).
+func (p *PostgresStore) GetCommentChangeEvents(ctx context.Context, postID string, limit int) ([]*storage.CommentChangeEvent, error) {
+	return nil, &storage.DatabaseError{
+		Operation: "GetCommentChangeEvents",
+		Message:   "PostgreSQL backend not yet implemented",
+		Err:       nil,
+	}
+}

@@ -283,6 +283,54 @@ const (
 	queryDeleteStaleComments = `DELETE FROM comments WHERE fetched_at <= ?`
 
 	// ============================================================================
+	// Post Snapshot Queries
+	// ============================================================================
+
+	// insertPostSnapshotQuery inserts a new post snapshot into the post_snapshots table.
+	// Snapshots capture immutable post metrics (comment count, score) at a specific point in time.
+	// created_at is set to current timestamp by the database.
+	// Parameters: 4 values (post_id, fullname, num_comments, score)
+	insertPostSnapshotQuery = `
+		INSERT INTO post_snapshots (post_id, fullname, num_comments, score)
+		VALUES (?, ?, ?, ?)
+	`
+
+	// selectLatestSnapshotQuery retrieves the most recent snapshot for a post.
+	// Returns the latest snapshot ordered by created_at descending.
+	// Parameters: 1 (post_id)
+	selectLatestSnapshotQuery = `
+		SELECT id, post_id, fullname, num_comments, score, created_at
+		FROM post_snapshots
+		WHERE post_id = ?
+		ORDER BY created_at DESC
+		LIMIT 1
+	`
+
+	// ============================================================================
+	// Comment Change Event Queries
+	// ============================================================================
+
+	// insertCommentChangeEventQuery inserts a new comment change event into the comment_change_events table.
+	// Events record detected changes in comment count between consecutive snapshots.
+	// detected_at is set to current timestamp by the database.
+	// Parameters: 5 values (post_id, fullname, previous_count, new_count, comments_added)
+	insertCommentChangeEventQuery = `
+		INSERT INTO comment_change_events (post_id, fullname, previous_count, new_count, comments_added)
+		VALUES (?, ?, ?, ?, ?)
+	`
+
+	// selectCommentChangeEventsQuery retrieves all comment change events for a post.
+	// Returns events ordered by detected_at descending (most recent first).
+	// Parameters: 2 (post_id, limit)
+	selectCommentChangeEventsQuery = `
+		SELECT id, post_id, fullname, detected_at, previous_count, new_count, comments_added
+		FROM comment_change_events
+		WHERE post_id = ?
+		ORDER BY detected_at DESC
+		LIMIT ?
+	`
+
+	// ============================================================================
 	// SQLite-specific expressions
 	// ============================================================================
 

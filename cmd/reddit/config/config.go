@@ -49,6 +49,7 @@ type Config struct {
 	MinScoreFilter  int    // Filter posts with minimum score threshold (can be negative)
 
 	// Monitor configuration
+	MonitorDuration time.Duration // Total duration to monitor (0 means indefinite)
 	MonitorInterval time.Duration // Polling interval for monitor command (default: DefaultMonitorInterval)
 	MonitorLimit    int           // Posts per fetch for monitor command (default: DefaultMonitorLimit)
 	FetchComments   bool          // Fetch comments for posts in monitor mode (default: DefaultFetchComments, false disables comment fetching to save API quota)
@@ -66,6 +67,7 @@ type Config struct {
 //   - REDDIT_USER_AGENT: Optional custom user agent string
 //   - REDDIT_STORE: Optional boolean to enable storage (default: false)
 //   - REDDIT_DB_PATH: Optional path to SQLite database file (default: ~/.reddit/data.db)
+//   - REDDIT_MONITOR_DURATION: Optional total duration to monitor (default: 0 = indefinite)
 //   - REDDIT_MONITOR_INTERVAL: Optional polling interval for monitor command (default: 5m)
 //   - REDDIT_MONITOR_LIMIT: Optional posts per fetch for monitor command (default: 25)
 //   - REDDIT_FETCH_COMMENTS: Optional boolean to fetch comments in monitor mode (default: true)
@@ -111,6 +113,14 @@ func FromEnv() (*Config, error) {
 	}
 
 	// Parse monitor configuration
+	if duration := os.Getenv("REDDIT_MONITOR_DURATION"); duration != "" {
+		d, err := time.ParseDuration(duration)
+		if err != nil {
+			return nil, fmt.Errorf("invalid REDDIT_MONITOR_DURATION: %w", err)
+		}
+		cfg.MonitorDuration = d
+	}
+
 	if interval := os.Getenv("REDDIT_MONITOR_INTERVAL"); interval != "" {
 		duration, err := time.ParseDuration(interval)
 		if err != nil {
@@ -200,6 +210,11 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("monitor limit must be between 1 and 100, got %d", c.MonitorLimit)
 	}
 
+	// Monitor duration validation - must be non-negative (0 means indefinite)
+	if c.MonitorDuration < 0 {
+		return fmt.Errorf("monitor duration must be non-negative, got %v", c.MonitorDuration)
+	}
+
 	return nil
 }
 
@@ -227,7 +242,7 @@ func (c *Config) ToRedditConfig() *graw.Config {
 // It includes the database path but does not include sensitive credentials.
 func (c *Config) String() string {
 	return fmt.Sprintf(
-		"Config{ClientID: %s, Username: %s, Output: %s, Limit: %d, Verbose: %v, Debug: %v, Store: %v, DBPath: %s, SubredditFilter: %s, MinScoreFilter: %d, MonitorInterval: %v, MonitorLimit: %d, FetchComments: %v}",
-		c.ClientID, c.Username, c.Output, c.Limit, c.Verbose, c.Debug, c.Store, c.DBPath, c.SubredditFilter, c.MinScoreFilter, c.MonitorInterval, c.MonitorLimit, c.FetchComments,
+		"Config{ClientID: %s, Username: %s, Output: %s, Limit: %d, Verbose: %v, Debug: %v, Store: %v, DBPath: %s, SubredditFilter: %s, MinScoreFilter: %d, MonitorDuration: %v, MonitorInterval: %v, MonitorLimit: %d, FetchComments: %v}",
+		c.ClientID, c.Username, c.Output, c.Limit, c.Verbose, c.Debug, c.Store, c.DBPath, c.SubredditFilter, c.MinScoreFilter, c.MonitorDuration, c.MonitorInterval, c.MonitorLimit, c.FetchComments,
 	)
 }
