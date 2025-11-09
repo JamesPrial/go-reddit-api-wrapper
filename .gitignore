@@ -60,6 +60,7 @@ frontend/server/test-build
 *.log
 server*.log
 start.sh
+logs/*
 
 # Frontend build artifacts and caches
 node_modules/
