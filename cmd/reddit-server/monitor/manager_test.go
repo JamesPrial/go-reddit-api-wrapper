@@ -121,6 +121,18 @@ func (m *mockStore) GetStats(ctx context.Context) (*storage.CacheStats, error) {
 func (m *mockStore) EvictStale(ctx context.Context, maxAge time.Duration) (int64, error) {
 	return 0, nil
 }
+func (m *mockStore) SavePostSnapshot(ctx context.Context, snapshot *storage.PostSnapshot) error {
+	return nil
+}
+func (m *mockStore) GetLatestSnapshot(ctx context.Context, postID string) (*storage.PostSnapshot, error) {
+	return nil, nil
+}
+func (m *mockStore) SaveCommentChangeEvent(ctx context.Context, event *storage.CommentChangeEvent) error {
+	return nil
+}
+func (m *mockStore) GetCommentChangeEvents(ctx context.Context, postID string, limit int) ([]*storage.CommentChangeEvent, error) {
+	return nil, nil
+}
 
 // newTestLogger creates a logger for testing that discards output.
 func newTestLogger() *slog.Logger {
