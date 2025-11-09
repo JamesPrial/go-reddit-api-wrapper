@@ -217,6 +217,22 @@ func (m *MonitorManager) Stop() error {
 	}
 
 	snapshot := instance.stats.Snapshot()
+
+	// Query actual database stats to get real unique post/comment counts
+	// This prevents inflated counts from duplicate fetches
+	statsCtx, statsCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer statsCancel()
+
+	if dbStats, err := m.store.GetStats(statsCtx); err == nil && dbStats != nil {
+		snapshot.TotalPosts = uint64(dbStats.PostCount)
+		snapshot.TotalComments = uint64(dbStats.CommentCount)
+	} else if err != nil {
+		m.logger.Warn("failed to get database stats after monitor stop",
+			slog.String("monitor_id", instance.ID),
+			slog.Any("error", err),
+		)
+	}
+
 	m.logger.Info("monitor stopped",
 		slog.String("monitor_id", instance.ID),
 		slog.Uint64("total_fetches", snapshot.TotalFetches),
@@ -236,6 +252,16 @@ func (m *MonitorManager) Stop() error {
 func (m *MonitorManager) GetStatus() (*MonitorStatus, error) {
 	m.mu.RLock()
 	instance := m.activeMonitor
+	var id string
+	var subreddits []string
+	var interval time.Duration
+	var started time.Time
+	if instance != nil {
+		id = instance.ID
+		subreddits = append([]string{}, instance.Subreddits...)
+		interval = instance.Interval
+		started = instance.StartedAt
+	}
 	m.mu.RUnlock()
 
 	if instance == nil {
@@ -245,13 +271,27 @@ func (m *MonitorManager) GetStatus() (*MonitorStatus, error) {
 	}
 
 	snapshot := instance.stats.Snapshot()
-	started := instance.StartedAt
+
+	// Query actual database stats to get real unique post/comment counts
+	// This prevents inflated counts from duplicate fetches
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if dbStats, err := m.store.GetStats(ctx); err == nil && dbStats != nil {
+		snapshot.TotalPosts = uint64(dbStats.PostCount)
+		snapshot.TotalComments = uint64(dbStats.CommentCount)
+	} else if err != nil {
+		m.logger.Warn("failed to get database stats for monitor status",
+			slog.String("monitor_id", id),
+			slog.Any("error", err),
+		)
+	}
 
 	return &MonitorStatus{
 		Status:     "running",
-		ID:         instance.ID,
-		Subreddits: instance.Subreddits,
-		Interval:   instance.Interval.String(),
+		ID:         id,
+		Subreddits: subreddits,
+		Interval:   interval.String(),
 		StartedAt:  &started,
 		Stats:      snapshot,
 	}, nil
@@ -395,7 +435,8 @@ func (m *MonitorManager) fetchAndSave(ctx context.Context, subreddit string, ins
 		return fmt.Errorf("failed to save posts from %s: %w", subreddit, err)
 	}
 
-	instance.stats.IncrementPosts(uint64(len(resp.Posts)))
+	// Note: Post count is tracked via database stats, not incremented here
+	// This prevents counting duplicate posts on subsequent fetches
 
 	// Optionally fetch comments for each post
 	if instance.FetchComments {
@@ -439,7 +480,8 @@ func (m *MonitorManager) fetchAndSave(ctx context.Context, subreddit string, ins
 					instance.stats.IncrementConsecutiveErrors()
 					continue
 				}
-				instance.stats.IncrementComments(uint64(len(commentsResp.Comments)))
+				// Note: Comment count is tracked via database stats, not incremented here
+				// This prevents counting duplicate comments on subsequent fetches
 			}
 		}
 	}

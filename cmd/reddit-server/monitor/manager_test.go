@@ -48,6 +48,7 @@ func (m *mockRedditClient) GetComments(ctx context.Context, req *types.CommentsR
 
 // mockStore mocks the storage layer for testing.
 type mockStore struct {
+	mu sync.RWMutex
 	upsertPostsFunc    func(ctx context.Context, posts []*types.Post) error
 	upsertCommentsFunc func(ctx context.Context, comments []*types.Comment) error
 	callCounts         struct {
@@ -64,7 +65,9 @@ func (m *mockStore) UpsertPosts(ctx context.Context, posts []*types.Post) error 
 	m.callCounts.upsertPostsCalls++
 	m.callCounts.mu.Unlock()
 
+	m.mu.Lock()
 	m.savedPosts = append(m.savedPosts, posts...)
+	m.mu.Unlock()
 
 	if m.upsertPostsFunc != nil {
 		return m.upsertPostsFunc(ctx, posts)
@@ -77,7 +80,9 @@ func (m *mockStore) UpsertComments(ctx context.Context, comments []*types.Commen
 	m.callCounts.upsertCommentsCalls++
 	m.callCounts.mu.Unlock()
 
+	m.mu.Lock()
 	m.savedComments = append(m.savedComments, comments...)
+	m.mu.Unlock()
 
 	if m.upsertCommentsFunc != nil {
 		return m.upsertCommentsFunc(ctx, comments)
@@ -105,7 +110,14 @@ func (m *mockStore) GetCommentTree(ctx context.Context, postID string, opts *sto
 func (m *mockStore) DeleteComment(ctx context.Context, id string) error        { return nil }
 func (m *mockStore) Close() error                                              { return nil }
 func (m *mockStore) Ping(ctx context.Context) error                            { return nil }
-func (m *mockStore) GetStats(ctx context.Context) (*storage.CacheStats, error) { return nil, nil }
+func (m *mockStore) GetStats(ctx context.Context) (*storage.CacheStats, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return &storage.CacheStats{
+		PostCount:    int64(len(m.savedPosts)),
+		CommentCount: int64(len(m.savedComments)),
+	}, nil
+}
 func (m *mockStore) EvictStale(ctx context.Context, maxAge time.Duration) (int64, error) {
 	return 0, nil
 }
