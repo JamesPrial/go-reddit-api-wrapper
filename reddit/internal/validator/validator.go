@@ -188,9 +188,9 @@ func (v *Validator) ValidateLinkID(linkID string) (string, error) {
 	}
 
 	// Check for wrong prefix (e.g., t1_, t5_)
-	if strings.Contains(linkID, "_") && (strings.HasPrefix(linkID, "t1_") ||
-		strings.HasPrefix(linkID, "t2_") || strings.HasPrefix(linkID, "t4_") ||
-		strings.HasPrefix(linkID, "t5_") || strings.HasPrefix(linkID, "t6_")) {
+	if strings.HasPrefix(linkID, "t1_") || strings.HasPrefix(linkID, "t2_") ||
+		strings.HasPrefix(linkID, "t4_") || strings.HasPrefix(linkID, "t5_") ||
+		strings.HasPrefix(linkID, "t6_") {
 		return "", &ValidationError{
 			Field:  "LinkID",
 			Value:  linkID,

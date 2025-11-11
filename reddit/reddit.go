@@ -376,7 +376,8 @@ func NewClientWithContext(ctx context.Context, config *Config) (*Reddit, error) 
 	if err != nil {
 		return nil, &ConfigError{Field: "TokenCachePath", Message: fmt.Sprintf("failed to get token from cache: %v", err)}
 	}
-	if found && expiry.After(time.Now()) || !found {
+	// Fetch a new token if not found or if expired
+	if !found || expiry.Before(time.Now()) {
 		token, expiry, err = authenticator.GetToken(ctx)
 		if err != nil {
 			return nil, &AuthError{Message: "failed to authenticate", Err: err}
@@ -978,6 +979,16 @@ func (r *Reddit) GetMoreComments(ctx context.Context, request *types.MoreComment
 	// Create POST request with form data
 	payload := formData.Encode()
 
+	// Limit payload size to prevent DoS attacks (1MB limit)
+	const maxPayloadSize = 1 * 1024 * 1024 // 1MB
+	if len(payload) > maxPayloadSize {
+		return nil, &ValidationError{
+			Field:  "payload",
+			Value:  fmt.Sprintf("%d bytes", len(payload)),
+			Reason: fmt.Sprintf("payload size exceeds maximum of %d bytes", maxPayloadSize),
+		}
+	}
+
 	req, err := r.httpClient.NewRequest(ctx, http.MethodPost, MoreChildrenURL, strings.NewReader(payload))
 	if err != nil {
 		return nil, wrapDoError(err, "create request", MoreChildrenURL)
@@ -1100,9 +1111,11 @@ func (r *Reddit) handleAuthErrorWithContext(ctx context.Context, err error) bool
 	if apiErr, ok := mapAPIError(err); ok {
 		if apiErr.StatusCode == http.StatusUnauthorized {
 			if err := r.tokenCache.Invalidate(ctx); err != nil {
-				r.config.Logger.LogAttrs(ctx, slog.LevelError, "failed to invalidate token cache",
-					slog.String("error", err.Error()),
-					slog.String("request_id", reqid.FromContext(ctx)))
+				if r.config.Logger != nil {
+					r.config.Logger.LogAttrs(ctx, slog.LevelError, "failed to invalidate token cache",
+						slog.String("error", err.Error()),
+						slog.String("request_id", reqid.FromContext(ctx)))
+				}
 			}
 			return true
 		}

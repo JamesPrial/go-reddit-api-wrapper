@@ -165,13 +165,15 @@ func (m *MonitorManager) Start(ctx context.Context, config MonitorConfig) (*Moni
 
 	m.activeMonitor = instance
 
-	m.logger.Info("starting monitor",
-		slog.String("monitor_id", id),
-		slog.Any("subreddits", config.Subreddits),
-		slog.Duration("interval", config.Interval),
-		slog.Int("limit", config.Limit),
-		slog.Bool("fetch_comments", config.FetchComments),
-	)
+	if m.logger != nil {
+		m.logger.Info("starting monitor",
+			slog.String("monitor_id", id),
+			slog.Any("subreddits", config.Subreddits),
+			slog.Duration("interval", config.Interval),
+			slog.Int("limit", config.Limit),
+			slog.Bool("fetch_comments", config.FetchComments),
+		)
+	}
 
 	go m.monitorLoop(monitorCtx, instance)
 
@@ -179,10 +181,12 @@ func (m *MonitorManager) Start(ctx context.Context, config MonitorConfig) (*Moni
 	persistCtx, persistCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer persistCancel()
 	if err := m.persistState(persistCtx, instance); err != nil {
-		m.logger.Warn("failed to persist initial monitor state",
-			slog.String("monitor_id", id),
-			slog.Any("error", err),
-		)
+		if m.logger != nil {
+			m.logger.Warn("failed to persist initial monitor state",
+				slog.String("monitor_id", id),
+				slog.Any("error", err),
+			)
+		}
 	}
 
 	// Return the MonitorInstance type
@@ -210,7 +214,9 @@ func (m *MonitorManager) Stop() error {
 	m.activeMonitor = nil
 	m.mu.Unlock()
 
-	m.logger.Info("stopping monitor", slog.String("monitor_id", instance.ID))
+	if m.logger != nil {
+		m.logger.Info("stopping monitor", slog.String("monitor_id", instance.ID))
+	}
 
 	instance.cancel()
 
@@ -222,15 +228,19 @@ func (m *MonitorManager) Stop() error {
 	select {
 	case err := <-instance.done:
 		if err != nil {
-			m.logger.Warn("monitor stopped with error",
-				slog.String("monitor_id", instance.ID),
-				slog.Any("error", err),
-			)
+			if m.logger != nil {
+				m.logger.Warn("monitor stopped with error",
+					slog.String("monitor_id", instance.ID),
+					slog.Any("error", err),
+				)
+			}
 		}
 	case <-ctx.Done():
-		m.logger.Warn("monitor stop timeout",
-			slog.String("monitor_id", instance.ID),
-		)
+		if m.logger != nil {
+			m.logger.Warn("monitor stop timeout",
+				slog.String("monitor_id", instance.ID),
+			)
+		}
 		timeoutErr = fmt.Errorf("monitor stop timeout after %v", StopTimeout)
 	}
 
@@ -245,29 +255,35 @@ func (m *MonitorManager) Stop() error {
 		snapshot.TotalPosts = uint64(dbStats.PostCount)
 		snapshot.TotalComments = uint64(dbStats.CommentCount)
 	} else if err != nil {
-		m.logger.Warn("failed to get database stats after monitor stop",
-			slog.String("monitor_id", instance.ID),
-			slog.Any("error", err),
-		)
+		if m.logger != nil {
+			m.logger.Warn("failed to get database stats after monitor stop",
+				slog.String("monitor_id", instance.ID),
+				slog.Any("error", err),
+			)
+		}
 	}
 
 	// Persist final state before marking as stopped
 	persistCtx, persistCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer persistCancel()
 	if err := m.persistState(persistCtx, instance); err != nil {
-		m.logger.Warn("failed to persist final monitor state",
-			slog.String("monitor_id", instance.ID),
-			slog.Any("error", err),
-		)
+		if m.logger != nil {
+			m.logger.Warn("failed to persist final monitor state",
+				slog.String("monitor_id", instance.ID),
+				slog.Any("error", err),
+			)
+		}
 	}
 
 	// Update status to stopped in storage
 	stoppedAt := time.Now()
 	if err := m.store.UpdateMonitorStatus(persistCtx, instance.ID, "stopped"); err != nil {
-		m.logger.Warn("failed to update monitor status to stopped",
-			slog.String("monitor_id", instance.ID),
-			slog.Any("error", err),
-		)
+		if m.logger != nil {
+			m.logger.Warn("failed to update monitor status to stopped",
+				slog.String("monitor_id", instance.ID),
+				slog.Any("error", err),
+			)
+		}
 	} else {
 		// Update StoppedAt timestamp by saving full state
 		lastPostIDs := m.copyLastPostIDs(instance)
@@ -291,19 +307,23 @@ func (m *MonitorManager) Stop() error {
 			StoppedAt:         &stoppedAt,
 		}
 		if err := m.store.SaveMonitorState(persistCtx, state); err != nil {
-			m.logger.Warn("failed to update stopped_at timestamp",
-				slog.String("monitor_id", instance.ID),
-				slog.Any("error", err),
-			)
+			if m.logger != nil {
+				m.logger.Warn("failed to update stopped_at timestamp",
+					slog.String("monitor_id", instance.ID),
+					slog.Any("error", err),
+				)
+			}
 		}
 	}
 
-	m.logger.Info("monitor stopped",
-		slog.String("monitor_id", instance.ID),
-		slog.Uint64("total_fetches", snapshot.TotalFetches),
-		slog.Uint64("total_posts", snapshot.TotalPosts),
-		slog.Uint64("total_comments", snapshot.TotalComments),
-	)
+	if m.logger != nil {
+		m.logger.Info("monitor stopped",
+			slog.String("monitor_id", instance.ID),
+			slog.Uint64("total_fetches", snapshot.TotalFetches),
+			slog.Uint64("total_posts", snapshot.TotalPosts),
+			slog.Uint64("total_comments", snapshot.TotalComments),
+		)
+	}
 
 	// Preserve stats after stop
 	m.mu.Lock()
@@ -350,10 +370,12 @@ func (m *MonitorManager) GetStatus() (*MonitorStatus, error) {
 		snapshot.TotalPosts = uint64(dbStats.PostCount)
 		snapshot.TotalComments = uint64(dbStats.CommentCount)
 	} else if err != nil {
-		m.logger.Warn("failed to get database stats for monitor status",
-			slog.String("monitor_id", id),
-			slog.Any("error", err),
-		)
+		if m.logger != nil {
+			m.logger.Warn("failed to get database stats for monitor status",
+				slog.String("monitor_id", id),
+				slog.Any("error", err),
+			)
+		}
 	}
 
 	// Copy LastPostIDs map safely
@@ -425,10 +447,12 @@ func (m *MonitorManager) validateSubredditName(name string) error {
 func (m *MonitorManager) monitorLoop(ctx context.Context, instance *monitorRuntimeInstance) {
 	defer func() {
 		if r := recover(); r != nil {
-			m.logger.Error("monitor loop panic",
-				slog.String("monitor_id", instance.ID),
-				slog.Any("panic", r),
-			)
+			if m.logger != nil {
+				m.logger.Error("monitor loop panic",
+					slog.String("monitor_id", instance.ID),
+					slog.Any("panic", r),
+				)
+			}
 			instance.done <- fmt.Errorf("monitor panic: %v", r)
 		} else {
 			instance.done <- nil
@@ -455,11 +479,13 @@ func (m *MonitorManager) monitorLoop(ctx context.Context, instance *monitorRunti
 		}
 
 		if err := m.fetchAndSave(ctx, subreddit, instance); err != nil {
-			m.logger.Warn("initial fetch failed",
-				slog.String("monitor_id", instance.ID),
-				slog.String("subreddit", subreddit),
-				slog.Any("error", err),
-			)
+			if m.logger != nil {
+				m.logger.Warn("initial fetch failed",
+					slog.String("monitor_id", instance.ID),
+					slog.String("subreddit", subreddit),
+					slog.Any("error", err),
+				)
+			}
 			instance.stats.SetLastError(err.Error())
 			instance.stats.IncrementFailedFetches()
 		}
@@ -474,14 +500,18 @@ func (m *MonitorManager) monitorLoop(ctx context.Context, instance *monitorRunti
 			// Periodic persistence every 5 minutes
 			persistCtx, persistCancel := context.WithTimeout(context.Background(), 10*time.Second)
 			if err := m.persistState(persistCtx, instance); err != nil {
-				m.logger.Warn("periodic persistence failed",
-					slog.String("monitor_id", instance.ID),
-					slog.Any("error", err),
-				)
+				if m.logger != nil {
+					m.logger.Warn("periodic persistence failed",
+						slog.String("monitor_id", instance.ID),
+						slog.Any("error", err),
+					)
+				}
 			} else {
-				m.logger.Debug("periodic persistence completed",
-					slog.String("monitor_id", instance.ID),
-				)
+				if m.logger != nil {
+					m.logger.Debug("periodic persistence completed",
+						slog.String("monitor_id", instance.ID),
+					)
+				}
 			}
 			persistCancel()
 			// Reset fetch counter
@@ -495,11 +525,13 @@ func (m *MonitorManager) monitorLoop(ctx context.Context, instance *monitorRunti
 				}
 
 				if err := m.fetchAndSave(ctx, subreddit, instance); err != nil {
-					m.logger.Warn("fetch failed",
-						slog.String("monitor_id", instance.ID),
-						slog.String("subreddit", subreddit),
-						slog.Any("error", err),
-					)
+					if m.logger != nil {
+						m.logger.Warn("fetch failed",
+							slog.String("monitor_id", instance.ID),
+							slog.String("subreddit", subreddit),
+							slog.Any("error", err),
+						)
+					}
 					instance.stats.SetLastError(err.Error())
 					instance.stats.IncrementFailedFetches()
 				}
@@ -511,15 +543,19 @@ func (m *MonitorManager) monitorLoop(ctx context.Context, instance *monitorRunti
 			if fetchesSinceLastPersist >= 10 {
 				persistCtx, persistCancel := context.WithTimeout(context.Background(), 10*time.Second)
 				if err := m.persistState(persistCtx, instance); err != nil {
-					m.logger.Warn("fetch-based persistence failed",
-						slog.String("monitor_id", instance.ID),
-						slog.Any("error", err),
-					)
+					if m.logger != nil {
+						m.logger.Warn("fetch-based persistence failed",
+							slog.String("monitor_id", instance.ID),
+							slog.Any("error", err),
+						)
+					}
 				} else {
-					m.logger.Debug("fetch-based persistence completed",
-						slog.String("monitor_id", instance.ID),
-						slog.Uint64("fetches", fetchesSinceLastPersist),
-					)
+					if m.logger != nil {
+						m.logger.Debug("fetch-based persistence completed",
+							slog.String("monitor_id", instance.ID),
+							slog.Uint64("fetches", fetchesSinceLastPersist),
+						)
+					}
 				}
 				persistCancel()
 				// Reset fetch counter
@@ -590,11 +626,13 @@ func (m *MonitorManager) fetchAndSave(ctx context.Context, subreddit string, ins
 			commentsResp, err := m.client.GetComments(ctx, commentsReq)
 			if err != nil {
 				// Non-fatal error: log and continue with next post
-				m.logger.Warn("failed to fetch comments",
-					slog.String("monitor_id", instance.ID),
-					slog.String("post_id", post.ID),
-					slog.Any("error", err),
-				)
+				if m.logger != nil {
+					m.logger.Warn("failed to fetch comments",
+						slog.String("monitor_id", instance.ID),
+						slog.String("post_id", post.ID),
+						slog.Any("error", err),
+					)
+				}
 				instance.stats.IncrementConsecutiveErrors()
 				continue
 			}
@@ -605,11 +643,13 @@ func (m *MonitorManager) fetchAndSave(ctx context.Context, subreddit string, ins
 			if commentsResp != nil && len(commentsResp.Comments) > 0 {
 				if err := m.store.UpsertComments(ctx, commentsResp.Comments); err != nil {
 					// Non-fatal error: log and continue with next post
-					m.logger.Warn("failed to save comments",
-						slog.String("monitor_id", instance.ID),
-						slog.String("post_id", post.ID),
-						slog.Any("error", err),
-					)
+					if m.logger != nil {
+						m.logger.Warn("failed to save comments",
+							slog.String("monitor_id", instance.ID),
+							slog.String("post_id", post.ID),
+							slog.Any("error", err),
+						)
+					}
 					instance.stats.IncrementConsecutiveErrors()
 					continue
 				}
@@ -711,12 +751,14 @@ func (m *MonitorManager) setLastPostID(instance *monitorRuntimeInstance, subredd
 	defer cancel()
 
 	if err := m.store.UpdateLastPostID(ctx, instance.ID, subreddit, postID); err != nil {
-		m.logger.Warn("failed to persist last post ID",
-			slog.String("monitor_id", instance.ID),
-			slog.String("subreddit", subreddit),
-			slog.String("post_id", postID),
-			slog.Any("error", err),
-		)
+		if m.logger != nil {
+			m.logger.Warn("failed to persist last post ID",
+				slog.String("monitor_id", instance.ID),
+				slog.String("subreddit", subreddit),
+				slog.String("post_id", postID),
+				slog.Any("error", err),
+			)
+		}
 	}
 }
 
@@ -778,14 +820,16 @@ func (m *MonitorManager) RestoreFromState(ctx context.Context, state *storage.Mo
 
 	m.activeMonitor = instance
 
-	m.logger.Info("restoring monitor from state",
-		slog.String("monitor_id", state.ID),
-		slog.Any("subreddits", state.Subreddits),
-		slog.Duration("interval", config.Interval),
-		slog.Int("limit", state.PostLimit),
-		slog.Bool("fetch_comments", state.FetchComments),
-		slog.Uint64("total_fetches", state.TotalFetches),
-	)
+	if m.logger != nil {
+		m.logger.Info("restoring monitor from state",
+			slog.String("monitor_id", state.ID),
+			slog.Any("subreddits", state.Subreddits),
+			slog.Duration("interval", config.Interval),
+			slog.Int("limit", state.PostLimit),
+			slog.Bool("fetch_comments", state.FetchComments),
+			slog.Uint64("total_fetches", state.TotalFetches),
+		)
+	}
 
 	go m.monitorLoop(monitorCtx, instance)
 
@@ -793,10 +837,12 @@ func (m *MonitorManager) RestoreFromState(ctx context.Context, state *storage.Mo
 	persistCtx, persistCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer persistCancel()
 	if err := m.store.UpdateMonitorStatus(persistCtx, state.ID, "active"); err != nil {
-		m.logger.Warn("failed to update monitor status to active",
-			slog.String("monitor_id", state.ID),
-			slog.Any("error", err),
-		)
+		if m.logger != nil {
+			m.logger.Warn("failed to update monitor status to active",
+				slog.String("monitor_id", state.ID),
+				slog.Any("error", err),
+			)
+		}
 	}
 
 	return &MonitorInstance{
