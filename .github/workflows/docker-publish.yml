@@ -1,0 +1,87 @@
+name: Build and Push Docker Image
+
+# Trigger: Run when code is pushed to main AND tests have passed
+on:
+  workflow_run:
+    workflows: ["Test and Build"]
+    types:
+      - completed
+    branches:
+      - main
+
+# Minimal permissions for security
+permissions:
+  contents: read
+  packages: write
+
+# Cancel in-progress runs for the same workflow
+concurrency:
+  group: docker-publish-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  docker:
+    name: Build and Push Multi-Arch Image
+    runs-on: ubuntu-latest
+    # Only run if tests passed successfully
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        # QEMU enables building ARM64 images on x86 runners
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Set up Docker Buildx
+        # Buildx enables multi-platform builds and layer caching
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        # Use GITHUB_TOKEN for authentication (no manual secrets needed)
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        # Generate Docker tags and labels based on Git metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/reddit-server
+          tags: |
+            # Tag with 'latest' for main branch
+            type=raw,value=latest,enable={{is_default_branch}}
+            # Tag with git short SHA (e.g., 'abc1234')
+            type=sha,format=short
+          labels: |
+            org.opencontainers.image.title=Reddit API Server
+            org.opencontainers.image.description=HTTP server for Reddit API wrapper with authentication and storage
+            org.opencontainers.image.vendor=${{ github.repository_owner }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          # Build for both AMD64 (x86) and ARM64 architectures
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Enable layer caching for faster subsequent builds
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          # Build arguments
+          build-args: |
+            BUILDTIME=${{ github.event.repository.updated_at }}
+            VERSION=${{ github.sha }}
+
+      - name: Image digest
+        # Output the image digest for verification
+        run: echo "Image pushed with digest ${{ steps.build.outputs.digest }}"
