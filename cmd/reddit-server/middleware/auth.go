@@ -60,14 +60,36 @@ func respondError(w http.ResponseWriter, status int, message string) {
 func APIKey(keys []string, exemptPaths []string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Log middleware invocation with configuration details
+			slog.Debug("apikey middleware called",
+				"path", r.URL.Path,
+				"method", r.Method,
+				"configured_keys", len(keys),
+				"exempt_paths", len(exemptPaths),
+			)
+
 			// Skip authentication for exempt paths
-			if isExemptPath(r.URL.Path, exemptPaths) {
+			isExempt := isExemptPath(r.URL.Path, exemptPaths)
+			slog.Debug("path exemption check",
+				"path", r.URL.Path,
+				"is_exempt", isExempt,
+			)
+			if isExempt {
+				slog.Info("request allowed without authentication (exempt path)",
+					"path", r.URL.Path,
+					"method", r.Method,
+				)
 				next.ServeHTTP(w, r)
 				return
 			}
 
 			// Extract Authorization header
 			authHeader := r.Header.Get("Authorization")
+			hasAuthHeader := authHeader != ""
+			slog.Debug("authorization header check",
+				"path", r.URL.Path,
+				"has_auth_header", hasAuthHeader,
+			)
 
 			// Check if Authorization header is present
 			if authHeader == "" {
@@ -90,9 +112,18 @@ func APIKey(keys []string, exemptPaths []string) func(http.Handler) http.Handler
 				respondError(w, http.StatusUnauthorized, "authentication required")
 				return
 			}
+			slog.Debug("bearer token parsed successfully",
+				"path", r.URL.Path,
+			)
 
 			// Validate API key against allowed keys using constant-time comparison
-			if !validateAPIKey(apiKey, keys) {
+			isValid := validateAPIKey(apiKey, keys)
+			slog.Debug("api key validation result",
+				"path", r.URL.Path,
+				"is_valid", isValid,
+				"keys_checked", len(keys),
+			)
+			if !isValid {
 				slog.Warn("invalid API key",
 					"path", r.URL.Path,
 					"remote_addr", r.RemoteAddr,
@@ -102,6 +133,10 @@ func APIKey(keys []string, exemptPaths []string) func(http.Handler) http.Handler
 			}
 
 			// Key is valid, call the next handler
+			slog.Info("request authenticated successfully",
+				"path", r.URL.Path,
+				"method", r.Method,
+			)
 			next.ServeHTTP(w, r)
 		})
 	}
@@ -158,6 +193,14 @@ func validateAPIKey(providedKey string, allowedKeys []string) bool {
 // Other paths are matched exactly.
 func isExemptPath(path string, exemptPaths []string) bool {
 	for _, exemptPath := range exemptPaths {
+		// Special case: "/" should only match the root path exactly, not as a prefix
+		if exemptPath == "/" {
+			if path == "/" {
+				return true
+			}
+			continue
+		}
+
 		// If exempt path ends with /, treat it as a prefix match
 		if strings.HasSuffix(exemptPath, "/") {
 			if strings.HasPrefix(path, exemptPath) || path == strings.TrimSuffix(exemptPath, "/") {
@@ -240,7 +283,7 @@ func JWTAuth(validator JWTAuthValidator, exemptPaths []string) func(http.Handler
 
 			slog.Debug("JWT token validated", "path", r.URL.Path)
 
-			// Token is valid, call the next handler
+			// Token is valid, proceed to next handler
 			next.ServeHTTP(w, r)
 		})
 	}

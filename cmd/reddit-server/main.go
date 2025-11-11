@@ -292,25 +292,23 @@ func main() {
 	handler = middleware.Logging(logger)(handler)
 	handler = middleware.CORS(cfg.AllowedOrigins)(handler)
 
-	if jwtService != nil {
-		// JWT auth as primary, exempt public endpoints
-		jwtValidator := &jwtValidatorAdapter{jwtService: jwtService}
-		handler = middleware.JWTAuth(jwtValidator, []string{
-			"/health",
-			"/",
-			"/app/",
-			"/api/v1/auth/login",
-			"/api/v1/auth/logout",
-		})(handler)
-	}
-
-	// API key as fallback for programmatic access (applied after JWT)
-	handler = middleware.APIKey(cfg.APIKeys, []string{
+	// Authentication: Load either JWT or API key middleware (not both)
+	exemptPaths := []string{
 		"/health",
 		"/",
 		"/app/",
-		"/api/v1/auth/", // All auth endpoints accessible with API key
-	})(handler)
+		"/api/v1/auth/login",
+		"/api/v1/auth/logout",
+	}
+
+	if jwtService != nil {
+		// JWT authentication mode - use JWT tokens only
+		jwtValidator := &jwtValidatorAdapter{jwtService: jwtService}
+		handler = middleware.JWTAuth(jwtValidator, exemptPaths)(handler)
+	} else {
+		// API key authentication mode - use API keys only
+		handler = middleware.APIKey(cfg.APIKeys, exemptPaths)(handler)
+	}
 
 	// Create HTTP server
 	addr := fmt.Sprintf(":%d", cfg.Port)
@@ -327,11 +325,14 @@ func main() {
 	// Start server in a goroutine
 	serverErrors := make(chan error, 1)
 	go func() {
-		authEnabled := cfg.Auth != nil && cfg.Auth.Enabled
+		jwtAuthEnabled := cfg.Auth != nil && cfg.Auth.Enabled
+		apiKeyAuthEnabled := len(cfg.APIKeys) > 0
 		logger.Info("starting HTTP server",
 			"addr", addr,
 			"port", cfg.Port,
-			"auth_enabled", authEnabled,
+			"jwt_auth_enabled", jwtAuthEnabled,
+			"api_key_auth_enabled", apiKeyAuthEnabled,
+			"api_keys_count", len(cfg.APIKeys),
 		)
 		serverErrors <- srv.ListenAndServe()
 	}()

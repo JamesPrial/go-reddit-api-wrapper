@@ -1,0 +1,108 @@
+version: '3.8'
+
+services:
+  reddit-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: reddit-server:latest
+    container_name: reddit-server
+
+    # Port mapping
+    ports:
+      - "${PORT:-8080}:8080"
+
+    # Environment variables from .env file (for secrets)
+    env_file:
+      - .env
+
+    # Environment variables with defaults (override in .env for secrets)
+    environment:
+      # Server Configuration
+      PORT: 8080
+      SHUTDOWN_TIMEOUT: 30s
+      REQUEST_TIMEOUT: 30s
+
+      # Storage Configuration
+      STORAGE_DSN: /data/reddit.db
+      STORAGE_MAX_OPEN_CONNS: 10
+      STORAGE_MAX_IDLE_CONNS: 5
+      STORAGE_CONN_MAX_LIFETIME: 1h
+
+      # Logging Configuration
+      LOG_LEVEL: info
+      LOG_FORMAT: json
+
+      # CORS Configuration
+      ALLOWED_ORIGINS: "http://localhost:8080,http://localhost:5173"
+
+      # Authentication & Security
+      # Leave blank - will auto-generate or use values from .env:
+      # REDDIT_CLIENT_ID: ""
+      # REDDIT_CLIENT_SECRET: ""
+      # REDDIT_USERNAME: ""
+      # REDDIT_PASSWORD: ""
+      # API_KEYS: ""
+      # JWT_SECRET_KEY: ""
+
+      # JWT Authentication (optional)
+      AUTH_ENABLED: "false"
+      # USERS: '[{"username":"admin","password_hash":"$$2a$$10$$9Q1CE59E133ULD5iWjvTjeiKwaVsflvOTbZrgIxU53HL4CroOppGu","role":"admin"},{"username":"user","password_hash":"$$2a$$10$$Sgtb.hGNr9g1xUEmdloyJOAF7bPn8RVgxtP64NwQfMuLW4SpNgipG","role":"viewer"}]'
+      # TOKEN_EXPIRY: 24h
+
+    # Volume mounts for persistence
+    volumes:
+      # Database persistence
+      - ./data:/data
+      # Log files (optional, only if LOG_FILE is set)
+      - ./logs:/logs
+      # Optional: mount config file if using YAML configuration
+      # - ./config.yml:/app/config.yml:ro
+
+    # Health check
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
+    # Restart policy
+    restart: unless-stopped
+
+    # Resource limits (optional, uncomment to enable)
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: '1.0'
+    #       memory: 512M
+    #     reservations:
+    #       cpus: '0.5'
+    #       memory: 256M
+
+    # Labels
+    labels:
+      com.reddit-server.description: "Reddit API HTTP Server"
+      com.reddit-server.version: "1.0"
+
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    # Network mode (optional)
+    # network_mode: bridge
+
+# Create named volumes (alternative to bind mounts)
+# volumes:
+#   reddit-data:
+#     driver: local
+#   reddit-logs:
+#     driver: local
+
+# Custom network (optional)
+# networks:
+#   reddit-network:
+#     driver: bridge
