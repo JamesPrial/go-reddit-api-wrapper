@@ -133,6 +133,28 @@ func (m *mockStore) SaveCommentChangeEvent(ctx context.Context, event *storage.C
 func (m *mockStore) GetCommentChangeEvents(ctx context.Context, postID string, limit int) ([]*storage.CommentChangeEvent, error) {
 	return nil, nil
 }
+func (m *mockStore) SaveMonitorState(ctx context.Context, state *storage.MonitorState) error {
+	return nil
+}
+func (m *mockStore) GetMonitorState(ctx context.Context, id string) (*storage.MonitorState, error) {
+	return nil, nil
+}
+func (m *mockStore) GetActiveMonitors(ctx context.Context) ([]*storage.MonitorState, error) {
+	return nil, nil
+}
+func (m *mockStore) GetPausedMonitors(ctx context.Context) ([]*storage.MonitorState, error) {
+	return nil, nil
+}
+func (m *mockStore) UpdateMonitorStatus(ctx context.Context, id string, status string) error {
+	return nil
+}
+func (m *mockStore) UpdateMonitorStats(ctx context.Context, id string, stats *storage.MonitorStats) error {
+	return nil
+}
+func (m *mockStore) UpdateLastPostID(ctx context.Context, monitorID string, subreddit string, postID string) error {
+	return nil
+}
+func (m *mockStore) DeleteMonitorState(ctx context.Context, id string) error { return nil }
 
 // newTestLogger creates a logger for testing that discards output.
 func newTestLogger() *slog.Logger {
@@ -1179,6 +1201,304 @@ func TestMonitorInstance_FieldsSet(t *testing.T) {
 
 	if instance.StartedAt.IsZero() {
 		t.Error("instance.StartedAt should not be zero")
+	}
+}
+
+// TestMonitorManager_PaginationTracking tests that position tracking works correctly.
+func TestMonitorManager_PaginationTracking(t *testing.T) {
+	t.Parallel()
+
+	var requestsMu sync.Mutex
+	var requests []*types.PostsRequest
+
+	client := &mockRedditClient{
+		getNewFunc: func(ctx context.Context, req *types.PostsRequest) (*types.PostsResponse, error) {
+			requestsMu.Lock()
+			// Make a copy of the request to avoid data races
+			reqCopy := &types.PostsRequest{
+				Subreddit: req.Subreddit,
+				Pagination: types.Pagination{
+					Limit: req.Pagination.Limit,
+					After: req.Pagination.After,
+				},
+			}
+			requests = append(requests, reqCopy)
+			requestsMu.Unlock()
+
+			// Return posts with fullnames
+			posts := []*types.Post{
+				{
+					ThingData: types.ThingData{
+						ID:   "abc123",
+						Name: "t3_abc123",
+					},
+					Title: "Test Post 1",
+				},
+				{
+					ThingData: types.ThingData{
+						ID:   "def456",
+						Name: "t3_def456",
+					},
+					Title: "Test Post 2",
+				},
+			}
+			return &types.PostsResponse{Posts: posts}, nil
+		},
+	}
+
+	store := &mockStore{}
+	manager := NewMonitorManager(client, store, newTestLogger())
+
+	// Use valid config with minimum interval
+	config := MonitorConfig{
+		Subreddits:    []string{"golang"},
+		Interval:      10 * time.Second,
+		Limit:         25,
+		FetchComments: false,
+	}
+
+	_, err := manager.Start(context.Background(), config)
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+
+	// Wait for initial fetch to complete and manually trigger another fetch cycle
+	// by accessing the monitor loop indirectly through multiple status checks
+	time.Sleep(100 * time.Millisecond)
+
+	// Manually call fetchAndSave to simulate a second fetch cycle
+	manager.mu.RLock()
+	instance := manager.activeMonitor
+	manager.mu.RUnlock()
+
+	if instance != nil {
+		// Trigger a second fetch manually
+		manager.fetchAndSave(context.Background(), "golang", instance)
+	}
+
+	manager.Stop()
+
+	// Verify we got multiple requests
+	requestsMu.Lock()
+	numRequests := len(requests)
+	requestsMu.Unlock()
+
+	if numRequests < 2 {
+		t.Fatalf("expected at least 2 requests, got %d", numRequests)
+	}
+
+	// First request should have no After value
+	requestsMu.Lock()
+	firstReq := requests[0]
+	requestsMu.Unlock()
+
+	if firstReq.Pagination.After != "" {
+		t.Errorf("first request After = %q, want empty", firstReq.Pagination.After)
+	}
+
+	// Subsequent requests should have After set to the first post's fullname
+	requestsMu.Lock()
+	secondReq := requests[1]
+	requestsMu.Unlock()
+
+	if secondReq.Pagination.After != "t3_abc123" {
+		t.Errorf("second request After = %q, want 't3_abc123'", secondReq.Pagination.After)
+	}
+}
+
+// TestMonitorManager_EmptyPostsNoPagination tests that empty responses don't update position.
+func TestMonitorManager_EmptyPostsNoPagination(t *testing.T) {
+	t.Parallel()
+
+	var requestsMu sync.Mutex
+	var requests []*types.PostsRequest
+	callCount := 0
+
+	client := &mockRedditClient{
+		getNewFunc: func(ctx context.Context, req *types.PostsRequest) (*types.PostsResponse, error) {
+			requestsMu.Lock()
+			callCount++
+			currentCall := callCount
+			reqCopy := &types.PostsRequest{
+				Subreddit: req.Subreddit,
+				Pagination: types.Pagination{
+					Limit: req.Pagination.Limit,
+					After: req.Pagination.After,
+				},
+			}
+			requests = append(requests, reqCopy)
+			requestsMu.Unlock()
+
+			// First call returns posts, subsequent calls return empty
+			if currentCall == 1 {
+				return &types.PostsResponse{
+					Posts: []*types.Post{
+						{
+							ThingData: types.ThingData{
+								ID:   "abc123",
+								Name: "t3_abc123",
+							},
+							Title: "Test Post",
+						},
+					},
+				}, nil
+			}
+			return &types.PostsResponse{Posts: []*types.Post{}}, nil
+		},
+	}
+
+	store := &mockStore{}
+	manager := NewMonitorManager(client, store, newTestLogger())
+
+	config := MonitorConfig{
+		Subreddits:    []string{"golang"},
+		Interval:      10 * time.Second,
+		Limit:         25,
+		FetchComments: false,
+	}
+
+	_, err := manager.Start(context.Background(), config)
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+
+	// Wait for initial fetch to complete
+	time.Sleep(100 * time.Millisecond)
+
+	// Manually call fetchAndSave to simulate a second fetch cycle
+	manager.mu.RLock()
+	instance := manager.activeMonitor
+	manager.mu.RUnlock()
+
+	if instance != nil {
+		// Trigger a second fetch manually
+		manager.fetchAndSave(context.Background(), "golang", instance)
+	}
+
+	manager.Stop()
+
+	// Verify we got multiple requests
+	requestsMu.Lock()
+	numRequests := len(requests)
+	requestsMu.Unlock()
+
+	if numRequests < 2 {
+		t.Fatalf("expected at least 2 requests, got %d", numRequests)
+	}
+
+	// Second request should still have the position from first request
+	requestsMu.Lock()
+	secondReq := requests[1]
+	requestsMu.Unlock()
+
+	if secondReq.Pagination.After != "t3_abc123" {
+		t.Errorf("second request After = %q, want 't3_abc123' (position should persist even with empty response)", secondReq.Pagination.After)
+	}
+}
+
+// TestMonitorManager_MultipleSubredditsSeparatePositions tests that each subreddit tracks its own position.
+func TestMonitorManager_MultipleSubredditsSeparatePositions(t *testing.T) {
+	t.Parallel()
+
+	var requestsMu sync.Mutex
+	requestsBySubreddit := make(map[string][]*types.PostsRequest)
+
+	client := &mockRedditClient{
+		getNewFunc: func(ctx context.Context, req *types.PostsRequest) (*types.PostsResponse, error) {
+			requestsMu.Lock()
+			reqCopy := &types.PostsRequest{
+				Subreddit: req.Subreddit,
+				Pagination: types.Pagination{
+					Limit: req.Pagination.Limit,
+					After: req.Pagination.After,
+				},
+			}
+			requestsBySubreddit[req.Subreddit] = append(requestsBySubreddit[req.Subreddit], reqCopy)
+			requestsMu.Unlock()
+
+			// Return different posts for each subreddit
+			postID := "abc123"
+			if req.Subreddit == "rust" {
+				postID = "xyz789"
+			}
+
+			return &types.PostsResponse{
+				Posts: []*types.Post{
+					{
+						ThingData: types.ThingData{
+							ID:   postID,
+							Name: "t3_" + postID,
+						},
+						Title: "Test Post for " + req.Subreddit,
+					},
+				},
+			}, nil
+		},
+	}
+
+	store := &mockStore{}
+	manager := NewMonitorManager(client, store, newTestLogger())
+
+	config := MonitorConfig{
+		Subreddits:    []string{"golang", "rust"},
+		Interval:      10 * time.Second,
+		Limit:         25,
+		FetchComments: false,
+	}
+
+	_, err := manager.Start(context.Background(), config)
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+
+	// Wait for initial fetch to complete
+	time.Sleep(100 * time.Millisecond)
+
+	// Manually call fetchAndSave to simulate a second fetch cycle for both subreddits
+	manager.mu.RLock()
+	instance := manager.activeMonitor
+	manager.mu.RUnlock()
+
+	if instance != nil {
+		// Trigger second fetches manually for both subreddits
+		manager.fetchAndSave(context.Background(), "golang", instance)
+		manager.fetchAndSave(context.Background(), "rust", instance)
+	}
+
+	manager.Stop()
+
+	// Check golang subreddit requests
+	requestsMu.Lock()
+	golangRequests := requestsBySubreddit["golang"]
+	rustRequests := requestsBySubreddit["rust"]
+	requestsMu.Unlock()
+
+	if len(golangRequests) < 2 {
+		t.Fatalf("expected at least 2 requests for golang, got %d", len(golangRequests))
+	}
+
+	if len(rustRequests) < 2 {
+		t.Fatalf("expected at least 2 requests for rust, got %d", len(rustRequests))
+	}
+
+	// First golang request should have no position
+	if golangRequests[0].Pagination.After != "" {
+		t.Errorf("first golang request After = %q, want empty", golangRequests[0].Pagination.After)
+	}
+
+	// Second golang request should have golang's position
+	if golangRequests[1].Pagination.After != "t3_abc123" {
+		t.Errorf("second golang request After = %q, want 't3_abc123'", golangRequests[1].Pagination.After)
+	}
+
+	// First rust request should have no position
+	if rustRequests[0].Pagination.After != "" {
+		t.Errorf("first rust request After = %q, want empty", rustRequests[0].Pagination.After)
+	}
+
+	// Second rust request should have rust's position (not golang's)
+	if rustRequests[1].Pagination.After != "t3_xyz789" {
+		t.Errorf("second rust request After = %q, want 't3_xyz789'", rustRequests[1].Pagination.After)
 	}
 }
 

@@ -178,6 +178,14 @@ func main() {
 	h.SetMonitorManager(monitorMgr)
 	logger.Info("monitor manager created")
 
+	// Restore active monitors from previous session
+	if cfg.AutoRestoreMonitors {
+		if err := restoreActiveMonitors(context.Background(), monitorMgr, store, logger); err != nil {
+			logger.Warn("failed to restore monitors", slog.String("error", err.Error()))
+			// Non-fatal: continue startup even if restoration fails
+		}
+	}
+
 	// Initialize authentication system if enabled
 	var jwtService handlers.JWTService
 	var authHandlers *handlers.AuthHandlers
@@ -244,6 +252,8 @@ func main() {
 	// Monitor endpoints
 	mux.HandleFunc("/api/v1/monitor/start", h.StartMonitor)
 	mux.HandleFunc("/api/v1/monitor/stop", h.StopMonitor)
+	mux.HandleFunc("/api/v1/monitor/pause", h.PauseMonitor)
+	mux.HandleFunc("/api/v1/monitor/resume", h.ResumeMonitor)
 	mux.HandleFunc("/api/v1/monitor/status", h.GetMonitorStatus)
 
 	// Server endpoints
@@ -588,6 +598,61 @@ func createRedditClient(cfg *config.Config) (*graw.Reddit, error) {
 	}
 
 	return client, nil
+}
+
+// restoreActiveMonitors restores any monitors that were active before shutdown.
+// This is called during server startup to automatically resume monitoring.
+func restoreActiveMonitors(ctx context.Context, mgr *monitor.MonitorManager, store storage.Store, logger *slog.Logger) error {
+	activeMonitors, err := store.GetActiveMonitors(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to query active monitors: %w", err)
+	}
+
+	if len(activeMonitors) == 0 {
+		logger.Info("no active monitors to restore")
+		return nil
+	}
+
+	// Currently the manager supports only one monitor at a time
+	// In the future, this could be extended to restore multiple monitors
+	state := activeMonitors[0]
+	logger.Info("restoring monitor from previous session",
+		slog.String("monitor_id", state.ID),
+		slog.Any("subreddits", state.Subreddits),
+		slog.Int("interval_seconds", state.IntervalSeconds),
+	)
+
+	_, err = mgr.RestoreFromState(ctx, state)
+	if err != nil {
+		// Mark as stopped in DB so it doesn't keep trying to restore on every restart
+		if updateErr := store.UpdateMonitorStatus(ctx, state.ID, "stopped"); updateErr != nil {
+			logger.Warn("failed to mark monitor as stopped after restore failure",
+				slog.String("monitor_id", state.ID),
+				slog.String("error", updateErr.Error()),
+			)
+		}
+		return fmt.Errorf("failed to restore monitor %s: %w", state.ID, err)
+	}
+
+	logger.Info("monitor restored successfully", slog.String("monitor_id", state.ID))
+
+	// If there are multiple active monitors, log a warning and mark others as stopped
+	if len(activeMonitors) > 1 {
+		logger.Warn("multiple active monitors found, only restored the first one",
+			slog.Int("count", len(activeMonitors)),
+		)
+		// Mark remaining monitors as stopped to prevent retry loops on future restarts
+		for i := 1; i < len(activeMonitors); i++ {
+			if err := store.UpdateMonitorStatus(ctx, activeMonitors[i].ID, "stopped"); err != nil {
+				logger.Warn("failed to mark excess monitor as stopped",
+					slog.String("monitor_id", activeMonitors[i].ID),
+					slog.String("error", err.Error()),
+				)
+			}
+		}
+	}
+
+	return nil
 }
 
 // jwtValidatorAdapter adapts handlers.JWTService to middleware.JWTAuthValidator interface

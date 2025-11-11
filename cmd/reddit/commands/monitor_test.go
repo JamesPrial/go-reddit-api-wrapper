@@ -300,3 +300,36 @@ func (m *minimalMockStore) GetLatestSnapshot(ctx context.Context, postID string)
 func (m *minimalMockStore) SaveCommentChangeEvent(ctx context.Context, event *storage.CommentChangeEvent) error {
 	return nil
 }
+
+// Monitor state operations
+func (m *minimalMockStore) SaveMonitorState(ctx context.Context, state *storage.MonitorState) error {
+	return nil
+}
+
+func (m *minimalMockStore) GetMonitorState(ctx context.Context, id string) (*storage.MonitorState, error) {
+	return nil, nil
+}
+
+func (m *minimalMockStore) GetActiveMonitors(ctx context.Context) ([]*storage.MonitorState, error) {
+	return nil, nil
+}
+
+func (m *minimalMockStore) GetPausedMonitors(ctx context.Context) ([]*storage.MonitorState, error) {
+	return nil, nil
+}
+
+func (m *minimalMockStore) UpdateMonitorStatus(ctx context.Context, id string, status string) error {
+	return nil
+}
+
+func (m *minimalMockStore) UpdateMonitorStats(ctx context.Context, id string, stats *storage.MonitorStats) error {
+	return nil
+}
+
+func (m *minimalMockStore) UpdateLastPostID(ctx context.Context, monitorID string, subreddit string, postID string) error {
+	return nil
+}
+
+func (m *minimalMockStore) DeleteMonitorState(ctx context.Context, id string) error {
+	return nil
+}

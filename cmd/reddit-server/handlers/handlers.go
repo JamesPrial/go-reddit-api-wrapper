@@ -40,11 +40,16 @@ import (
 //
 // IsRunning returns true if a monitor is currently active, false otherwise.
 // This is useful for quick status checks without fetching full status details.
+//
+// RestoreFromState restores a monitor from persisted state. This allows resuming
+// a previously paused monitor with its saved configuration, position, and statistics.
+// Returns an error if validation fails or a monitor is already running.
 type MonitorManager interface {
 	Start(ctx context.Context, config MonitorConfig) (*MonitorInstance, error)
 	Stop() error
 	GetStatus() (*MonitorStatus, error)
 	IsRunning() bool
+	RestoreFromState(ctx context.Context, state *storage.MonitorState) (*MonitorInstance, error)
 }
 
 // Type aliases for monitor package types - these ensure compatibility

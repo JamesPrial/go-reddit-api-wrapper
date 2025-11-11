@@ -480,6 +480,7 @@ func (s *SQLiteStore) verifyIndexes() error {
 	requiredIndexes := []string{
 		"idx_post_snapshots_post_created",
 		"idx_comment_change_events_post_detected",
+		"idx_monitor_state_status",
 	}
 
 	for _, idx := range requiredIndexes {

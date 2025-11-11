@@ -143,3 +143,68 @@ func (p *PostgresStore) GetCommentChangeEvents(ctx context.Context, postID strin
 		Err:       nil,
 	}
 }
+
+// Monitor state operations (stub implementations)
+func (p *PostgresStore) SaveMonitorState(ctx context.Context, state *storage.MonitorState) error {
+	return &storage.DatabaseError{
+		Operation: "SaveMonitorState",
+		Message:   "PostgreSQL backend not yet implemented",
+		Err:       nil,
+	}
+}
+
+func (p *PostgresStore) GetMonitorState(ctx context.Context, id string) (*storage.MonitorState, error) {
+	return nil, &storage.DatabaseError{
+		Operation: "GetMonitorState",
+		Message:   "PostgreSQL backend not yet implemented",
+		Err:       nil,
+	}
+}
+
+func (p *PostgresStore) GetActiveMonitors(ctx context.Context) ([]*storage.MonitorState, error) {
+	return nil, &storage.DatabaseError{
+		Operation: "GetActiveMonitors",
+		Message:   "PostgreSQL backend not yet implemented",
+		Err:       nil,
+	}
+}
+
+func (p *PostgresStore) GetPausedMonitors(ctx context.Context) ([]*storage.MonitorState, error) {
+	return nil, &storage.DatabaseError{
+		Operation: "GetPausedMonitors",
+		Message:   "PostgreSQL backend not yet implemented",
+		Err:       nil,
+	}
+}
+
+func (p *PostgresStore) UpdateMonitorStatus(ctx context.Context, id string, status string) error {
+	return &storage.DatabaseError{
+		Operation: "UpdateMonitorStatus",
+		Message:   "PostgreSQL backend not yet implemented",
+		Err:       nil,
+	}
+}
+
+func (p *PostgresStore) UpdateMonitorStats(ctx context.Context, id string, stats *storage.MonitorStats) error {
+	return &storage.DatabaseError{
+		Operation: "UpdateMonitorStats",
+		Message:   "PostgreSQL backend not yet implemented",
+		Err:       nil,
+	}
+}
+
+func (p *PostgresStore) UpdateLastPostID(ctx context.Context, monitorID string, subreddit string, postID string) error {
+	return &storage.DatabaseError{
+		Operation: "UpdateLastPostID",
+		Message:   "PostgreSQL backend not yet implemented",
+		Err:       nil,
+	}
+}
+
+func (p *PostgresStore) DeleteMonitorState(ctx context.Context, id string) error {
+	return &storage.DatabaseError{
+		Operation: "DeleteMonitorState",
+		Message:   "PostgreSQL backend not yet implemented",
+		Err:       nil,
+	}
+}

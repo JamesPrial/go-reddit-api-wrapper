@@ -21,6 +21,9 @@ type Store interface {
 	// SnapshotOperations defines operations for tracking post state over time.
 	SnapshotOperations
 
+	// MonitorStateOperations defines operations for managing monitor state.
+	MonitorStateOperations
+
 	// UtilityOperations defines utility operations for store management.
 	UtilityOperations
 }
@@ -281,4 +284,148 @@ type CommentChangeEvent struct {
 	// CommentsAdded is the difference between NewCount and PreviousCount.
 	// Calculated as: NewCount - PreviousCount
 	CommentsAdded int
+}
+
+// MonitorStateOperations defines storage operations for monitor state tracking.
+// Monitors represent long-running processes that periodically fetch posts and comments
+// from subreddits. This interface provides persistence for monitor configuration,
+// execution state, statistics, and position tracking (last fetched post per subreddit).
+type MonitorStateOperations interface {
+	// SaveMonitorState inserts a new monitor or updates an existing monitor if it already exists.
+	// The monitor ID (state.ID) is used as the unique identifier.
+	// This is a full upsert - all fields are updated.
+	// Returns an error if the operation fails.
+	SaveMonitorState(ctx context.Context, state *MonitorState) error
+
+	// GetMonitorState retrieves a monitor state by its ID.
+	// Returns the monitor state if found, or nil with an error if not found.
+	// Implementations should return a NotFoundError for "not found" cases.
+	GetMonitorState(ctx context.Context, id string) (*MonitorState, error)
+
+	// GetActiveMonitors retrieves all monitors with status="active".
+	// Returns an empty slice if no active monitors exist.
+	// Returns an error if the operation fails.
+	GetActiveMonitors(ctx context.Context) ([]*MonitorState, error)
+
+	// GetPausedMonitors retrieves all monitors with status="paused".
+	// Returns an empty slice if no paused monitors exist.
+	// Returns an error if the operation fails.
+	GetPausedMonitors(ctx context.Context) ([]*MonitorState, error)
+
+	// UpdateMonitorStatus updates only the status field of a monitor.
+	// The id parameter is the monitor's unique identifier.
+	// The status parameter should be one of: "active", "paused", or "stopped".
+	// Returns an error if the monitor doesn't exist or the operation fails.
+	UpdateMonitorStatus(ctx context.Context, id string, status string) error
+
+	// UpdateMonitorStats updates the statistics fields of a monitor.
+	// This is a partial update - only statistics and LastFetchTime are modified.
+	// Returns an error if the monitor doesn't exist or the operation fails.
+	UpdateMonitorStats(ctx context.Context, id string, stats *MonitorStats) error
+
+	// UpdateLastPostID updates the last fetched post ID for a specific subreddit.
+	// This tracks the position in the subreddit's feed to prevent duplicate fetches.
+	// The monitorID parameter is the monitor's unique identifier.
+	// The subreddit parameter is the subreddit name (e.g., "golang").
+	// The postID parameter is the Reddit post fullname (e.g., "t3_abc123").
+	// Returns an error if the monitor doesn't exist or the operation fails.
+	UpdateLastPostID(ctx context.Context, monitorID string, subreddit string, postID string) error
+
+	// DeleteMonitorState removes a monitor state by its ID.
+	// Returns an error if the operation fails.
+	// Implementations may choose to return an error if the monitor doesn't exist,
+	// or succeed silently (idempotent delete).
+	DeleteMonitorState(ctx context.Context, id string) error
+}
+
+// MonitorState represents the persistent state of a monitor.
+// Monitors are long-running processes that periodically fetch posts and comments
+// from one or more subreddits. This struct contains configuration, execution state,
+// statistics, and position tracking (last fetched post per subreddit).
+type MonitorState struct {
+	// ID is the unique identifier for this monitor.
+	ID string
+
+	// Subreddits is the list of subreddit names to monitor (e.g., ["golang", "rust"]).
+	Subreddits []string
+
+	// IntervalSeconds is the fetch interval in seconds between polling cycles.
+	IntervalSeconds int
+
+	// PostLimit is the maximum number of posts to fetch per subreddit per cycle.
+	PostLimit int
+
+	// FetchComments indicates whether to fetch comments for each post.
+	FetchComments bool
+
+	// Status is the current execution status of the monitor.
+	// Valid values: "active", "paused", "stopped".
+	Status string
+
+	// LastPostIDs maps subreddit names to the last fetched post fullname (e.g., "t3_abc123").
+	// This tracks the position in each subreddit's feed to prevent duplicate fetches.
+	// Empty map indicates no posts have been fetched yet.
+	LastPostIDs map[string]string
+
+	// TotalFetches is the total number of successful fetch cycles completed.
+	TotalFetches uint64
+
+	// TotalPosts is the cumulative number of posts fetched across all cycles.
+	TotalPosts uint64
+
+	// TotalComments is the cumulative number of comments fetched across all cycles.
+	TotalComments uint64
+
+	// FailedFetches is the total number of failed fetch attempts.
+	FailedFetches uint64
+
+	// ConsecutiveErrors is the number of consecutive errors without a successful fetch.
+	// Reset to 0 on successful fetch.
+	ConsecutiveErrors uint64
+
+	// LastError is the error message from the most recent failed fetch.
+	// Empty string indicates no error or last operation was successful.
+	LastError string
+
+	// CreatedAt is the time when this monitor was created.
+	// Stored as Unix timestamp (seconds since epoch).
+	CreatedAt time.Time
+
+	// StartedAt is the time when this monitor was last started.
+	// Stored as Unix timestamp (seconds since epoch).
+	StartedAt time.Time
+
+	// LastFetchTime is the time of the most recent fetch attempt (successful or failed).
+	// Nil indicates the monitor has never attempted a fetch.
+	LastFetchTime *time.Time
+
+	// StoppedAt is the time when this monitor was stopped.
+	// Nil indicates the monitor has never been stopped or is currently running.
+	StoppedAt *time.Time
+}
+
+// MonitorStats represents statistics for a monitor, used for partial updates.
+// This struct contains only the fields that change during monitor execution.
+type MonitorStats struct {
+	// TotalFetches is the total number of successful fetch cycles completed.
+	TotalFetches uint64
+
+	// TotalPosts is the cumulative number of posts fetched across all cycles.
+	TotalPosts uint64
+
+	// TotalComments is the cumulative number of comments fetched across all cycles.
+	TotalComments uint64
+
+	// FailedFetches is the total number of failed fetch attempts.
+	FailedFetches uint64
+
+	// ConsecutiveErrors is the number of consecutive errors without a successful fetch.
+	ConsecutiveErrors uint64
+
+	// LastError is the error message from the most recent failed fetch.
+	// Empty string indicates no error or last operation was successful.
+	LastError string
+
+	// LastFetchTime is the time of the most recent fetch attempt.
+	LastFetchTime time.Time
 }

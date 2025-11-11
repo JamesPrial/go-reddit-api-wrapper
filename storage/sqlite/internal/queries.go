@@ -331,6 +331,123 @@ const (
 	`
 
 	// ============================================================================
+	// Monitor State Queries
+	// ============================================================================
+
+	// queryUpsertMonitorState inserts a new monitor or updates an existing monitor if it already exists.
+	// Uses INSERT ... ON CONFLICT to handle upserts atomically.
+	// The monitor ID is the unique identifier and primary key.
+	// Parameters: 17 values for all monitor state fields
+	queryUpsertMonitorState = `
+		INSERT INTO monitor_state (
+			id, subreddits, interval_seconds, post_limit, fetch_comments,
+			status, last_post_ids, total_fetches, total_posts, total_comments,
+			failed_fetches, consecutive_errors, last_error, created_at, started_at,
+			last_fetch_time, stopped_at
+		) VALUES (
+			?, ?, ?, ?, ?,
+			?, ?, ?, ?, ?,
+			?, ?, ?, ?, ?,
+			?, ?
+		)
+		ON CONFLICT(id) DO UPDATE SET
+			subreddits = excluded.subreddits,
+			interval_seconds = excluded.interval_seconds,
+			post_limit = excluded.post_limit,
+			fetch_comments = excluded.fetch_comments,
+			status = excluded.status,
+			last_post_ids = excluded.last_post_ids,
+			total_fetches = excluded.total_fetches,
+			total_posts = excluded.total_posts,
+			total_comments = excluded.total_comments,
+			failed_fetches = excluded.failed_fetches,
+			consecutive_errors = excluded.consecutive_errors,
+			last_error = excluded.last_error,
+			created_at = excluded.created_at,
+			started_at = excluded.started_at,
+			last_fetch_time = excluded.last_fetch_time,
+			stopped_at = excluded.stopped_at
+	`
+
+	// queryGetMonitorState retrieves a monitor state by its ID.
+	// Parameters: 1 (monitor id)
+	queryGetMonitorState = `
+		SELECT
+			id, subreddits, interval_seconds, post_limit, fetch_comments,
+			status, last_post_ids, total_fetches, total_posts, total_comments,
+			failed_fetches, consecutive_errors, last_error, created_at, started_at,
+			last_fetch_time, stopped_at
+		FROM monitor_state
+		WHERE id = ?
+	`
+
+	// queryGetActiveMonitors retrieves all monitors with status="active".
+	queryGetActiveMonitors = `
+		SELECT
+			id, subreddits, interval_seconds, post_limit, fetch_comments,
+			status, last_post_ids, total_fetches, total_posts, total_comments,
+			failed_fetches, consecutive_errors, last_error, created_at, started_at,
+			last_fetch_time, stopped_at
+		FROM monitor_state
+		WHERE status = 'active'
+	`
+
+	// queryGetPausedMonitors retrieves all monitors with status="paused".
+	queryGetPausedMonitors = `
+		SELECT
+			id, subreddits, interval_seconds, post_limit, fetch_comments,
+			status, last_post_ids, total_fetches, total_posts, total_comments,
+			failed_fetches, consecutive_errors, last_error, created_at, started_at,
+			last_fetch_time, stopped_at
+		FROM monitor_state
+		WHERE status = 'paused'
+		ORDER BY stopped_at DESC
+	`
+
+	// queryUpdateMonitorStatus updates only the status field of a monitor.
+	// Parameters: 2 (status, id)
+	queryUpdateMonitorStatus = `
+		UPDATE monitor_state
+		SET status = ?
+		WHERE id = ?
+	`
+
+	// queryUpdateMonitorStats updates the statistics fields of a monitor.
+	// Parameters: 8 (total_fetches, total_posts, total_comments, failed_fetches, consecutive_errors, last_error, last_fetch_time, id)
+	queryUpdateMonitorStats = `
+		UPDATE monitor_state
+		SET total_fetches = ?,
+		    total_posts = ?,
+		    total_comments = ?,
+		    failed_fetches = ?,
+		    consecutive_errors = ?,
+		    last_error = ?,
+		    last_fetch_time = ?
+		WHERE id = ?
+	`
+
+	// queryGetMonitorLastPostIDs retrieves just the last_post_ids field.
+	// Used by UpdateLastPostID to read, modify, and write back the JSON map.
+	// Parameters: 1 (id)
+	queryGetMonitorLastPostIDs = `
+		SELECT last_post_ids
+		FROM monitor_state
+		WHERE id = ?
+	`
+
+	// queryUpdateMonitorLastPostIDs updates just the last_post_ids field.
+	// Parameters: 2 (last_post_ids, id)
+	queryUpdateMonitorLastPostIDs = `
+		UPDATE monitor_state
+		SET last_post_ids = ?
+		WHERE id = ?
+	`
+
+	// queryDeleteMonitorState removes a monitor state by its ID.
+	// Parameters: 1 (id)
+	queryDeleteMonitorState = `DELETE FROM monitor_state WHERE id = ?`
+
+	// ============================================================================
 	// SQLite-specific expressions
 	// ============================================================================
 

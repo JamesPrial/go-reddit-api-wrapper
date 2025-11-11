@@ -14,6 +14,10 @@ A production-ready HTTP server that exposes Reddit API operations as RESTful end
 - **Panic Recovery** - Middleware prevents server crashes from panics
 - **Request Timeouts** - Configurable timeouts to prevent hung requests
 - **Security Hardening** - Request size limits, header timeouts, and input validation
+- **Persistent Monitoring** - Monitors automatically resume after server restarts
+- **Position Tracking** - Avoids refetching posts by tracking the last seen post per subreddit
+- **Pause/Resume** - Temporarily suspend monitoring without losing state
+- **Auto-Recovery** - Configurable automatic restoration of active monitors on startup
 
 ## Installation
 
@@ -160,6 +164,7 @@ Both `config.yaml` and `.env` files are already in `.gitignore` to prevent accid
 | `STORAGE_DSN` | SQLite database path or `:memory:` | `~/.local/share/reddit-server/reddit.db` | `/var/lib/reddit-server/reddit.db` or `:memory:` |
 | `STORAGE_MAX_OPEN_CONNS` | Maximum open database connections | `10` | `25` |
 | `STORAGE_MAX_IDLE_CONNS` | Maximum idle database connections | `5` | `10` |
+| `AUTO_RESTORE_MONITORS` | Automatically restore monitors on startup | `true` | `true`, `false` |
 | `LOG_LEVEL` | Log level (debug, info, warn, error) | `info` | `debug` |
 | `LOG_FORMAT` | Log output format (json, text) | `json` | `text` |
 | `LOG_FILE` | Path to log file (must be absolute path; logs to stderr + file when set) | _(empty)_ | `/var/log/reddit-server/app.log` |
@@ -172,6 +177,7 @@ Both `config.yaml` and `.env` files are already in `.gitignore` to prevent accid
 - Origins in `ALLOWED_ORIGINS` must start with `http://` or `https://`
 - Storage DSN respects `XDG_DATA_HOME` environment variable when using default location
 - Use `:memory:` for in-memory database (data lost on restart)
+- `AUTO_RESTORE_MONITORS` accepts boolean values: `true`, `false`, `1`, `0`, `t`, `f`, `T`, `F`, `TRUE`, `FALSE` (case-insensitive)
 
 ## Running the Server
 
@@ -779,21 +785,69 @@ Returns the current status of the monitor, including real-time statistics if run
   "id": "550e8400-e29b-41d4-a716-446655440000",
   "subreddits": ["golang", "programming"],
   "interval": "30s",
+  "limit": 25,
+  "fetch_comments": true,
   "started_at": "2025-11-07T10:30:00Z",
   "stats": {
     "total_fetches": 120,
     "total_posts": 450,
     "total_comments": 3200,
+    "failed_fetches": 2,
+    "consecutive_errors": 0,
     "last_fetch_time": "2025-11-07T11:00:00Z",
     "last_error": ""
-  }
+  },
+  "last_post_ids": {
+    "golang": "t3_abc123",
+    "programming": "t3_def456"
+  },
+  "can_resume": true,
+  "state_persisted": true
 }
 ```
+
+**Response Fields:**
+- `id`: Unique identifier for the monitor instance (UUID)
+- `limit`: Number of posts fetched per subreddit per cycle
+- `fetch_comments`: Whether comments are being fetched for each post
+- `last_post_ids`: Map of subreddit names to last fetched post IDs (position tracking)
+- `failed_fetches`: Total number of failed fetch attempts
+- `consecutive_errors`: Current consecutive error count
+- `can_resume`: Whether the monitor can be restored after restart (requires persistence)
+- `state_persisted`: Whether state persistence is enabled
 
 **Response (200 OK) - When Stopped:**
 ```json
 {
   "status": "stopped"
+}
+```
+
+**Response (200 OK) - When Paused:**
+```json
+{
+  "status": "paused",
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "subreddits": ["golang", "programming"],
+  "interval": "30s",
+  "limit": 25,
+  "fetch_comments": true,
+  "started_at": "2025-11-07T10:30:00Z",
+  "stats": {
+    "total_fetches": 120,
+    "total_posts": 450,
+    "total_comments": 3200,
+    "failed_fetches": 2,
+    "consecutive_errors": 0,
+    "last_fetch_time": "2025-11-07T11:00:00Z",
+    "last_error": ""
+  },
+  "last_post_ids": {
+    "golang": "t3_abc123",
+    "programming": "t3_def456"
+  },
+  "can_resume": true,
+  "state_persisted": true
 }
 ```
 
@@ -803,6 +857,79 @@ Returns the current status of the monitor, including real-time statistics if run
 **Example:**
 ```bash
 curl http://localhost:8080/api/v1/monitor/status \
+  -H "X-API-Key: your-api-key-here"
+```
+
+---
+
+#### Pause Monitor
+
+`POST /api/v1/monitor/pause`
+
+Temporarily suspends a running monitor without losing its state. The monitor can be resumed later from the same position.
+
+**Request Headers:**
+- `X-API-Key: <your-api-key>` (required)
+
+**Response (200 OK):**
+```json
+{
+  "status": "paused",
+  "message": "monitor paused successfully",
+  "id": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+**Error Responses:**
+- `404 Not Found`: No monitor is currently running
+
+**Example:**
+```bash
+curl -X POST http://localhost:8080/api/v1/monitor/pause \
+  -H "X-API-Key: your-api-key-here"
+```
+
+---
+
+#### Resume Monitor
+
+`POST /api/v1/monitor/resume`
+
+Resumes a previously paused monitor from its saved state, including position tracking and statistics.
+
+**Request Headers:**
+- `X-API-Key: <your-api-key>` (required)
+
+**Response (200 OK):**
+```json
+{
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "status": "resumed",
+  "subreddits": ["golang", "programming"],
+  "interval": "30s",
+  "limit": 25,
+  "fetch_comments": true,
+  "started_at": "2025-11-10T21:00:00Z",
+  "stats": {
+    "total_fetches": 10,
+    "total_posts": 50,
+    "total_comments": 200,
+    "failed_fetches": 0,
+    "consecutive_errors": 0,
+    "last_fetch_time": "2025-11-10T21:05:00Z",
+    "last_error": ""
+  }
+}
+```
+
+**Error Responses:**
+- `404 Not Found`: No paused monitor exists
+- `409 Conflict`: A monitor is already running
+- `400 Bad Request`: Saved monitor configuration is invalid
+
+**Example:**
+```bash
+curl -X POST http://localhost:8080/api/v1/monitor/resume \
   -H "X-API-Key: your-api-key-here"
 ```
 
@@ -872,6 +999,178 @@ curl -X POST http://localhost:8080/api/v1/monitor/stop \
 - Monitoring continues until explicitly stopped via the API or the server shuts down.
 - All monitored posts and comments are saved to the configured storage backend.
 - Use intervals of at least 30 seconds to avoid hitting Reddit's rate limits.
+- Monitor state is automatically persisted to the database and can be resumed after server restarts.
+
+---
+
+## Monitor Persistence
+
+The HTTP server automatically persists monitor state to the SQLite database, enabling monitors to resume after server restarts.
+
+### How It Works
+
+1. **State Persistence**: When a monitor is started, its configuration and state are saved to the database
+2. **Position Tracking**: The last fetched post ID for each subreddit is tracked to avoid refetching
+3. **Periodic Updates**: Monitor state is updated every 10 fetches or every 5 minutes
+4. **Auto-Restoration**: On startup, the server queries for active monitors and automatically restores them
+
+### Position Tracking
+
+Position tracking prevents the monitor from refetching the same posts after a restart:
+
+- Each time posts are fetched, the newest (first) post's fullname is saved
+- On the next fetch, this fullname is used as the `After` pagination parameter
+- Reddit returns only posts newer than the saved position
+- This ensures efficient monitoring without gaps or duplicates
+
+### Monitor Lifecycle
+
+```
+[Start] → [Active] → [Pause] → [Resume] → [Active] → [Stop]
+   ↓          ↓          ↓         ↓          ↓         ↓
+ Persist   Persist   Persist   Restore   Persist   Persist
+```
+
+### Configuration
+
+#### AUTO_RESTORE_MONITORS
+
+Controls whether monitors are automatically restored when the server starts.
+
+- **Type**: Boolean
+- **Default**: `true`
+- **Valid Values**: `true`, `false`, `1`, `0`, `t`, `f`, `T`, `F`, `TRUE`, `FALSE` (case-insensitive)
+- **Description**: When `true`, the server automatically restores any monitors that were active when it last shut down. When `false`, monitors must be manually started via the API after each server restart.
+
+**Example:**
+```bash
+export AUTO_RESTORE_MONITORS=true
+./reddit-server
+```
+
+### Database Schema
+
+Monitor state is stored in the `monitor_state` table with:
+- Configuration: subreddits, interval, post limit, fetch_comments
+- State: status (active/paused/stopped), last post IDs
+- Statistics: total fetches, posts, comments, errors
+- Timestamps: created, started, last fetch, stopped
+
+### Failure Handling
+
+- **Persistence Failures**: Logged but don't stop monitoring (degraded mode)
+- **Restoration Failures**: Logged and marked as stopped to prevent retry loops
+- **Corrupted State**: Invalid state is skipped with warning, server continues normally
+
+### Monitor Workflow Examples
+
+#### Example 1: Start, Restart, Auto-Resume
+
+```bash
+# Start the server with auto-restore enabled (default)
+export AUTO_RESTORE_MONITORS=true
+./reddit-server
+
+# Start a monitor
+curl -X POST http://localhost:8080/api/v1/monitor/start \
+  -H "X-API-Key: your-api-key-here" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "subreddits": ["golang", "programming"],
+    "interval": "30s",
+    "limit": 25,
+    "fetch_comments": true
+  }'
+
+# Server is running, fetching posts...
+# Response: {"id": "550e8400-...", "status": "running", "started_at": "..."}
+
+# Restart the server (Ctrl+C, then restart)
+./reddit-server
+
+# Monitor automatically resumes from last position
+# Check logs for: "restoring monitor from previous session"
+# Position tracking ensures no posts are refetched or missed
+```
+
+#### Example 2: Pause and Resume
+
+```bash
+# Monitor is running...
+
+# Pause the monitor temporarily
+curl -X POST http://localhost:8080/api/v1/monitor/pause \
+  -H "X-API-Key: your-api-key-here"
+
+# Response: {"status": "paused", "message": "monitor paused successfully", "id": "..."}
+
+# Monitor is paused, state is saved to database
+
+# Later, resume the monitor
+curl -X POST http://localhost:8080/api/v1/monitor/resume \
+  -H "X-API-Key: your-api-key-here"
+
+# Response: {"id": "...", "status": "resumed", "subreddits": [...], ...}
+# Monitor resumes from where it left off with all statistics preserved
+```
+
+#### Example 3: Disable Auto-Restore
+
+```bash
+# Start server with auto-restore disabled
+export AUTO_RESTORE_MONITORS=false
+./reddit-server
+
+# Start a monitor
+curl -X POST http://localhost:8080/api/v1/monitor/start \
+  -H "X-API-Key: your-api-key-here" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "subreddits": ["golang"],
+    "interval": "1m",
+    "limit": 25,
+    "fetch_comments": false
+  }'
+
+# Restart the server
+./reddit-server
+
+# Monitor does NOT automatically resume
+# State is still saved, but must be manually resumed:
+curl -X POST http://localhost:8080/api/v1/monitor/resume \
+  -H "X-API-Key: your-api-key-here"
+```
+
+#### Example 4: Check Position Tracking
+
+```bash
+# Start monitoring
+curl -X POST http://localhost:8080/api/v1/monitor/start \
+  -H "X-API-Key: your-api-key-here" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "subreddits": ["golang"],
+    "interval": "30s",
+    "limit": 10,
+    "fetch_comments": false
+  }'
+
+# Wait for a few fetches, then check status
+curl http://localhost:8080/api/v1/monitor/status \
+  -H "X-API-Key: your-api-key-here"
+
+# Response shows last_post_ids:
+# {
+#   "status": "running",
+#   "last_post_ids": {
+#     "golang": "t3_abc123"
+#   },
+#   ...
+# }
+
+# This ID is used as the pagination cursor on the next fetch
+# Only posts newer than t3_abc123 will be fetched
+```
 
 ---
 

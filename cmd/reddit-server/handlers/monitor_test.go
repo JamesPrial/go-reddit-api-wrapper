@@ -12,14 +12,16 @@ import (
 	"time"
 
 	"github.com/jamesprial/go-reddit-api-wrapper/cmd/reddit-server/monitor"
+	"github.com/jamesprial/go-reddit-api-wrapper/storage"
 )
 
 // mockMonitorManager mocks the MonitorManager interface for testing.
 type mockMonitorManager struct {
-	startFunc   func(ctx context.Context, config MonitorConfig) (*MonitorInstance, error)
-	stopFunc    func() error
-	statusFunc  func() (*MonitorStatus, error)
-	runningFunc func() bool
+	startFunc            func(ctx context.Context, config MonitorConfig) (*MonitorInstance, error)
+	stopFunc             func() error
+	statusFunc           func() (*MonitorStatus, error)
+	runningFunc          func() bool
+	restoreFromStateFunc func(ctx context.Context, state *storage.MonitorState) (*MonitorInstance, error)
 }
 
 // Start mocks the Start method.
@@ -52,6 +54,14 @@ func (m *mockMonitorManager) IsRunning() bool {
 		return m.runningFunc()
 	}
 	return false
+}
+
+// RestoreFromState mocks the RestoreFromState method.
+func (m *mockMonitorManager) RestoreFromState(ctx context.Context, state *storage.MonitorState) (*MonitorInstance, error) {
+	if m.restoreFromStateFunc != nil {
+		return m.restoreFromStateFunc(ctx, state)
+	}
+	return nil, errors.New("mock not configured")
 }
 
 // Helper functions for tests
@@ -824,17 +834,25 @@ func TestGetMonitorStatus_Running(t *testing.T) {
 	mockMgr := &mockMonitorManager{
 		statusFunc: func() (*MonitorStatus, error) {
 			return &MonitorStatus{
-				Status:     "running",
-				ID:         "monitor-123",
-				Subreddits: []string{"golang", "programming"},
-				Interval:   "30s",
-				StartedAt:  &now,
+				Status:        "running",
+				ID:            "monitor-123",
+				Subreddits:    []string{"golang", "programming"},
+				Interval:      "30s",
+				Limit:         25,
+				FetchComments: true,
+				StartedAt:     &now,
 				Stats: &StatsSnapshot{
-					TotalFetches:  5,
-					TotalPosts:    50,
-					TotalComments: 200,
-					LastFetchTime: &now,
-					LastError:     "",
+					TotalFetches:      5,
+					TotalPosts:        50,
+					TotalComments:     200,
+					FailedFetches:     1,
+					ConsecutiveErrors: 0,
+					LastFetchTime:     &now,
+					LastError:         "",
+				},
+				LastPostIDs: map[string]string{
+					"golang":      "t3_abc123",
+					"programming": "t3_def456",
 				},
 			}, nil
 		},
@@ -875,6 +893,14 @@ func TestGetMonitorStatus_Running(t *testing.T) {
 		t.Errorf("GetMonitorStatus() response.Interval = %q, want %q", resp.Interval, "30s")
 	}
 
+	if resp.Limit != 25 {
+		t.Errorf("GetMonitorStatus() response.Limit = %d, want 25", resp.Limit)
+	}
+
+	if !resp.FetchComments {
+		t.Error("GetMonitorStatus() response.FetchComments = false, want true")
+	}
+
 	if resp.StartedAt == nil {
 		t.Error("GetMonitorStatus() response.StartedAt is nil")
 	}
@@ -891,6 +917,33 @@ func TestGetMonitorStatus_Running(t *testing.T) {
 		if resp.Stats.TotalComments != 200 {
 			t.Errorf("GetMonitorStatus() Stats.TotalComments = %d, want 200", resp.Stats.TotalComments)
 		}
+		if resp.Stats.FailedFetches != 1 {
+			t.Errorf("GetMonitorStatus() Stats.FailedFetches = %d, want 1", resp.Stats.FailedFetches)
+		}
+		if resp.Stats.ConsecutiveErrors != 0 {
+			t.Errorf("GetMonitorStatus() Stats.ConsecutiveErrors = %d, want 0", resp.Stats.ConsecutiveErrors)
+		}
+	}
+
+	if len(resp.LastPostIDs) != 2 {
+		t.Errorf("GetMonitorStatus() response.LastPostIDs count = %d, want 2", len(resp.LastPostIDs))
+	} else {
+		if resp.LastPostIDs["golang"] != "t3_abc123" {
+			t.Errorf("GetMonitorStatus() LastPostIDs[golang] = %q, want %q", resp.LastPostIDs["golang"], "t3_abc123")
+		}
+		if resp.LastPostIDs["programming"] != "t3_def456" {
+			t.Errorf("GetMonitorStatus() LastPostIDs[programming] = %q, want %q", resp.LastPostIDs["programming"], "t3_def456")
+		}
+	}
+
+	// With nil store, CanResume should be false
+	if resp.CanResume {
+		t.Error("GetMonitorStatus() response.CanResume = true, want false (store is nil)")
+	}
+
+	// With nil store, StatePersisted should be false
+	if resp.StatePersisted {
+		t.Error("GetMonitorStatus() response.StatePersisted = true, want false (store is nil)")
 	}
 }
 

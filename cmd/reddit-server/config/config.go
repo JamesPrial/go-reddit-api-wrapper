@@ -51,6 +51,9 @@ type Config struct {
 	LogFormat string // Log format (from LOG_FORMAT, default: "json", valid: "json", "text")
 	LogFile   string // Log file path (from LOG_FILE, default: "" - empty means stderr only, must be absolute path)
 
+	// Monitor configuration
+	AutoRestoreMonitors bool // Automatically restore active monitors on server startup (from AUTO_RESTORE_MONITORS, default: true)
+
 	// Configuration file path (from CONFIG_FILE, default: "" - empty means env vars only)
 	ConfigFile string // Path to configuration file if loaded from file
 }
@@ -79,6 +82,7 @@ type Config struct {
 //   - LOG_LEVEL: Log level (default: "info", valid: "debug", "info", "warn", "error")
 //   - LOG_FORMAT: Log format (default: "json", valid: "json", "text")
 //   - LOG_FILE: Log file path (default: "" - empty means stderr only, must be absolute path if provided)
+//   - AUTO_RESTORE_MONITORS: Automatically restore active monitors on startup (default: true, accepts: "true", "false", "1", "0", "t", "f", "T", "F", "TRUE", "FALSE")
 //
 // Authentication Configuration (optional, only loaded if AUTH_ENABLED=true or "1"):
 //   - AUTH_ENABLED: Enable JWT authentication (default: false)
@@ -114,6 +118,7 @@ func Load() (*Config, string, error) {
 			LogLevel:            "info",
 			LogFormat:           "json",
 			LogFile:             "",
+			AutoRestoreMonitors: true,
 		}
 	}
 
@@ -290,6 +295,15 @@ func Load() (*Config, string, error) {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return nil, "", fmt.Errorf("failed to create log file directory %q: %w", dir, err)
 		}
+	}
+
+	// Parse monitor configuration (override file value if env var is set)
+	if autoRestoreStr := os.Getenv("AUTO_RESTORE_MONITORS"); autoRestoreStr != "" {
+		autoRestore, err := strconv.ParseBool(autoRestoreStr)
+		if err != nil {
+			return nil, "", fmt.Errorf("invalid AUTO_RESTORE_MONITORS: %w", err)
+		}
+		cfg.AutoRestoreMonitors = autoRestore
 	}
 
 	// Load authentication configuration only if explicitly enabled
@@ -516,7 +530,7 @@ func (c *Config) String() string {
 	}
 
 	return fmt.Sprintf(
-		"Config{Port: %d, ShutdownTimeout: %v, RequestTimeout: %v, RedditClientID: %s, RedditClientSecret: %s, RedditUsername: %s, RedditPassword: %s, APIKeys: %v, AllowedOrigins: %v, StorageDSN: %s, StorageMaxOpenConns: %d, StorageMaxIdleConns: %d, LogLevel: %s, LogFormat: %s, LogFile: %s}",
+		"Config{Port: %d, ShutdownTimeout: %v, RequestTimeout: %v, RedditClientID: %s, RedditClientSecret: %s, RedditUsername: %s, RedditPassword: %s, APIKeys: %v, AllowedOrigins: %v, StorageDSN: %s, StorageMaxOpenConns: %d, StorageMaxIdleConns: %d, LogLevel: %s, LogFormat: %s, LogFile: %s, AutoRestoreMonitors: %t}",
 		c.Port,
 		c.ShutdownTimeout,
 		c.RequestTimeout,
@@ -532,6 +546,7 @@ func (c *Config) String() string {
 		c.LogLevel,
 		c.LogFormat,
 		logFileDisplay,
+		c.AutoRestoreMonitors,
 	)
 }
 

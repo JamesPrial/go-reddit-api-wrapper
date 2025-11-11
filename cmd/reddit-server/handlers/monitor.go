@@ -44,21 +44,28 @@ type StopMonitorResponse struct {
 
 // MonitorStatsResponse contains monitoring statistics.
 type MonitorStatsResponse struct {
-	TotalFetches  uint64     `json:"total_fetches"`
-	TotalPosts    uint64     `json:"total_posts"`
-	TotalComments uint64     `json:"total_comments"`
-	LastFetchTime *time.Time `json:"last_fetch_time,omitempty"`
-	LastError     string     `json:"last_error,omitempty"`
+	TotalFetches      uint64     `json:"total_fetches"`
+	TotalPosts        uint64     `json:"total_posts"`
+	TotalComments     uint64     `json:"total_comments"`
+	FailedFetches     uint64     `json:"failed_fetches"`
+	ConsecutiveErrors uint64     `json:"consecutive_errors"`
+	LastFetchTime     *time.Time `json:"last_fetch_time,omitempty"`
+	LastError         string     `json:"last_error,omitempty"`
 }
 
 // MonitorStatusResponse is the response for status requests.
 type MonitorStatusResponse struct {
-	Status     string                `json:"status"`
-	ID         string                `json:"id,omitempty"`
-	Subreddits []string              `json:"subreddits,omitempty"`
-	Interval   string                `json:"interval,omitempty"`
-	StartedAt  *time.Time            `json:"started_at,omitempty"`
-	Stats      *MonitorStatsResponse `json:"stats,omitempty"`
+	Status         string                `json:"status"`
+	ID             string                `json:"id,omitempty"`
+	Subreddits     []string              `json:"subreddits,omitempty"`
+	Interval       string                `json:"interval,omitempty"`
+	Limit          int                   `json:"limit,omitempty"`
+	FetchComments  bool                  `json:"fetch_comments,omitempty"`
+	StartedAt      *time.Time            `json:"started_at,omitempty"`
+	Stats          *MonitorStatsResponse `json:"stats,omitempty"`
+	LastPostIDs    map[string]string     `json:"last_post_ids,omitempty"`
+	CanResume      bool                  `json:"can_resume"`
+	StatePersisted bool                  `json:"state_persisted"`
 }
 
 // StartMonitor handles POST /api/v1/monitor/start requests.
@@ -288,11 +295,13 @@ func (h *Handlers) StopMonitor(w http.ResponseWriter, r *http.Request) {
 	var statsResp *MonitorStatsResponse
 	if status.Stats != nil {
 		statsResp = &MonitorStatsResponse{
-			TotalFetches:  status.Stats.TotalFetches,
-			TotalPosts:    status.Stats.TotalPosts,
-			TotalComments: status.Stats.TotalComments,
-			LastFetchTime: status.Stats.LastFetchTime,
-			LastError:     status.Stats.LastError,
+			TotalFetches:      status.Stats.TotalFetches,
+			TotalPosts:        status.Stats.TotalPosts,
+			TotalComments:     status.Stats.TotalComments,
+			FailedFetches:     status.Stats.FailedFetches,
+			ConsecutiveErrors: status.Stats.ConsecutiveErrors,
+			LastFetchTime:     status.Stats.LastFetchTime,
+			LastError:         status.Stats.LastError,
 		}
 	}
 
@@ -337,22 +346,203 @@ func (h *Handlers) GetMonitorStatus(w http.ResponseWriter, r *http.Request) {
 
 	// Convert to response format
 	resp := MonitorStatusResponse{
-		Status:     status.Status,
-		ID:         status.ID,
-		Subreddits: status.Subreddits,
-		Interval:   status.Interval,
-		StartedAt:  status.StartedAt,
+		Status:         status.Status,
+		ID:             status.ID,
+		Subreddits:     status.Subreddits,
+		Interval:       status.Interval,
+		Limit:          status.Limit,
+		FetchComments:  status.FetchComments,
+		StartedAt:      status.StartedAt,
+		LastPostIDs:    status.LastPostIDs,
+		CanResume:      h.store != nil && status.ID != "",
+		StatePersisted: h.store != nil,
 	}
 
 	// Convert stats if present
 	if status.Stats != nil {
 		resp.Stats = &MonitorStatsResponse{
-			TotalFetches:  status.Stats.TotalFetches,
-			TotalPosts:    status.Stats.TotalPosts,
-			TotalComments: status.Stats.TotalComments,
-			LastFetchTime: status.Stats.LastFetchTime,
-			LastError:     status.Stats.LastError,
+			TotalFetches:      status.Stats.TotalFetches,
+			TotalPosts:        status.Stats.TotalPosts,
+			TotalComments:     status.Stats.TotalComments,
+			FailedFetches:     status.Stats.FailedFetches,
+			ConsecutiveErrors: status.Stats.ConsecutiveErrors,
+			LastFetchTime:     status.Stats.LastFetchTime,
+			LastError:         status.Stats.LastError,
 		}
+	}
+
+	respondJSON(w, http.StatusOK, resp)
+}
+
+// PauseMonitor handles POST /api/v1/monitor/pause requests.
+// It pauses the currently running monitor by stopping it and marking its status as "paused".
+// The monitor state is preserved and can be resumed later.
+//
+// Returns 200 OK with pause confirmation on success.
+// Returns 404 Not Found if no monitor is running.
+// Returns 500 Internal Server Error for other errors.
+func (h *Handlers) PauseMonitor(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", "POST")
+		respondError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	// Limit request body size to 1MB for defensive programming
+	r.Body = http.MaxBytesReader(w, r.Body, MaxRequestBodySize)
+
+	if h.monitorMgr == nil {
+		respondError(w, http.StatusServiceUnavailable, "monitor service not available")
+		return
+	}
+
+	// Get the current monitor ID before stopping
+	status, err := h.monitorMgr.GetStatus()
+	if err != nil {
+		statusCode := mapErrorToStatus(err)
+		slog.Error("failed to get monitor status before pause",
+			"error", err,
+			"status", statusCode)
+		respondError(w, statusCode, getClientErrorMessage(err, statusCode))
+		return
+	}
+
+	if status.Status != "running" {
+		slog.Debug("attempted to pause monitor when none is running",
+			"method", r.Method,
+			"path", r.RequestURI)
+		respondError(w, http.StatusNotFound, "no monitor is currently running")
+		return
+	}
+
+	monitorID := status.ID
+
+	// Stop monitor
+	err = h.monitorMgr.Stop()
+	if err != nil {
+		// If monitor is already stopped, consider pause successful (idempotent)
+		if errors.Is(err, monitor.ErrNoMonitorRunning) {
+			slog.Debug("monitor already stopped during pause request",
+				slog.String("method", r.Method),
+				slog.String("path", r.RequestURI),
+			)
+			respondJSON(w, http.StatusOK, map[string]interface{}{
+				"status":  "stopped",
+				"message": "monitor was already stopped",
+			})
+			return
+		}
+		// Other errors
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// Update status from "stopped" to "paused" in storage
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := h.store.UpdateMonitorStatus(ctx, monitorID, "paused"); err != nil {
+		slog.Warn("failed to update monitor status to paused",
+			"monitor_id", monitorID,
+			"error", err)
+		// Still return success since the monitor was stopped successfully
+	} else {
+		slog.Info("monitor paused successfully", "monitor_id", monitorID)
+	}
+
+	resp := map[string]interface{}{
+		"status":  "paused",
+		"message": "monitor paused successfully",
+		"id":      monitorID,
+	}
+
+	respondJSON(w, http.StatusOK, resp)
+}
+
+// ResumeMonitor handles POST /api/v1/monitor/resume requests.
+// It resumes a paused monitor from its saved state.
+//
+// Returns 200 OK with StartMonitorResponse on success.
+// Returns 404 Not Found if no paused monitor exists.
+// Returns 409 Conflict if a monitor is already running.
+// Returns 500 Internal Server Error for other errors.
+func (h *Handlers) ResumeMonitor(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", "POST")
+		respondError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	// Limit request body size to 1MB for defensive programming
+	r.Body = http.MaxBytesReader(w, r.Body, MaxRequestBodySize)
+
+	if h.monitorMgr == nil {
+		respondError(w, http.StatusServiceUnavailable, "monitor service not available")
+		return
+	}
+
+	// Query storage for paused monitors
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	pausedMonitors, err := h.store.GetPausedMonitors(ctx)
+	if err != nil {
+		slog.Error("failed to query paused monitors",
+			"error", err,
+			"method", r.Method,
+			"path", r.RequestURI)
+		respondError(w, http.StatusInternalServerError, "failed to query paused monitors")
+		return
+	}
+
+	if len(pausedMonitors) == 0 {
+		slog.Debug("no paused monitors found",
+			"method", r.Method,
+			"path", r.RequestURI)
+		respondError(w, http.StatusNotFound, "no paused monitor found")
+		return
+	}
+
+	// Get the most recently paused monitor (first in list due to ORDER BY stopped_at DESC)
+	state := pausedMonitors[0]
+
+	// Restore the monitor from state using background context
+	instance, err := h.monitorMgr.RestoreFromState(context.Background(), state)
+	if err != nil {
+		// Check for specific error types
+		if errors.Is(err, monitor.ErrMonitorAlreadyRunning) {
+			slog.Warn("attempted to resume monitor when one is already running",
+				"method", r.Method,
+				"path", r.RequestURI)
+			respondError(w, http.StatusConflict, "monitor is already running")
+			return
+		}
+
+		if errors.Is(err, monitor.ErrInvalidConfig) {
+			slog.Warn("invalid monitor configuration in paused state",
+				"error", err,
+				"monitor_id", state.ID,
+				"method", r.Method,
+				"path", r.RequestURI)
+			respondError(w, http.StatusBadRequest, "invalid monitor configuration: "+err.Error())
+			return
+		}
+
+		statusCode := mapErrorToStatus(err)
+		slog.Error("failed to resume monitor",
+			"error", err,
+			"monitor_id", state.ID,
+			"method", r.Method,
+			"path", r.RequestURI,
+			"status", statusCode)
+		respondError(w, statusCode, getClientErrorMessage(err, statusCode))
+		return
+	}
+
+	resp := StartMonitorResponse{
+		ID:        instance.ID,
+		Status:    "resumed",
+		StartedAt: instance.StartedAt,
 	}
 
 	respondJSON(w, http.StatusOK, resp)
