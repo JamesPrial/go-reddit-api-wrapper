@@ -1,0 +1,74 @@
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Documentation
+*.md
+docs/
+LICENSE
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+.travis.yml
+.circleci/
+
+# Test files
+*_test.go
+testdata/
+coverage.out
+*.coverprofile
+*.test
+
+# Benchmarks
+*_bench_test.go
+*.bench
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Build artifacts (binaries)
+reddit-server
+reddit-example*
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Frontend (not needed for server build)
+frontend/
+node_modules/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.log
+
+# Docker files (avoid recursion)
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+.dockerignore.bak
+
+# Database files (should be in volumes)
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# Local data directories
+data/
+logs/
