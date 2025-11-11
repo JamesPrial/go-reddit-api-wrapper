@@ -42,7 +42,7 @@ const (
 	DefaultTokenExpiry = 24 * time.Hour
 	JWTSecretLength    = 64 // bytes
 	MinJWTSecretLength = 32 // bytes after hex decode
-	MinTokenExpiry     = 15 * time.Minute
+	MinTokenExpiry     = 1 * time.Hour
 	MaxTokenExpiry     = 30 * 24 * time.Hour // 30 days
 )
 

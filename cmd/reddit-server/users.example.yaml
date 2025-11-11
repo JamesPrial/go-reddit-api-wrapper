@@ -15,14 +15,14 @@ jwt_secret: ""
 
 # Token Expiry Duration
 # How long JWT tokens remain valid after issuance before requiring re-authentication
-# Format: Go duration string (e.g., "1h", "24h", "1h30m", "30m")
+# Format: Go duration string (e.g., "1h", "24h", "1h30m", "2h")
 # Default: 24h
-# Minimum: 15m (prevents excessive re-authentication)
+# Minimum: 1h (prevents excessive re-authentication)
 # Maximum: 720h (30 days - prevents indefinite token validity)
 #
 # Examples:
-#   - 30m: 30 minutes (short-lived, frequent re-auth required)
-#   - 1h: 1 hour (balanced security and convenience)
+#   - 1h: 1 hour (minimum, balanced security and convenience)
+#   - 2h: 2 hours (slightly longer sessions)
 #   - 8h: 8 hours (typical work day)
 #   - 24h: 24 hours (one day, default)
 #   - 7d: 7 days (one week)
@@ -281,8 +281,8 @@ users:
 #   - Case-sensitive (admin != Admin)
 
 # Token Expiry Requirements:
-#   - Valid Go duration format (e.g., "1h", "30m", "24h")
-#   - Minimum: 15 minutes
+#   - Valid Go duration format (e.g., "1h", "2h", "24h")
+#   - Minimum: 1 hour
 #   - Maximum: 720 hours (30 days)
 #   - Empty value defaults to 24h
 
