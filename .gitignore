@@ -43,6 +43,7 @@ Thumbs.db
 # Environment files
 .env
 .env.local
+.envrc
 
 # Example binary
 example_binary
